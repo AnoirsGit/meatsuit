@@ -1,0 +1,9 @@
+{
+  "logins": ["https://hh.kz/account/login", "https://www.linkedin.com/login"],
+  "sites": [
+    "https://hh.kz/search/vacancy?text=react&area=160",
+    "https://hh.kz/search/vacancy?text=node.js&schedule=remote",
+    "https://www.linkedin.com/feed/",
+    "https://www.linkedin.com/jobs/"
+  ]
+}
