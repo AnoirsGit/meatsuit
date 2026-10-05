@@ -23,6 +23,11 @@ const ROUTES = {
   '/recaptcha/api2/bframe': FRAME,
   '/hcaptcha.com/captcha/v1': FRAME,
   '/challenges.cloudflare.com/x': FRAME,
+  '/recaptcha/api2/anchor': FRAME,
+  '/recaptcha/enterprise/anchor': FRAME,
+  '/arkoselabs.com/x': FRAME,
+  '/captcha-delivery.com/x': FRAME,
+  '/smartcaptcha.yandexcloud.net/x': FRAME,
 };
 
 before(async () => {
@@ -67,6 +72,29 @@ test('скрытый фрейм reCAPTCHA (visibility, opacity, за краем 
     'display: none': frame('display:none'),
   };
   for (const [name, body] of Object.entries(hidden)) {
+    const snap = await withPage(body, (page) => probe.snapshot(page));
+    assert.equal(snap.captchaFrame, false, name);
+  }
+});
+
+test('видимый чекбокс «Я не робот» (reCAPTCHA v2) и другие фреймы проверок — капча; бейдж невидимой reCAPTCHA — нет', { skip }, async () => {
+  const checkbox = (src) => `<div style="position:absolute;top:40px;left:100px"><iframe src="{S}${src}" width="304" height="78"></iframe></div>`;
+  const shown = {
+    'чекбокс reCAPTCHA v2': checkbox('/recaptcha/api2/anchor?ar=1&size=normal'),
+    'чекбокс reCAPTCHA Enterprise': checkbox('/recaptcha/enterprise/anchor?ar=1&size=normal'),
+    'Arkose': checkbox('/arkoselabs.com/x'),
+    'DataDome': checkbox('/captcha-delivery.com/x'),
+    'Яндекс SmartCaptcha': checkbox('/smartcaptcha.yandexcloud.net/x'),
+    'PerimeterX': '<div id="px-captcha" style="width:300px;height:100px">Press &amp; hold</div>',
+  };
+  for (const [name, body] of Object.entries(shown)) {
+    const snap = await withPage(body, (page) => probe.snapshot(page));
+    assert.equal(snap.captchaFrame, true, name);
+  }
+  // Бейдж reCAPTCHA v3 стоит на каждой странице сайта и частично виден у правого края: капчей он не бывает.
+  const badge = '<div class="grecaptcha-badge" style="position:fixed;bottom:14px;right:-186px;width:256px;height:60px"><iframe src="{S}/recaptcha/api2/anchor?ar=1&size=invisible" width="256" height="60"></iframe></div>';
+  const badgeBare = '<iframe style="position:fixed;bottom:14px;right:-186px" src="{S}/recaptcha/api2/anchor?ar=1&size=invisible" width="256" height="60"></iframe>';
+  for (const [name, body] of Object.entries({ 'бейдж v3 в контейнере': badge, 'невидимая reCAPTCHA без контейнера': badgeBare })) {
     const snap = await withPage(body, (page) => probe.snapshot(page));
     assert.equal(snap.captchaFrame, false, name);
   }

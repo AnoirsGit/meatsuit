@@ -63,7 +63,7 @@ test('now в паузе после капчи: отказ с понятным с
   try {
     const until1 = Date.now() + 5 * H;
     w.writeState({ day: localDay(Date.now(), TZ), starts: [], done: [], pausedUntil: until1 });
-    const r = await life(['now', '--config', w.config, '--data', w.data, '--cdp', DEAD_CDP], { cwd: w.dir }).exited;
+    const r = await life(['now', '--config', w.config, '--data', w.data, '--cdp', DEAD_CDP, '--no-egress-check'], { cwd: w.dir }).exited;
     assert.notEqual(r.code, 0);
     assert.match(r.stderr, /[Пп]ауза до/);
     assert.match(r.stderr, /--force/);
@@ -76,7 +76,7 @@ test('now --force в паузе: запускается (здесь упирае
   const w = workdir();
   try {
     w.writeState({ day: localDay(Date.now(), TZ), starts: [], done: [], pausedUntil: Date.now() + 5 * H });
-    const r = await life(['now', '--force', '--config', w.config, '--data', w.data, '--cdp', DEAD_CDP], { cwd: w.dir }).exited;
+    const r = await life(['now', '--force', '--config', w.config, '--data', w.data, '--cdp', DEAD_CDP, '--no-egress-check'], { cwd: w.dir }).exited;
     const j = w.journal();
     assert.ok(j.some((e) => e.event === 'session-start'), 'с --force сессия не началась');
     assert.ok(j.some((e) => e.event === 'error'), `нет события error: ${r.stdout}${r.stderr}`);
@@ -87,7 +87,7 @@ test('now --force в паузе: запускается (здесь упирае
 test('now при недоступном браузере: событие error в журнале, предупреждение о выходе, код выхода 1', async () => {
   const w = workdir();
   try {
-    const r = await life(['now', '--config', w.config, '--data', w.data, '--cdp', DEAD_CDP], { cwd: w.dir }).exited;
+    const r = await life(['now', '--config', w.config, '--data', w.data, '--cdp', DEAD_CDP, '--no-egress-check'], { cwd: w.dir }).exited;
     const j = w.journal();
     assert.ok(j.some((e) => e.event === 'warning' && /выход в сеть не проверяется/.test(e.reason)), 'нет предупреждения про выход в сеть');
     const err = j.find((e) => e.event === 'error');
@@ -102,13 +102,29 @@ test('run при недоступном браузере не падает: erro
   try {
     const start = Date.now() - MIN;
     w.writeState({ day: localDay(Date.now(), TZ), starts: [start], done: [] });
-    const child = life(['run', '--config', w.config, '--data', w.data, '--cdp', DEAD_CDP], { cwd: w.dir });
+    const child = life(['run', '--config', w.config, '--data', w.data, '--cdp', DEAD_CDP, '--no-egress-check'], { cwd: w.dir });
     await until(() => w.journal().some((e) => e.event === 'error'), 'событие error');
     await until(() => w.state().done.includes(start), 'старт отмечен сделанным');
     assert.equal(child.exitCode, null, 'процесс упал после сбоя подключения');
     child.kill('SIGTERM');
     const r = await child.exited;
     assert.equal(r.code, 0, `${r.stdout}${r.stderr}`);
+  } finally { w.cleanup(); }
+});
+
+test('нет egress.json: now и run отказываются сразу, а с --no-egress-check идут с предупреждением', async () => {
+  const w = workdir();
+  try {
+    const missing = path.join(w.dir, 'нет-такого.json');
+    for (const cmd of ['now', 'run']) {
+      const r = await life([cmd, '--config', w.config, '--data', w.data, '--cdp', DEAD_CDP, '--egress', missing], { cwd: w.dir }).exited;
+      assert.equal(r.code, 1, `${cmd}: ${r.stdout}${r.stderr}`);
+      assert.match(r.stderr, /egress\.json|нет-такого/);
+      assert.equal(w.journal().some((e) => e.event === 'session-start'), false);
+    }
+    const r = await life(['now', '--config', w.config, '--data', w.data, '--cdp', DEAD_CDP, '--egress', missing, '--no-egress-check'], { cwd: w.dir }).exited;
+    assert.equal(w.journal().some((e) => e.event === 'warning' && /не проверяется/.test(e.reason)), true, `${r.stdout}${r.stderr}`);
+    assert.equal(w.journal().some((e) => e.event === 'session-start'), true, 'с --no-egress-check сессия должна стартовать (браузера нет, упадёт на подключении)');
   } finally { w.cleanup(); }
 });
 
@@ -166,7 +182,7 @@ test('SIGTERM посреди сессии: вкладка закрыта, про
   try {
     const pages = async () => (await (await fetch(`${browser.cdpUrl}/json/list`)).json()).filter((t) => t.type === 'page');
     const before = (await pages()).length;
-    const child = life(['now', '--config', w.config, '--data', w.data, '--cdp', browser.cdpUrl], { cwd: w.dir });
+    const child = life(['now', '--config', w.config, '--data', w.data, '--cdp', browser.cdpUrl, '--no-egress-check'], { cwd: w.dir });
     await until(async () => (await pages()).length === before + 1, 'вкладка сессии открылась');
     await until(() => slow.hits.length > 0 || w.journal().some((e) => e.event === 'session-start'), 'сессия идёт');
     child.kill('SIGTERM');

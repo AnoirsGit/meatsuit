@@ -81,7 +81,7 @@ What happens on a failure:
 
 | Component | Behaviour |
 |---|---|
-| Warm-up (`life.js`) | Checks before every session, bypassing the cache. On failure the session is skipped, an `egress-wrong` event is journaled, no pause is set. **No `egress.json`: only a warning, and the session goes ahead** |
+| Warm-up (`life.js`) | Checks before every session, bypassing the cache. On failure the session is skipped, an `egress-wrong` event is journaled, no pause is set. **No `egress.json`: `now` and `run` refuse to start**; `--no-egress-check` is the explicit opt-out (a warning is journaled) |
 | HTTP service (`server.js`) | Refuses to start without `egress.json`. Checks at startup, on every `begin` (the call that opens a task, see [http-api.md](http-api.md); cached for 60 s) and every 5 minutes. `begin` answers `503` with `egress_wrong` or `egress_unknown`. A failing periodic check closes the running task and sends a Telegram message if configured |
 
 Callers should treat `503` as "postpone and retry later"; meatsuit does not retry or queue for them. A short outage at home looks like `egress_unknown` and is handled like a mismatch.

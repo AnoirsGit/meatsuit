@@ -46,7 +46,7 @@ Needs Node 20+. `plan` and `now --dry` need no browser. Real sessions also need 
 | `node life.js now` | One session right now. While a pause from a captcha or block is active it refuses (exit code 1) unless you pass `--force` | Yes |
 | `node life.js run` | Follows the schedule until stopped (Ctrl+C or SIGTERM: the tab is closed, exit code 0) | Yes |
 
-Options: `--config profiles/life.json`, `--cdp http://127.0.0.1:9222` (or the `MEATSUIT_CDP` variable), `--data data`, `--egress profiles/egress.json`, `--force`. Via npm: `npm run life -- plan`.
+Options: `--config profiles/life.json`, `--cdp http://127.0.0.1:9222` (or the `MEATSUIT_CDP` variable), `--data data`, `--egress profiles/egress.json`, `--force`, `--no-egress-check`. Via npm: `npm run life -- plan`.
 
 The example from `plan` is not what `run` will pick: each is chosen independently. `plan` lists the whole day's starts, including ones already past. Console output and journal `reason` strings are in Russian, and `plan` labels the time "Алматы сейчас" ("Almaty now") whatever your zone is; the time shown is in your configured zone.
 
@@ -86,7 +86,7 @@ The session has a hard deadline: the sum of the site budgets times 1.25, plus pa
 | Situation | What it does |
 |---|---|
 | Captcha or block (`guard` verdicts `captcha`, `blocked`) | The session stops and no more sites open. `pausedUntil` = now + `cooldownHours` is written to `data/life.json`. While paused `run` starts nothing and `now` refuses (exit 1) without `--force`. The pause survives a new day and a damaged state file |
-| Wrong egress (`egress-wrong`) | Before every session the exit is checked against `profiles/egress.json` ([egress.md](egress.md)). A mismatch, or an exit that cannot be determined, skips the session. No daily pause is set, and the start counts as done. **If the file does not exist, only a `warning` is journaled and the session runs.** A malformed file stops the program at startup |
+| Wrong egress (`egress-wrong`) | Before every session the exit is checked against `profiles/egress.json` ([egress.md](egress.md)). A mismatch, or an exit that cannot be determined, skips the session. No daily pause is set, and the start counts as done. **If the file does not exist, `now` and `run` refuse to start**, so warm-up cannot browse from the wrong address by accident. `--no-egress-check` turns the check off on purpose (a `warning` is journaled before each session). A malformed file also stops the program at startup |
 | Redirect to a sign-in page (`login`) | That site is skipped, the session continues |
 | Site did not open (30 s timeout and the like) | Skipped, the session continues |
 | Popup cannot be closed or keeps returning | Skipped, the session continues |
@@ -176,7 +176,7 @@ Every line begins with `ts` (ISO, UTC). Events in `life.jsonl`:
 | `cooldown` | `reason`, `url`, `until` | Captcha or block; silent until `until` |
 | `error` | `reason` | A failure not on a site (browser unavailable, tab did not open, code bug) |
 | `egress-wrong` | `reason`, `country`, `asn`, `org`, `detail` | Wrong or unknown exit; session skipped, no pause |
-| `warning` | `reason` | No `egress.json` (exit not checked), or `now --force` during a pause |
+| `warning` | `reason` | Started with `--no-egress-check` (exit not checked), or `now --force` during a pause |
 | `stopped` | `reason` | A session was interrupted by SIGTERM or Ctrl+C |
 
 A format example composed from the code, not the output of a real run:
@@ -224,7 +224,7 @@ It stops growing there on purpose: the aim is to look like someone who reads a c
 | Solve a captcha or get around a block | The project stops on a captcha, then stays quiet for `cooldownHours` |
 | Visit sites outside `sites` or follow links to other hosts | Sites come only from the config, links only on the same host, only `http`/`https` |
 | Spoof fingerprints or geolocation | The browser is real and does not lie about itself |
-| Know that you are in the mirror or that your bots are working | There is no queue and no "I am in the mirror" check yet. The exit check exists, but only takes effect if `profiles/egress.json` exists |
+| Know that you are in the mirror or that your bots are working | There is no queue and no "I am in the mirror" check yet. The exit check exists and is mandatory: without `profiles/egress.json` warm-up does not start, unless you pass `--no-egress-check` |
 
 ## What is verified and what is not
 
@@ -236,7 +236,7 @@ It stops growing there on purpose: the aim is to look like someone who reads a c
 
 | # | Risk | What to do |
 |---|---|---|
-| 1 | **Wrong IP.** The exit check turns on only with `profiles/egress.json`. Without it `life.js` warns and goes on. On a server without an exit node, sessions would leave from a datacenter address and the browser's first "history" would be from there | Create `profiles/egress.json` and do not run until the exit is up ([egress.md](egress.md)). Check that `egress-wrong` shows in the journal when the exit is wrong |
+| 1 | **Wrong IP.** Without an exit node, sessions on a server would leave from a datacenter address and the browser's first "history" would be from there. The check protects against this and is mandatory (no `egress.json`, no start) | Create `profiles/egress.json` and do not run until the exit is up ([egress.md](egress.md)). Check that `egress-wrong` shows in the journal when the exit is wrong |
 | 2 | **Brave and Patchright.** Only Chromium was exercised end to end. Whether Patchright's patches still apply when it attaches to a running Brave is unknown | Run `node life.js now` against Brave once, watching the screen |
 | 3 | **Real sites.** Everything was run on local pages. Cookie consent, popups, link markup and video behave differently on real sites | Run `now` once or twice while watching the mirror, then check `life.jsonl` for `skipped` |
 | 4 | **You and warm-up in one browser.** A session opens a tab in the first browser context, not a separate window. What you see in the mirror, whether you lose focus, and how a background tab behaves (does it freeze, what `document.visibilityState` says) are not verified | Run `now` while you watch the mirror |

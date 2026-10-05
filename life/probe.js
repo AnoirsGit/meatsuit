@@ -33,11 +33,20 @@ const snapshot = (page) => stable(page, async () => {
       const style = getComputedStyle(el);
       return style.visibility === 'visible' && style.opacity !== '0';
     };
-    const challenge = document.querySelectorAll('iframe[src*="recaptcha/api2/bframe"], iframe[src*="hcaptcha.com/captcha"], iframe[src*="challenges.cloudflare.com"], #cf-challenge-running');
+    // Чекбокс «Я не робот» (reCAPTCHA v2) — фрейм anchor; тот же anchor с size=invisible — это бейдж v3/невидимой
+    // reCAPTCHA, он есть на каждой странице сайта и капчей не бывает. Имена фреймов Arkose, DataDome, SmartCaptcha
+    // и PerimeterX взяты из общих знаний автора, на живых сайтах не проверены.
+    const challenge = document.querySelectorAll([
+      'iframe[src*="recaptcha/api2/bframe"]', 'iframe[src*="recaptcha/enterprise/bframe"]',
+      'iframe[src*="recaptcha/api2/anchor"]:not([src*="size=invisible"])', 'iframe[src*="recaptcha/enterprise/anchor"]:not([src*="size=invisible"])',
+      'iframe[src*="hcaptcha.com/captcha"]', 'iframe[src*="challenges.cloudflare.com"]',
+      'iframe[src*="arkoselabs.com"]', 'iframe[src*="captcha-delivery.com"]', 'iframe[src*="smartcaptcha.yandexcloud.net"]',
+      '#cf-challenge-running', '#px-captcha',
+    ].join(', '));
     return {
       title: document.title,
       text: (document.body ? document.body.innerText : '').slice(0, 3000), // длиннее 2000 — уже «длинная страница» для guard
-      captchaFrame: [...challenge].some(visible),
+      captchaFrame: [...challenge].some((el) => !el.closest('.grecaptcha-badge') && visible(el)),
     };
   });
   return { url: page.url(), ...s };
