@@ -8,11 +8,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createEgress, normalizeExpected } = require('../egress.js');
 
-const EXPECTED = { country: 'KZ', asn: [41124] };
+const EXPECTED = { country: 'KZ', asn: [64500] };
 
-const IPINFO_KZ = { ip: '203.0.113.7', country: 'KZ', org: 'AS41124 BTcom Infocommunications Ltd.', timezone: 'Asia/Almaty' };
+const IPINFO_KZ = { ip: '203.0.113.7', country: 'KZ', org: 'AS64500 Example ISP', timezone: 'Asia/Almaty' };
 const IPINFO_NL = { ip: '198.51.100.9', country: 'NL', org: 'AS200313 Datacenter' };
-const IPWHO_KZ = { ip: '203.0.113.7', success: true, country_code: 'KZ', connection: { asn: 41124, org: 'BTcom' } };
+const IPWHO_KZ = { ip: '203.0.113.7', success: true, country_code: 'KZ', connection: { asn: 64500, org: 'Example ISP' } };
 
 const reply = (body, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
 
@@ -42,7 +42,7 @@ function setup(routes, opts = {}) {
 test('Алматы и нужный провайдер: ok', async () => {
   const { egress } = setup({ 'ipinfo.io': reply(IPINFO_KZ) });
   const r = await egress.check();
-  assert.deepEqual([r.ok, r.country, r.asn], [true, 'KZ', 41124]);
+  assert.deepEqual([r.ok, r.country, r.asn], [true, 'KZ', 64500]);
   assert.equal(r.error, undefined);
 });
 
@@ -59,19 +59,19 @@ test('та же страна, чужой провайдер: egress_wrong', asyn
 });
 
 test('сверка по номеру провайдера, а не по названию', async () => {
-  const { egress } = setup({ 'ipinfo.io': reply({ country: 'KZ', org: 'AS41124 ALFA TELECOM s.r.o.' }) });
+  const { egress } = setup({ 'ipinfo.io': reply({ country: 'KZ', org: 'AS64500 ALFA TELECOM s.r.o.' }) });
   assert.equal((await egress.check()).ok, true);
 });
 
 test('страна в другом регистре не обман', async () => {
-  const { egress } = setup({ 'ipinfo.io': reply({ country: 'kz', org: 'AS41124 BTcom' }) });
+  const { egress } = setup({ 'ipinfo.io': reply({ country: 'kz', org: 'AS64500 Example ISP' }) });
   assert.equal((await egress.check()).ok, true);
 });
 
 test('основной сервис упал: берёт запасной (ipwho.is)', async () => {
   const { egress, fetch } = setup({ 'ipinfo.io': new Error('ECONNRESET'), 'ipwho.is': reply(IPWHO_KZ) });
   const r = await egress.check();
-  assert.deepEqual([r.ok, r.country, r.asn, r.source], [true, 'KZ', 41124, 'ipwho.is']);
+  assert.deepEqual([r.ok, r.country, r.asn, r.source], [true, 'KZ', 64500, 'ipwho.is']);
   assert.equal(fetch.calls.length, 2);
 });
 
@@ -183,16 +183,16 @@ test('last: последний результат для страницы ста
   assert.equal(egress.last(), null);
   await egress.check();
   const last = egress.last();
-  assert.deepEqual([last.ok, last.country, last.asn], [true, 'KZ', 41124]);
+  assert.deepEqual([last.ok, last.country, last.asn], [true, 'KZ', 64500]);
   assert.ok(!JSON.stringify(last).includes('203.0.113'));
 });
 
 test('normalizeExpected: страна двумя буквами, провайдеры — числа', () => {
-  assert.deepEqual(normalizeExpected({ country: 'kz', asn: [41124] }), { country: 'KZ', asn: [41124] });
+  assert.deepEqual(normalizeExpected({ country: 'kz', asn: [64500] }), { country: 'KZ', asn: [64500] });
   assert.deepEqual(normalizeExpected({ country: 'KZ' }), { country: 'KZ', asn: [] });
   assert.throws(() => normalizeExpected({}), /country/);
   assert.throws(() => normalizeExpected({ country: 'Kazakhstan' }), /country/);
-  assert.throws(() => normalizeExpected({ country: 'KZ', asn: ['AS41124'] }), /asn/);
-  assert.throws(() => normalizeExpected({ country: 'KZ', asn: 41124 }), /asn/);
+  assert.throws(() => normalizeExpected({ country: 'KZ', asn: ['AS64500'] }), /asn/);
+  assert.throws(() => normalizeExpected({ country: 'KZ', asn: 64500 }), /asn/);
   assert.throws(() => normalizeExpected(null), /egress/);
 });

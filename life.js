@@ -12,7 +12,7 @@
  * Опции: --config profiles/life.json  --cdp http://127.0.0.1:9222  --data data
  *        --egress profiles/egress.json  --force
  * Браузер должен быть запущен с --remote-debugging-port, к нему подключаемся по CDP.
- * Перед каждой сессией проверяется выход в сеть по egress.json ({"country":"KZ","asn":[41124]});
+ * Перед каждой сессией проверяется выход в сеть по egress.json ({"country":"KZ","asn":[64500]});
  * нет файла — в журнале предупреждение, сессия идёт; не совпало — сессия пропускается.
  */
 const fs = require('node:fs');

@@ -2,14 +2,15 @@
 /**
  * HTTP-сервис: два входа, GET /view (видимый HTML) и POST /act (одно действие),
  * плюс GET / (страница статуса для человека, без токена). Интерфейс и коды ответов
- * в docs/04-http-api.md. Здесь только HTTP, токены клиентов, очередь, лимиты,
+ * в docs/http-api.md. Здесь только HTTP, токены клиентов, очередь, лимиты,
  * проверка выхода и журнал; браузер за интерфейсом Driver, который подставляется.
  *
  *   node server.js [--host 127.0.0.1] [--port 8787] [--data data]
  *                  [--sites profiles/sites.json] [--clients profiles/clients.json]
  *                  [--egress profiles/egress.json] [--cdp http://127.0.0.1:9222]
+ *                  [--tz Asia/Almaty]
  *
- * Окружение: MEATSUIT_HOST, MEATSUIT_PORT, MEATSUIT_CDP, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
+ * Окружение: MEATSUIT_HOST, MEATSUIT_PORT, MEATSUIT_CDP, MEATSUIT_TZ, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
  * Нужен driver.js (open / view / act / resume / close).
  */
 const http = require('node:http');
@@ -548,6 +549,7 @@ function parseArgs(argv, env) {
   const opts = {
     host: env.MEATSUIT_HOST || '127.0.0.1', port: env.MEATSUIT_PORT || '8787', data: 'data', cdp: env.MEATSUIT_CDP || 'http://127.0.0.1:9222',
     sites: 'profiles/sites.json', clients: 'profiles/clients.json', egress: 'profiles/egress.json',
+    tz: env.MEATSUIT_TZ || 'Asia/Almaty', // границы суток для лимитов: часовой пояс владельца, не сервера
   };
   for (let i = 0; i < argv.length; i++) {
     const name = argv[i].replace(/^--/, '');
@@ -556,6 +558,7 @@ function parseArgs(argv, env) {
   }
   opts.port = Number(opts.port);
   if (!Number.isInteger(opts.port) || opts.port < 0 || opts.port > 65535) throw new Error(`порт «${opts.port}» не годится`);
+  try { new Intl.DateTimeFormat('en', { timeZone: opts.tz }); } catch { throw new Error(`часовой пояс «${opts.tz}» не годится (нужно имя IANA, например Europe/Berlin)`); }
   return opts;
 }
 
@@ -590,18 +593,18 @@ async function main() {
 
   const clients = normalizeClients(loadJson(opts.clients, 'токены клиентов; образец profiles/clients.example.json, настоящий файл держать вне git'));
   const sites = loadJson(opts.sites, 'лимиты площадок, образец profiles/sites.json');
-  const expected = loadJson(opts.egress, 'ожидаемый выход, например {"country":"KZ","asn":[41124]}');
+  const expected = loadJson(opts.egress, 'ожидаемый выход, например {"country":"KZ","asn":[64500]}');
 
   const journal = createJournal({
     file: path.join(opts.data, 'journal.jsonl'),
     echo: (e) => console.log(`${e.ts.slice(11, 19)} ${e.client || '-'} ${e.event}${e.do ? `:${e.do}` : ''} ${e.result ?? ''}${e.site ? ` ${e.site}` : ''}`),
   });
   const notify = fromEnv(process.env, { log: (e) => journal.write(e) });
-  const limits = createLimits({ sites, file: path.join(opts.data, 'limits.json') });
+  const limits = createLimits({ sites, file: path.join(opts.data, 'limits.json'), tz: opts.tz });
   const egress = createEgress({ expected });
   const queue = createQueue();
   const driver = await loadDriver(opts);
-  const server = createServer({ driver, queue, limits, egress, clients, journal, notify });
+  const server = createServer({ driver, queue, limits, egress, clients, journal, notify, tz: opts.tz });
 
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(opts.port, opts.host, resolve); });
   console.log(`meatsuit слушает http://${opts.host}:${server.address().port} (клиентов: ${clients.length}, площадок: ${limits.sites().length})`);
@@ -620,4 +623,4 @@ async function main() {
 
 if (require.main === module) main().catch((err) => { console.error(`Ошибка: ${err.message}`); process.exit(1); });
 
-module.exports = { createServer, createJournal, normalizeClients };
+module.exports = { createServer, createJournal, normalizeClients, parseArgs };
