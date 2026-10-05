@@ -21,12 +21,14 @@ npm install
 npm test        # node --test, one file at a time
 ```
 
-Tests that need a real browser skip themselves unless Patchright and a Chromium are available. To run them:
+Tests that need a real browser skip themselves unless Patchright (installed by `npm install`) and a Chromium are available. Patchright does not download a browser: install Chromium with your system's package manager (the tests look for `/usr/bin/chromium`, `chromium-browser`, `google-chrome`, or the path in `MEATSUIT_CHROMIUM`). Then:
 
 ```sh
-NODE_PATH=/path/to/node_modules npm test
+npm test
 npm run test:e2e        # slower end-to-end tests against a local page, needs Chromium
 ```
+
+If Patchright is installed somewhere else, point `NODE_PATH` at that `node_modules`.
 
 Browser tests are heavy. They run one file at a time on purpose (several Chromium processes at once can overload a small machine). On Linux with systemd, `scripts/capped <command>` runs a command under a hard memory and CPU cap, so a runaway process is killed instead of freezing the machine:
 
