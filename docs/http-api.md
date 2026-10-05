@@ -104,7 +104,9 @@ The page is a **copy** of what is visible, built in Patchright's isolated JavaSc
 | `pause` | `from`, `to` (ms, default 300 to 1200, at most 60000) | Random pause. |
 | `begin`, `end`, `resume` | see above | Lifecycle. |
 
-**Typing** uses real key events with uneven timing, alternating hands, longer pauses after punctuation, and capital letters via Shift on the opposite hand. It supports the US and Russian (ЙЦУКЕН) layouts. About 2.5 percent of letters get a typo on a neighboring key, which is noticed after 0 to 3 characters, erased with Backspace and retyped. The final field value always equals the requested text. Characters on neither layout (such as emoji) are inserted as text. Speed is a per-browser persona (about 30 to 95 words per minute). Typing 1500 characters takes minutes, so use a generous client timeout. Long texts cannot be pasted yet.
+`text` of `fill` and `type` is at most 5000 characters (`400` above that). Typing is as slow as a person, so a long text takes hours: split it.
+
+**Typing** uses real key events with uneven timing, alternating hands, longer pauses after punctuation, and capital letters via Shift on the opposite hand. It supports the US and Russian (ЙЦУКЕН) layouts. About 2.5 percent of letters get a typo on a neighboring key, which is noticed after 0 to 3 characters, erased with Backspace and retyped. The final field value always equals the requested text. Characters on neither layout (such as emoji) are inserted as text. Speed is a per-browser persona (about 30 to 95 words per minute), saved in `data/persona.json` and shared with warm-up, so give both the same `--data` directory and the browser keeps one "person" across restarts. Typing 1500 characters takes minutes, so use a generous client timeout. Long texts cannot be pasted yet.
 
 **Targets** for `click` and `fill`:
 
@@ -161,7 +163,9 @@ Limits live in `profiles/sites.json`, one entry per site. Each fires at `begin`,
 | `jitter` | The day limit is multiplied by a factor in `[1 - jitter, 1 + jitter]`, fixed for that day, so `perDay` becomes an average, not a maximum. |
 | `challengePauseDays` | After a `409 needs_human`, the site is frozen until the start of the local day plus this many days (default 3). A repeat only extends the pause. |
 
-A refusal is `429` with `reason`: `closed`, `too_big`, `hour`, `day`, `hours`, `rest_day` or `challenge_pause`. `retry_at` is the first moment a `begin` would really pass every rule, or `null` if it never will at this cost.
+A refusal is `429` with `reason`: `closed`, `too_big`, `hour`, `day`, `hours`, `rest_day` or `challenge_pause` (on `begin`), or `actions` (during a task, see below). `retry_at` is the first moment a `begin` would really pass every rule, or `null` if it never will at this cost.
+
+**Actions per task.** The limits above count tasks, and `cost` is whatever the client declares, so a script stuck in a loop could click without end inside one task. Each task therefore has a ceiling on `goto`, `click`, `fill`, `type` and `key` actions (scrolling, `back` and `pause` are free): `100 + 30 × cost` by default. Past it the service answers `429` with `reason: "actions"`, closes the window, frees the queue and sends the Telegram alert. If a task really needs more, declare a larger `cost` in `begin`. The defaults are the author's guesses, not measured.
 
 **The numbers are the author's untested starting values.** Platforms do not publish thresholds for account behavior. Tune them for yourself and treat them as a way to behave moderately, not as a guarantee.
 

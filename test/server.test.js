@@ -513,6 +513,17 @@ test('выход пропал, пока задача идёт: окно закр
   assert.match(s.notified[1], /восстанов/);
 });
 
+test('выход пропал, пока окно ещё открывалось: begin отвечает 503, окно закрыто, единицы лимита возвращены', async (t) => {
+  const s = await boot(t);
+  await s.egress.start();
+  s.driver.onOpen = async () => { s.echo.reply = NL; await s.timer.fn(); return { id: 'dX' }; };
+  const r = await s.act(CVS, { do: 'begin', task: 'cvs:x', site: 'hh.kz' });
+  assert.deepEqual([r.status, r.json.error], [503, 'egress_wrong']);
+  assert.ok(s.driver.calls.some((c) => c[0] === 'close' && c[1] === 'dX'), 'окно, открытое в этот момент, закрыто');
+  assert.equal(s.limits.snapshot()['hh.kz'].usedDay, 0);
+  assert.equal(s.queue.snapshot().active, null);
+});
+
 test('действие, прерванное потерей выхода, получает 503, а не «внутреннюю ошибку»', async (t) => {
   const s = await boot(t);
   await s.egress.start();
@@ -838,4 +849,41 @@ test('parseArgs: часовой пояс — по умолчанию Алмат�
 test('parseArgs: несуществующий пояс отвергается сразу, а не посреди суток', () => {
   assert.throws(() => parseArgs(['--tz', 'Mars/Olympus'], {}), /Mars\/Olympus/);
   assert.throws(() => parseArgs([], { MEATSUIT_TZ: 'не пояс' }), /не пояс/);
+});
+
+// ---------------------------------------------------------------- потолок действий и длина текста
+
+test('потолок действий в задаче: сверх actionsBase + actionsPerCost × cost — 429 actions, окно закрыто, очередь свободна', async (t) => {
+  const s = await boot(t, { server: { actionsBase: 1, actionsPerCost: 2 } }); // cost 1 → потолок 3
+  const task = await s.begin(CVS, { cost: 1 });
+  for (let i = 0; i < 3; i++) assert.equal((await s.act(CVS, { do: 'click', target: i }, task)).status, 200, `действие ${i + 1}`);
+  // прокрутка и пауза — не действия на сайте, потолок их не считает
+  assert.equal((await s.act(CVS, { do: 'scroll', px: 300 }, task)).status, 200);
+  assert.equal((await s.act(CVS, { do: 'pause', from: 1, to: 2 }, task)).status, 200);
+  const over = await s.act(CVS, { do: 'click', target: 9 }, task);
+  assert.deepEqual([over.status, over.json.error, over.json.reason], [429, 'limit', 'actions']);
+  assert.equal(s.driver.calls.filter((c) => c[0] === 'act' && c[2].target === 9).length, 0, 'сверхпотолочное действие дошло до браузера');
+  assert.equal(s.driver.count('close'), 1, 'окно закрыто');
+  assert.equal(s.queue.snapshot().active, null, 'очередь свободна');
+  assert.equal((await s.act(CVS, { do: 'click', target: 1 }, task)).status, 404, 'задача больше не существует');
+  assert.ok(s.notified.some((m) => /действий/.test(m)), 'владельцу сообщили');
+});
+
+test('потолок действий считается от cost: больший cost — больший потолок', async (t) => {
+  const s = await boot(t, { server: { actionsBase: 0, actionsPerCost: 2 } });
+  const task = await s.begin(CVS, { cost: 2 }); // потолок 4
+  for (let i = 0; i < 4; i++) assert.equal((await s.act(CVS, { do: 'key', key: 'Tab' }, task)).status, 200);
+  assert.equal((await s.act(CVS, { do: 'key', key: 'Tab' }, task)).json.reason, 'actions');
+});
+
+test('text длиннее maxTextChars — 400 с подсказкой, до браузера не доходит', async (t) => {
+  const s = await boot(t, { server: { maxTextChars: 50 } });
+  const task = await s.begin(CVS);
+  for (const body of [{ do: 'type', text: 'x'.repeat(51) }, { do: 'fill', target: 1, text: 'x'.repeat(51) }]) {
+    const r = await s.act(CVS, body, task);
+    assert.equal(r.status, 400, body.do);
+    assert.match(r.json.message || r.text, /50/);
+  }
+  assert.equal(s.driver.count('act'), 0);
+  assert.equal((await s.act(CVS, { do: 'type', text: 'x'.repeat(50) }, task)).status, 200);
 });

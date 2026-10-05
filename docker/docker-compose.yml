@@ -23,7 +23,7 @@ services:
     cpus: ${NEKO_CPUS:-2}
     pids_limit: 1024
     environment:
-      TZ: Asia/Almaty
+      TZ: ${MEATSUIT_TZ:-Asia/Almaty} # часовой пояс браузера должен совпадать с поясом страны выхода
       NEKO_DESKTOP_SCREEN: ${NEKO_SCREEN:-1280x720@30} # кодирование видео идёт на процессоре: на слабом сервере берите меньше
       # Neko 3: один пароль у участника, другой у админа (кто какой ввёл, тем и вошёл).
       NEKO_MEMBER_MULTIUSER_USER_PASSWORD: ${NEKO_PASSWORD:?Задайте NEKO_PASSWORD в docker/.env}
@@ -73,7 +73,7 @@ services:
       neko:
         condition: service_healthy
     environment:
-      TZ: Asia/Almaty
+      TZ: ${MEATSUIT_TZ:-Asia/Almaty} # часовой пояс браузера должен совпадать с поясом страны выхода
       MEATSUIT_CDP: http://127.0.0.1:9222
     volumes:
       - ..:/app:ro # код из репозитория; зависимости (patchright) лежат в образе
