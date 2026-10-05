@@ -184,7 +184,7 @@ test('last: последний результат для страницы ста
   await egress.check();
   const last = egress.last();
   assert.deepEqual([last.ok, last.country, last.asn], [true, 'KZ', 41124]);
-  assert.ok(!JSON.stringify(last).includes('95.47'));
+  assert.ok(!JSON.stringify(last).includes('203.0.113'));
 });
 
 test('normalizeExpected: страна двумя буквами, провайдеры — числа', () => {
