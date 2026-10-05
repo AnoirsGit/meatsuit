@@ -56,9 +56,14 @@ function cleanState(raw) {
   return out;
 }
 
-/** Проверка выхода в сеть по файлу egress.json; нет файла — null (не проверяем), неверный — ошибка. */
-function loadEgress({ fs = require('node:fs'), file, fetch } = {}) {
-  if (!fs.existsSync(file)) return null;
+/**
+ * Проверка выхода в сеть по файлу egress.json. Нет файла или неверный — ошибка: без проверки
+ * прогрев мог бы нагулять историю с адреса сервера, а это ровно то, против чего проект.
+ * skip: true — осознанный отказ от проверки (--no-egress-check), тогда null.
+ */
+function loadEgress({ fs = require('node:fs'), file, fetch, skip = false } = {}) {
+  if (skip) return null;
+  if (!fs.existsSync(file)) throw new Error(`egress: нет ${file}. Создайте его ({"country":"KZ","asn":[64500]}, образец в docs/egress.md) или запустите с --no-egress-check, если проверять выход не нужно (например, на своём компьютере)`);
   let expected;
   try { expected = JSON.parse(fs.readFileSync(file, 'utf8')); } catch (err) { throw new Error(`egress: ${file} не читается как JSON (${err.message})`); }
   return createEgress({ expected, fetch });
@@ -76,7 +81,7 @@ function createRunner({ cfg, connect, store, journal = () => {}, egress = null, 
 
   /** null — можно идти; иначе запись egress-wrong для журнала. */
   async function egressVerdict() {
-    if (!egress) { journal({ event: 'warning', reason: 'выход в сеть не проверяется (нет egress.json)' }); return null; }
+    if (!egress) { journal({ event: 'warning', reason: 'выход в сеть не проверяется (--no-egress-check)' }); return null; }
     let r;
     try { r = await egress.check({ force: true }); } catch (err) { r = { ok: false, error: 'egress_unknown', detail: err.message }; }
     if (r.ok) return null;

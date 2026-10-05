@@ -1,4 +1,6 @@
 node_modules/
 data/
 profiles/clients.json
+profiles/egress.json
+profiles/jobs.json
 docker/.env

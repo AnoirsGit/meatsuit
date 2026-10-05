@@ -34,7 +34,7 @@ const CLIENTS = [
 ];
 
 const KZ = { ip: '203.0.113.7', country: 'KZ', org: 'AS64500 Example ISP' };
-const NL = { ip: '198.51.100.9', country: 'NL', org: 'AS200313 Datacenter' };
+const NL = { ip: '198.51.100.9', country: 'NL', org: 'AS64502 Example Datacenter' };
 
 const PAGE = '<html><head><title>Вакансия</title></head><body><button data-ms="7">Откликнуться</button>СЕКРЕТНОЕ-СОДЕРЖИМОЕ-СТРАНИЦЫ</body></html>';
 

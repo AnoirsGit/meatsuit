@@ -214,11 +214,12 @@ test('перед каждой сессией выход проверяется �
   assert.equal(asked, 2);
 });
 
-test('loadEgress: нет файла — null; хороший — проверка; битый или неверный — ошибка сразу', () => {
+test('loadEgress: нет файла — ошибка (без проверки выхода не идём), skip — null; хороший — проверка; битый или неверный — ошибка сразу', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'meatsuit-egress-'));
   try {
     const file = path.join(dir, 'egress.json');
-    assert.equal(loadEgress({ file }), null);
+    assert.throws(() => loadEgress({ file }), /egress\.json.*--no-egress-check|--no-egress-check.*egress\.json/s);
+    assert.equal(loadEgress({ file, skip: true }), null);
     fs.writeFileSync(file, '{"country":"KZ","asn":[64500]}');
     assert.equal(typeof loadEgress({ file, fetch: async () => {} }).check, 'function');
     fs.writeFileSync(file, '{"country": ');

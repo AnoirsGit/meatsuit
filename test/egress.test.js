@@ -11,7 +11,7 @@ const { createEgress, normalizeExpected } = require('../egress.js');
 const EXPECTED = { country: 'KZ', asn: [64500] };
 
 const IPINFO_KZ = { ip: '203.0.113.7', country: 'KZ', org: 'AS64500 Example ISP', timezone: 'Asia/Almaty' };
-const IPINFO_NL = { ip: '198.51.100.9', country: 'NL', org: 'AS200313 Datacenter' };
+const IPINFO_NL = { ip: '198.51.100.9', country: 'NL', org: 'AS64502 Example Datacenter' };
 const IPWHO_KZ = { ip: '203.0.113.7', success: true, country_code: 'KZ', connection: { asn: 64500, org: 'Example ISP' } };
 
 const reply = (body, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => body });
@@ -49,17 +49,17 @@ test('Алматы и нужный провайдер: ok', async () => {
 test('другая страна: egress_wrong', async () => {
   const { egress } = setup({ 'ipinfo.io': reply(IPINFO_NL) });
   const r = await egress.check();
-  assert.deepEqual([r.ok, r.error, r.country, r.asn], [false, 'egress_wrong', 'NL', 200313]);
+  assert.deepEqual([r.ok, r.error, r.country, r.asn], [false, 'egress_wrong', 'NL', 64502]);
 });
 
 test('та же страна, чужой провайдер: egress_wrong', async () => {
-  const { egress } = setup({ 'ipinfo.io': reply({ country: 'KZ', org: 'AS9198 JSC Kazakhtelecom' }) });
+  const { egress } = setup({ 'ipinfo.io': reply({ country: 'KZ', org: 'AS64501 Example Other ISP' }) });
   const r = await egress.check();
   assert.deepEqual([r.ok, r.error], [false, 'egress_wrong']);
 });
 
 test('сверка по номеру провайдера, а не по названию', async () => {
-  const { egress } = setup({ 'ipinfo.io': reply({ country: 'KZ', org: 'AS64500 ALFA TELECOM s.r.o.' }) });
+  const { egress } = setup({ 'ipinfo.io': reply({ country: 'KZ', org: 'AS64500 Renamed Example Telecom' }) });
   assert.equal((await egress.check()).ok, true);
 });
 

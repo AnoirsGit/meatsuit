@@ -10,10 +10,11 @@
  *   node life.js run             по расписанию, пока не остановят (Ctrl+C, SIGTERM: вкладка закрывается)
  *
  * Опции: --config profiles/life.json  --cdp http://127.0.0.1:9222  --data data
- *        --egress profiles/egress.json  --force
+ *        --egress profiles/egress.json  --force  --no-egress-check
  * Браузер должен быть запущен с --remote-debugging-port, к нему подключаемся по CDP.
  * Перед каждой сессией проверяется выход в сеть по egress.json ({"country":"KZ","asn":[64500]});
- * нет файла — в журнале предупреждение, сессия идёт; не совпало — сессия пропускается.
+ * не совпало — сессия пропускается. Нет файла — now и run не стартуют (иначе прогрев мог бы
+ * идти с адреса сервера). --no-egress-check отключает проверку осознанно: в журнале предупреждение.
  */
 const fs = require('node:fs');
 const path = require('node:path');
@@ -30,6 +31,7 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a === '--dry') opts.dry = true;
     else if (a === '--force') opts.force = true;
+    else if (a === '--no-egress-check') opts.noEgressCheck = true;
     else if (['--config', '--cdp', '--data', '--egress'].includes(a)) opts[a.slice(2)] = argv[++i];
     else opts._.push(a);
   }
@@ -102,7 +104,7 @@ async function main() {
     connect: () => connect(opts.cdp),
     store: createStore({ file: path.join(opts.data, 'life.json') }),
     journal: createJournal({ dir: opts.data }),
-    egress: loadEgress({ file: opts.egress }), // неверный файл — ошибка здесь, до всякой сессии
+    egress: loadEgress({ file: opts.egress, skip: opts.noEgressCheck }), // нет файла или он неверный — ошибка здесь, до всякой сессии
   });
   exitOnSignals(runner);
 

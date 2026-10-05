@@ -106,7 +106,7 @@ docker compose --profile warmup logs -f life      # journal
 docker compose --profile warmup stop life         # stop
 ```
 
-Before the first start on a server create `../profiles/egress.json` (`{"country":"DE","asn":[64496]}`: use your own country and ASN, see [egress.md](../docs/egress.md#the-egress-check)). Then every session first checks the exit and is skipped on a mismatch. Without the file the check does not run and the session goes ahead. The config is read at startup, so restart the service after editing `profiles/life.json`. Schedule and options are in [warmup.md](../docs/warmup.md). The journal and state live in the `life_data` volume.
+Before the first start on a server create `../profiles/egress.json` (`{"country":"DE","asn":[64496]}`: use your own country and ASN, see [egress.md](../docs/egress.md#the-egress-check)). Then every session first checks the exit and is skipped on a mismatch. Without the file `life` does not start (`--no-egress-check` is the explicit opt-out). The config is read at startup, so restart the service after editing `profiles/life.json`. Schedule and options are in [warmup.md](../docs/warmup.md). The journal and state live in the `life_data` volume.
 
 ## Deploying on a server
 

@@ -53,10 +53,10 @@ test('короткая страница с заголовком ошибки —
 });
 
 test('«/login» в строке запроса или в якоре — не вход, только в пути', () => {
-  for (const url of ['https://site.test/news?utm=/login', 'https://site.test/news?next=/signin&x=1', 'https://site.test/#/login', 'https://site.test/blog/how-login-works']) {
+  for (const url of ['https://site.test/news?utm=/login', 'https://site.test/news?next=/signin&x=1', 'https://site.test/#/login', 'https://site.test/blog/how-login-works', 'https://site.test/login-security-tips', 'https://site.test/help/signin-problems']) {
     assert.equal(classify({ url, title: 'Новости', text: article }), null, url);
   }
-  for (const url of ['https://site.test/login', 'https://site.test/user/sign-in?next=/', 'https://accounts.google.com/v3/signin/identifier']) {
+  for (const url of ['https://site.test/login', 'https://site.test/user/sign-in?next=/', 'https://accounts.google.com/v3/signin/identifier', 'https://site.test/login/', 'https://site.test/account/login.php', 'https://site.test/Login']) {
     assert.equal(classify({ url, title: 'Вход', text: 'Войти' }), 'login', url);
   }
 });

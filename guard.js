@@ -13,7 +13,7 @@ const CHALLENGE_TITLE = /just a moment|attention required/i;
 const ERROR_TITLE = /^\s*(?:(?:error|http)\s*)?(?:403|429)\s*(?:[-–—:.]?\s*(?:forbidden|too many requests|access denied|error|доступ запрещ|запрещ|слишком много)[^]*)?$/i;
 const CHALLENGE_URL = /\/(show)?(captcha|challenge)\b/i;
 const BLOCKED_URL = /\/(sorry|checkpoint|blocked)\b/i;
-const LOGIN_PATH = /\/(log-?in|sign-?in)\b/i; // /signin ловит и вход Google (/v3/signin)
+const LOGIN_PATH = /\/(log-?in|sign-?in)(?=[/.]|$)/i; // /signin ловит и вход Google (/v3/signin); «/login-security-tips» — статья, не вход
 
 const SHORT = 2000;
 
