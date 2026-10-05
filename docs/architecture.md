@@ -119,7 +119,7 @@ Exact fields and codes are in the [HTTP API](http-api.md).
 
 ## Status
 
-"Verified" means automated tests pass (376 tests in `test/`; the whole suite passed in the author's last full run, including the ones that drive a real Chromium) and, for the browser parts, a run against local test pages (`npm run test:e2e`). It does not mean tested on real sites.
+"Verified" means automated tests pass (about 400 tests in `test/`, see `npm test`; the whole suite passed in the author's last full run, including the ones that drive a real Chromium) and, for the browser parts, a run against local test pages (`npm run test:e2e`). It does not mean tested on real sites.
 
 | State | Part | Basis or caveat |
 |---|---|---|

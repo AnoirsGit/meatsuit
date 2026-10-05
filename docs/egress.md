@@ -116,7 +116,7 @@ The rollback was not tested on a real server. Check that `tailscale` is in root'
 
 ## What is verified and what is not
 
-- **Verified:** `egress.js` and its use in `life.js` and `server.js`, by unit tests on a fake network (country and ASN match, fallback service, timeouts, caching, fail closed). The exit-node commands against Tailscale's documentation. The egress override as a configuration only (`docker compose config` accepts it).
+- **Verified:** `egress.js` and its use in `life.js` and `server.js`, by unit tests on a fake network (country and ASN match, fallback service, timeouts, caching, fail closed). The exit-node commands against Tailscale's documentation. The egress override as a configuration only (`docker compose config` accepts it). The kill switch relies on the browser not running as root: the Neko image sets `USER=neko` (read from the image metadata) and our supervisord config starts Brave with `user=%(ENV_USER)s`, so the owner rule should apply to it; a process listing in a running container has not been checked.
 - **Not verified:** the egress profile has not been run at all: Tailscale inside the container, Neko, warm-up, the HTTP service and Tailscale in one network namespace, the kill switch, WebRTC and DNS through the tunnel. Also not run: `begin` returning `503` with a real exit node, and the SSH rollback script on a server.
 
 Russian original: [05-egress.md](05-egress.md).

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Прогрев браузера: сам заходит на обычные сайты в случайные часы по Алматы
+ * Прогрев браузера: сам заходит на обычные сайты в случайные часы (пояс tz из конфига)
  * и ведёт себя как читатель. Только читает, ничего не вводит и не нажимает
  * в аккаунтах. Капча или блок: сессия останавливается, прогрев притихает на сутки.
  *
@@ -78,7 +78,7 @@ async function main() {
     const week = planWeek(now, cfg); // пример: настоящий выбор дней делает run и хранит в data/life.json
     const working = week.days.includes(localDay(now, cfg.tz));
     const starts = working ? planDay(startOfLocalDay(now, cfg.tz), cfg) : [];
-    console.log(`Алматы сейчас: ${fmt(now, cfg.tz)}; повадки: ${persona.wpm.toFixed(0)} слов в минуту, рука ×${persona.speed.toFixed(2)}`);
+    console.log(`Сейчас (${cfg.tz}): ${fmt(now, cfg.tz)}; повадки: ${persona.wpm.toFixed(0)} слов в минуту, рука ×${persona.speed.toFixed(2)}`);
     console.log(`Рабочие дни недели ${week.id} (пример): ${week.days.join(', ')}`);
     console.log(`Сегодня: ${working ? 'рабочий' : 'выходной'}`);
     console.log('Старты на сегодня:', starts.map((s) => fmt(s, cfg.tz).split(', ')[1]).join(', ') || 'нет');

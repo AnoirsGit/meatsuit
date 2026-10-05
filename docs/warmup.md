@@ -48,7 +48,7 @@ Needs Node 20+. `plan` and `now --dry` need no browser. Real sessions also need 
 
 Options: `--config profiles/life.json`, `--cdp http://127.0.0.1:9222` (or the `MEATSUIT_CDP` variable), `--data data`, `--egress profiles/egress.json`, `--force`, `--no-egress-check`. Via npm: `npm run life -- plan`.
 
-The example from `plan` is not what `run` will pick: each is chosen independently. `plan` lists the whole day's starts, including ones already past. Console output and journal `reason` strings are in Russian, and `plan` labels the time "Алматы сейчас" ("Almaty now") whatever your zone is; the time shown is in your configured zone.
+The example from `plan` is not what `run` will pick: each is chosen independently. `plan` lists the whole day's starts, including ones already past. Console output and journal `reason` strings are in Russian, and `plan` prints the current time as "Сейчас (<your tz>)" ("Now"), in your configured zone.
 
 ## Schedule
 

@@ -50,7 +50,7 @@ This is a hypothesis, not a guarantee. Nobody publishes what sites actually look
 | **Not verified at all** | running on a real server; Brave on real sites; bot-detection test sites; a multi-week warm-up; how any particular site reacts |
 | **Author's guesses** | every number in the limits and warm-up defaults (ramp-up length, rest days, jitter, pause after a challenge) is a starting value, not a measured one |
 
-More than 370 tests; the ones that need a browser skip themselves when none is available.
+About 400 tests (`npm test`); the ones that need a browser skip themselves when none is available.
 
 ## Quick start
 
