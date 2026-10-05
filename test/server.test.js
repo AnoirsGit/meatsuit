@@ -738,7 +738,7 @@ test('GET /: страница статуса без токена; очередь
   for (const want of ['cvs:hh-apply', 'tinder:like', 'hh.kz', 'tinder.com', 'linkedin.com', 'KZ', 'AS41124', 'begin', 'act']) assert.ok(r.text.includes(want), `на странице нет «${want}»`);
   assert.match(r.text, /1 \/ 3/, 'расход за сутки: 1 из 3');
   for (const hidden of [CVS, TINDER, 'Bearer', 'S3cr3t', 'СЕКРЕТНОЕ-СОДЕРЖИМОЕ-СТРАНИЦЫ', 'x-task']) assert.ok(!r.text.includes(hidden), `на странице не должно быть «${hidden}»`);
-  assert.ok(!r.text.includes('95.47'), 'IP на странице нет');
+  assert.ok(!r.text.includes('203.0.113'), 'IP на странице нет');
 });
 
 test('GET /: названия задач из запросов экранируются', async (t) => {
