@@ -52,6 +52,12 @@ test('короткая страница с заголовком ошибки —
   }
 });
 
+test('русские формулировки блока с окончаниями («подозрительная активность», «подозрительный трафик») распознаются', () => {
+  for (const text of ['Обнаружена подозрительная активность с вашего адреса.', 'С вашей сети идёт подозрительный трафик.', 'Подозрительных действий не было, но доступ ограничен.']) {
+    assert.equal(classify({ url: 'https://site.test/', title: 'Ошибка', text }), 'blocked', text);
+  }
+});
+
 test('«/login» в строке запроса или в якоре — не вход, только в пути', () => {
   for (const url of ['https://site.test/news?utm=/login', 'https://site.test/news?next=/signin&x=1', 'https://site.test/#/login', 'https://site.test/blog/how-login-works', 'https://site.test/login-security-tips', 'https://site.test/help/signin-problems']) {
     assert.equal(classify({ url, title: 'Новости', text: article }), null, url);

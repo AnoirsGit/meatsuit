@@ -234,7 +234,24 @@ test('настоящий браузер: оверлей без role, закры�
 
   const inFrame = await withPage({ '/': body('<h1>Статья</h1><iframe src="/ad" width="1000" height="600" style="position:fixed;top:50px;left:50px;z-index:99"></iframe>'),
     '/ad': body('<div role="dialog" style="position:fixed;inset:0"><button>Закрыть</button></div>') }, (p) => probe.overlays(p));
-  assert.deepEqual(found.length && inFrame, [], 'всплывающее внутри iframe (реклама) не должно быть видно: туда кликать нельзя');
+  assert.deepEqual(inFrame, [], 'всплывающее внутри iframe (реклама) не должно быть видно: туда кликать нельзя');
+});
+
+test('настоящий браузер: русский баннер без слова cookie («обрабатываем персональные данные») — всё равно баннер согласия', { skip }, async () => {
+  const banner = '<div style="position:fixed;left:0;right:0;bottom:0;background:#eee;padding:16px;z-index:50">Мы обрабатываем персональные данные посетителей. <button>Принять</button> <button>Отклонить</button></div>';
+  const found = await withPage({ '/': body(`<h1>Статья</h1>${banner}`) }, (p) => probe.overlays(p));
+  assert.equal(found.length, 1);
+  assert.equal(found[0].kind, 'consent');
+});
+
+test('настоящий браузер: окно входа или регистрации с «персональными данными» и паролем — не баннер cookies, «Понятно» в нём не нажимается', { skip }, async () => {
+  const signup = `<div role="dialog" style="position:fixed;top:100px;left:300px;width:500px;height:300px;background:#fff;z-index:100">
+    Создайте аккаунт. Нажимая кнопку, вы даёте согласие на обработку персональных данных.
+    <input type="password" aria-label="Пароль"> <button>Понятно</button> <button aria-label="Закрыть">×</button></div>`;
+  const found = await withPage({ '/': body(`<h1>Статья</h1>${signup}`) }, (p) => probe.overlays(p));
+  assert.equal(found.length, 1);
+  assert.equal(found[0].kind, 'dialog', 'форма с паролем принята за баннер cookies');
+  assert.equal(chooseCloser(found[0], { consent: 'accept' }).name, 'Закрыть');
 });
 
 test('настоящий браузер: ссылка «Закрыть», уводящая со страницы, не предлагается, якорная «Не сейчас» — да', { skip }, async () => {

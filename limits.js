@@ -14,7 +14,7 @@
 const crypto = require('node:crypto');
 const nodeFs = require('node:fs');
 const path = require('node:path');
-const { startOfLocalDay, localDay } = require('./life/plan.js');
+const { startOfLocalDay, localDay, wallSince, atLocalHour } = require('./life/plan.js');
 const { seeded } = require('./human/random');
 
 const H = 3600000, DAY_MS = 86400000;
@@ -207,9 +207,9 @@ function createLimits({ sites, file, now = Date.now, tz = 'Asia/Almaty', fs = no
     const { dayStart, rest, limit } = dayPlan(name, t);
     if (rest) return { reason: 'rest_day', until: nextDayStart(dayStart, tz) };
     if (c.hours) {
-      const tod = t - dayStart;
-      if (tod < c.hours[0] * H) return { reason: 'hours', until: dayStart + c.hours[0] * H };
-      if (tod >= c.hours[1] * H) return { reason: 'hours', until: nextDayStart(dayStart, tz) + c.hours[0] * H };
+      const tod = wallSince(dayStart, t, tz); // по местным часам, а не по прошедшему времени: в сутки с переводом часов они расходятся
+      if (tod < c.hours[0] * H) return { reason: 'hours', until: atLocalHour(dayStart, c.hours[0], tz) };
+      if (tod >= c.hours[1] * H) return { reason: 'hours', until: atLocalHour(nextDayStart(dayStart, tz), c.hours[0], tz) };
     }
     if (sum(list, dayStart) + cost > limit) return { reason: 'day', until: nextDayStart(dayStart, tz) };
     if (c.perHour !== null) {
@@ -289,7 +289,7 @@ function createLimits({ sites, file, now = Date.now, tz = 'Asia/Almaty', fs = no
     const t = now(), dayStart = startOfLocalDay(t, tz), out = {};
     for (const [name, c] of Object.entries(cfg)) {
       const list = events[name] || [];
-      const tod = t - dayStart;
+      const tod = wallSince(dayStart, t, tz);
       out[name] = {
         perDay: c.perDay, perHour: c.perHour, hours: c.hours ? `${c.hours[0]}-${c.hours[1]}` : null,
         usedDay: sum(list, dayStart), usedHour: sum(list, t - H + 1),

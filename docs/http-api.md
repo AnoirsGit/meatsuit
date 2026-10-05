@@ -6,7 +6,7 @@ Everything below follows the code in [`server.js`](../server.js), [`driver.js`](
 
 ## Running the service
 
-Requires Node 20+ and `npm install` (Patchright). The browser must already be running with its CDP port (Chrome DevTools Protocol) reachable at `--cdp`. The Docker setup does not run this service yet (see [Docker notes](../docker/README.md)), so start it yourself in the browser's network namespace.
+Requires Node 20+ and `npm install` (Patchright). The browser must already be running with its CDP port (Chrome DevTools Protocol) reachable at `--cdp`. With Docker, `docker compose --profile api up -d` runs it inside the browser's network (see [Docker notes](../docker/README.md#http-service); the compose definition has not been started in a container yet).
 
 ```sh
 node server.js [--host 127.0.0.1] [--port 8787] [--data data] [--cdp http://127.0.0.1:9222] \
@@ -96,7 +96,7 @@ The page is a **copy** of what is visible, built in Patchright's isolated JavaSc
 |---|---|---|
 | `goto` | `url` | Absolute `http` or `https` address, inside the task's site or `allow` hosts (subdomains count). Navigation does not use human timing. A site that does not load gives `502 nav_failed`. |
 | `click` | `target` | Scrolls to the element with the wheel (not a jump), moves the mouse along a slightly curved path, may overshoot and correct, clicks near the center, holds the button 45 to 200 ms. |
-| `fill` | `target`, `text` | Clicks the field, clears it if it has text, then types. For a `<select>`, picks the option by text or value without the mouse. Not a field: 400. |
+| `fill` | `target`, `text` | Clicks the field, clears it if it has text, then types. For a `<select>`, moves the mouse over it, focuses it and picks the option with the arrow keys (real key events, so `change` is trusted); if the arrows do not land on the option, it is set directly, which sends synthetic events. The list is not opened. Checked on headless Chromium only, not on a headed Brave. Not a field: 400. |
 | `type` | `text` | Types into the focused element, key by key. |
 | `key` | `key` | One key such as `Enter`, `Escape` or `Tab`. |
 | `scroll` | `px` (not 0, at most 20000 in size, negative scrolls up) or `to` (`"top"` or `"bottom"`) | Wheel notches of 100 with reading pauses. |

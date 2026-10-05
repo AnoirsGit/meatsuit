@@ -33,6 +33,15 @@ function startOfLocalDay(ms, tz) {
   return wall - tzOffsetMs(wall - tzOffsetMs(ms, tz), tz); // второй заход — на случай перевода часов в эти сутки
 }
 
+/** Сколько прошло по местным часам от полуночи dayStart до t (в сутки с переводом часов это не то же, что t - dayStart). */
+const wallSince = (dayStart, t, tz) => (t + tzOffsetMs(t, tz)) - (dayStart + tzOffsetMs(dayStart, tz));
+
+/** Момент UTC, когда на местных часах h часов (можно дробно) в сутки, начавшиеся в dayStart. */
+function atLocalHour(dayStart, h, tz) {
+  const wall = dayStart + tzOffsetMs(dayStart, tz) + h * H;
+  return wall - tzOffsetMs(wall - tzOffsetMs(dayStart, tz), tz); // второй заход — как в startOfLocalDay
+}
+
 const addDays = (ymd, n) => new Date(Date.parse(`${ymd}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
 const mondayIndex = (ymd) => (new Date(`${ymd}T00:00:00Z`).getUTCDay() + 6) % 7; // 0 — понедельник
 
@@ -64,8 +73,8 @@ function planWeek(ms, cfg, rnd = Math.random) {
  * Не помещается заказанное — берёт сколько помещается.
  */
 function planDay(dayStart, cfg, rnd = Math.random) {
-  const from = dayStart + cfg.hours[0] * H;
-  const to = dayStart + cfg.hours[1] * H - maxSessionMs(cfg);
+  const from = atLocalHour(dayStart, cfg.hours[0], cfg.tz);
+  const to = atLocalHour(dayStart, cfg.hours[1], cfg.tz) - maxSessionMs(cfg); // по местным часам: в сутки с переводом часов их 23 или 25
   if (to <= from) return [];
   const gap = cfg.minGapMinutes * MIN;
   for (let want = randInt(rnd, cfg.sessionsPerDay[0], cfg.sessionsPerDay[1]); want > 0; want--) {
@@ -152,4 +161,4 @@ function nextAction(state, now, cfg) {
   return now - next > cfg.lateMinutes * MIN ? { type: 'skip', start: next } : { type: 'run', start: next };
 }
 
-module.exports = { PAUSE_MAX, deadlineOf, maxSessionMs, tzOffsetMs, localDay, startOfLocalDay, weekDays, weekId, planWeek, planDay, planSession, readingTime, pickLink, nextAction };
+module.exports = { PAUSE_MAX, deadlineOf, maxSessionMs, tzOffsetMs, localDay, startOfLocalDay, wallSince, atLocalHour, weekDays, weekId, planWeek, planDay, planSession, readingTime, pickLink, nextAction };

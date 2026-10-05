@@ -154,8 +154,8 @@ async function scrollToView(page, locator, env) {
   return locator.scrollIntoViewIfNeeded();
 }
 
-/** Навести и кликнуть: точка около центра, задержка перед нажатием, кнопка держится не мгновенно. */
-async function click(page, locator, opts = {}) {
+/** Подвести мышь к элементу: прокрутка колесом, путь к точке около центра, недолгая задержка над ним. */
+async function hover(page, locator, opts = {}) {
   const env = envOf(opts);
   await scrollToView(page, locator, env);
   const box = await locator.boundingBox({ timeout: 5000 }); // нет элемента — не ждать 30 секунд
@@ -163,6 +163,12 @@ async function click(page, locator, opts = {}) {
   const target = pickPoint(box, await cursorOf(page, env.rnd), env.rnd);
   await moveTo(page, target.x, target.y, { ...opts, width: Math.min(box.width, box.height) });
   await linger(page, clamp(lognormal(env.rnd, 130, 0.4), 50, 500), { ...opts, box });
+}
+
+/** Навести и кликнуть: точка около центра, задержка перед нажатием, кнопка держится не мгновенно. */
+async function click(page, locator, opts = {}) {
+  const env = envOf(opts);
+  await hover(page, locator, opts);
   await page.mouse.down();
   await env.sleep(clamp(lognormal(env.rnd, 85, 0.3), 45, 200));
   await page.mouse.up();
@@ -211,4 +217,4 @@ async function pressKey(page, key, opts = {}) {
   await page.keyboard.up(key);
 }
 
-module.exports = { moveTo, click, scroll, type, press: pressKey, linger, pause, rand, sleep, newPersona, restorePersona, usePersona, planMove, planTyping, planScroll };
+module.exports = { moveTo, hover, click, scroll, type, press: pressKey, linger, pause, rand, sleep, newPersona, restorePersona, usePersona, planMove, planTyping, planScroll };

@@ -16,11 +16,26 @@ services:
     ports:
       - ${NEKO_BIND_IP:-127.0.0.1}:${NEKO_PORT:-8080}:8080
       - ${NEKO_BIND_IP:-127.0.0.1}:59000-59019:59000-59019/udp
+      - ${NEKO_BIND_IP:-127.0.0.1}:${MEATSUIT_API_PORT:-8787}:8787
 
   neko:
     network_mode: "service:tailscale"
     ports: !reset []
     dns: !reset []
+    depends_on:
+      tailscale:
+        condition: service_healthy
+
+  # Прогрев и HTTP-сервис в том же сетевом окружении, что Tailscale и Neko: их трафик тоже идёт через туннель
+  # и под тем же выключателем. Без этих строк они остались бы в сети neko (цепочка life -> neko -> tailscale).
+  life:
+    network_mode: "service:tailscale"
+    depends_on:
+      tailscale:
+        condition: service_healthy
+
+  server:
+    network_mode: "service:tailscale"
     depends_on:
       tailscale:
         condition: service_healthy
