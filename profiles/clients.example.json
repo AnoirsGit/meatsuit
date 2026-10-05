@@ -1,0 +1,12 @@
+[
+  {
+    "name": "cvs",
+    "token": "CHANGE-ME-cvs-openssl-rand-hex-24",
+    "sites": ["hh.kz", "greenhouse.io"]
+  },
+  {
+    "name": "tinder-matcher",
+    "token": "CHANGE-ME-tinder-openssl-rand-hex-24",
+    "sites": ["tinder.com"]
+  }
+]

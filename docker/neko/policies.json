@@ -1,0 +1,30 @@
+{
+  "DeveloperToolsAvailability": 1,
+  "BrowserSignin": 0,
+  "SyncDisabled": true,
+  "BrowserGuestModeEnabled": false,
+  "BrowserAddPersonEnabled": false,
+  "IncognitoModeAvailability": 1,
+  "PasswordManagerEnabled": false,
+  "AutofillAddressEnabled": false,
+  "AutofillCreditCardEnabled": false,
+  "EditBookmarksEnabled": false,
+  "BookmarkBarEnabled": false,
+  "DefaultNotificationsSetting": 2,
+  "AutoplayAllowed": true,
+  "VideoCaptureAllowed": true,
+  "FullscreenAllowed": true,
+  "AllowFileSelectionDialogs": false,
+  "PromptForDownloadLocation": false,
+  "DownloadRestrictions": 3,
+  "CommandLineFlagSecurityWarningsEnabled": false,
+  "URLAllowlist": [
+    "file:///home/neko/Downloads"
+  ],
+  "URLBlocklist": [
+    "file://*",
+    "chrome://policy"
+  ],
+  "MetricsReportingEnabled": false,
+  "DefaultCookiesSetting": 1
+}

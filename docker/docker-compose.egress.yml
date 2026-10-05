@@ -1,0 +1,26 @@
+# Выход через домашний узел Tailscale (exit node). Подключается поверх основного файла:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.egress.yml --profile egress up -d
+#
+# Neko и life живут в сетевом окружении контейнера tailscale: весь их трафик, включая UDP и WebRTC,
+# идёт через туннель, а правило из egress/killswitch.sh не даёт им выйти мимо него. Порты зеркала
+# публикуются у tailscale (у контейнера в чужой сети своих портов быть не может).
+#
+# Нужны в docker/.env: TS_AUTHKEY (одноразовый ключ), TS_EXTRA_ARGS=--exit-node=<имя домашнего узла>
+# --exit-node-allow-lan-access=false. Подробности и порядок проверки: README.md и ../docs/05-egress.md.
+#
+# НЕ ПРОВЕРЕНО: запускалось только описание (docker compose config); работа на сервере не проверена.
+
+services:
+  tailscale:
+    ports:
+      - ${NEKO_BIND_IP:-127.0.0.1}:${NEKO_PORT:-8080}:8080
+      - ${NEKO_BIND_IP:-127.0.0.1}:59000-59019:59000-59019/udp
+
+  neko:
+    network_mode: "service:tailscale"
+    ports: !reset []
+    dns: !reset []
+    depends_on:
+      tailscale:
+        condition: service_healthy
