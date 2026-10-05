@@ -25,12 +25,12 @@ const SERVICES = [
   },
 ];
 
-/** egress.json → { country: 'KZ', asn: [41124] } */
+/** egress.json → { country: 'KZ', asn: [64500] } */
 function normalizeExpected(raw) {
   if (!raw || typeof raw !== 'object') throw new Error('egress: нужен объект { country, asn }');
   if (typeof raw.country !== 'string' || !/^[A-Za-z]{2}$/.test(raw.country)) throw new Error(`egress: country должна быть двумя буквами (KZ), а не ${JSON.stringify(raw.country)}`);
   const asn = raw.asn ?? [];
-  if (!Array.isArray(asn) || !asn.every((n) => Number.isInteger(n) && n > 0)) throw new Error('egress: asn должен быть списком чисел, например [41124] (без «AS»)');
+  if (!Array.isArray(asn) || !asn.every((n) => Number.isInteger(n) && n > 0)) throw new Error('egress: asn должен быть списком чисел, например [64500] (без «AS»)');
   return { country: raw.country.toUpperCase(), asn };
 }
 

@@ -11,7 +11,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { createServer, createJournal, normalizeClients } = require('../server.js');
+const { createServer, createJournal, normalizeClients, parseArgs } = require('../server.js');
 const { createQueue } = require('../queue.js');
 const { createLimits } = require('../limits.js');
 const { createEgress } = require('../egress.js');
@@ -33,7 +33,7 @@ const CLIENTS = [
   { name: 'tinder', token: TINDER, sites: ['tinder.com', 'unlisted.test'] },
 ];
 
-const KZ = { ip: '203.0.113.7', country: 'KZ', org: 'AS41124 BTcom Infocommunications Ltd.' };
+const KZ = { ip: '203.0.113.7', country: 'KZ', org: 'AS64500 Example ISP' };
 const NL = { ip: '198.51.100.9', country: 'NL', org: 'AS200313 Datacenter' };
 
 const PAGE = '<html><head><title>Вакансия</title></head><body><button data-ms="7">Откликнуться</button>СЕКРЕТНОЕ-СОДЕРЖИМОЕ-СТРАНИЦЫ</body></html>';
@@ -92,7 +92,7 @@ async function boot(t, over = {}) {
   };
   const timer = {};
   const egress = createEgress({
-    expected: { country: 'KZ', asn: [41124] }, fetch: echoFetch, now: clock.now,
+    expected: { country: 'KZ', asn: [64500] }, fetch: echoFetch, now: clock.now,
     setIntervalFn: (fn) => { timer.fn = fn; return 1; }, clearIntervalFn() {},
   });
   const notified = [];
@@ -170,7 +170,7 @@ test('полный цикл: begin → view → act → end; журнал зна
   assert.equal(v.status, 200);
   assert.match(v.headers.get('content-type'), /text\/html/);
   assert.match(v.text, /СЕКРЕТНОЕ-СОДЕРЖИМОЕ-СТРАНИЦЫ/);
-  assert.match(v.text, /<meta name="egress" content="KZ AS41124">/, 'страна и провайдер выхода в <head>');
+  assert.match(v.text, /<meta name="egress" content="KZ AS64500">/, 'страна и провайдер выхода в <head>');
   assert.equal(v.headers.get('x-url'), 'https://hh.kz/vacancy/1');
   assert.deepEqual(s.driver.calls.at(-1), ['view', 'd1', { scope: 'document' }]);
 
@@ -735,7 +735,7 @@ test('GET /: страница статуса без токена; очередь
   const r = await s.call('/');
   assert.equal(r.status, 200);
   assert.match(r.headers.get('content-type'), /text\/html/);
-  for (const want of ['cvs:hh-apply', 'tinder:like', 'hh.kz', 'tinder.com', 'linkedin.com', 'KZ', 'AS41124', 'begin', 'act']) assert.ok(r.text.includes(want), `на странице нет «${want}»`);
+  for (const want of ['cvs:hh-apply', 'tinder:like', 'hh.kz', 'tinder.com', 'linkedin.com', 'KZ', 'AS64500', 'begin', 'act']) assert.ok(r.text.includes(want), `на странице нет «${want}»`);
   assert.match(r.text, /1 \/ 3/, 'расход за сутки: 1 из 3');
   for (const hidden of [CVS, TINDER, 'Bearer', 'S3cr3t', 'СЕКРЕТНОЕ-СОДЕРЖИМОЕ-СТРАНИЦЫ', 'x-task']) assert.ok(!r.text.includes(hidden), `на странице не должно быть «${hidden}»`);
   assert.ok(!r.text.includes('203.0.113'), 'IP на странице нет');
@@ -825,4 +825,17 @@ test('клиент со звёздочкой в sites допускается н�
   await s.act('tok-boss-0123456789abcdef', { do: 'end' }, ok.json.task);
   const no = await s.act('tok-boss-0123456789abcdef', { do: 'begin', task: 'x', site: 'unlisted.test' });
   assert.deepEqual([no.status, no.json.reason], [403, 'site_unknown']);
+});
+
+// ---------------------------------------------------------------- часовой пояс сервиса
+
+test('parseArgs: часовой пояс — по умолчанию Алматы, из MEATSUIT_TZ или из --tz', () => {
+  assert.equal(parseArgs([], {}).tz, 'Asia/Almaty');
+  assert.equal(parseArgs([], { MEATSUIT_TZ: 'Europe/Berlin' }).tz, 'Europe/Berlin');
+  assert.equal(parseArgs(['--tz', 'America/New_York'], { MEATSUIT_TZ: 'Europe/Berlin' }).tz, 'America/New_York');
+});
+
+test('parseArgs: несуществующий пояс отвергается сразу, а не посреди суток', () => {
+  assert.throws(() => parseArgs(['--tz', 'Mars/Olympus'], {}), /Mars\/Olympus/);
+  assert.throws(() => parseArgs([], { MEATSUIT_TZ: 'не пояс' }), /не пояс/);
 });

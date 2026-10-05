@@ -7,7 +7,7 @@
 # публикуются у tailscale (у контейнера в чужой сети своих портов быть не может).
 #
 # Нужны в docker/.env: TS_AUTHKEY (одноразовый ключ), TS_EXTRA_ARGS=--exit-node=<имя домашнего узла>
-# --exit-node-allow-lan-access=false. Подробности и порядок проверки: README.md и ../docs/05-egress.md.
+# --exit-node-allow-lan-access=false. Подробности и порядок проверки: README.md and ../docs/egress.md.
 #
 # НЕ ПРОВЕРЕНО: запускалось только описание (docker compose config); работа на сервере не проверена.
 

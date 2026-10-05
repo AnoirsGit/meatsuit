@@ -167,7 +167,7 @@ test('now: пауза уже кончилась — запускается ка�
 // ---------- выход в сеть ----------
 
 const echo = (country, asn) => async () => ({ ok: true, json: async () => ({ country, org: `AS${asn} Some ISP` }) });
-const egressOf = (fetch, expected = { country: 'KZ', asn: [41124] }) => createEgress({ expected, fetch });
+const egressOf = (fetch, expected = { country: 'KZ', asn: [64500] }) => createEgress({ expected, fetch });
 
 test('нет проверки выхода: одно предупреждение в журнале на сессию, сессия идёт', async () => {
   const { runner, journal, session } = make({ egress: null });
@@ -179,7 +179,7 @@ test('нет проверки выхода: одно предупреждени�
 });
 
 test('выход тот, что нужно: предупреждений нет, сессия идёт', async () => {
-  const { runner, journal, session } = make({ egress: egressOf(echo('KZ', 41124)) });
+  const { runner, journal, session } = make({ egress: egressOf(echo('KZ', 64500)) });
   await runner.runNow();
   assert.equal(session.calls.length, 1);
   assert.deepEqual(events(journal), ['session-start', 'session-end']);
@@ -207,7 +207,7 @@ test('выход не определился (сервисы молчат): то
 
 test('перед каждой сессией выход проверяется заново, а не берётся из кэша', async () => {
   let asked = 0;
-  const fetch = async () => { asked++; return { ok: true, json: async () => ({ country: 'KZ', org: 'AS41124 X' }) }; };
+  const fetch = async () => { asked++; return { ok: true, json: async () => ({ country: 'KZ', org: 'AS64500 X' }) }; };
   const { runner } = make({ egress: egressOf(fetch) });
   await runner.runNow();
   await runner.runNow();
@@ -219,7 +219,7 @@ test('loadEgress: нет файла — null; хороший — проверк�
   try {
     const file = path.join(dir, 'egress.json');
     assert.equal(loadEgress({ file }), null);
-    fs.writeFileSync(file, '{"country":"KZ","asn":[41124]}');
+    fs.writeFileSync(file, '{"country":"KZ","asn":[64500]}');
     assert.equal(typeof loadEgress({ file, fetch: async () => {} }).check, 'function');
     fs.writeFileSync(file, '{"country": ');
     assert.throws(() => loadEgress({ file }), /JSON/);
