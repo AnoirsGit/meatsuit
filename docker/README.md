@@ -117,7 +117,7 @@ Before the first start on a server create `../profiles/egress.json` (`{"country"
 5. **Exit through home** ([egress.md](../docs/egress.md)). Set up the exit node on the home device first. Add `TS_AUTHKEY` and `TS_EXTRA_ARGS=--exit-node=<home-node-name> --exit-node-allow-lan-access=false` to `.env` (`TS_HOSTNAME` and `TS_TAG` are optional), then run `docker compose -f docker-compose.yml -f docker-compose.egress.yml --profile egress up -d`. The override uses the `!reset` tag, which needs Compose 2.24 or newer. **Do not set the exit node on the host itself over an SSH session on its public address**: the session hangs. The rules and a rollback are in egress.md.
 6. Check the exit: open `https://ipinfo.io` in the mirror; it must show your home country and ISP. Only then start warm-up and your bots.
 
-The compose file hard-codes `TZ: Asia/Almaty` (the author's zone) for the containers; change it to match your exit. Run `./verify.sh` before step 5 (it has not been tried with the override).
+The browser's time zone comes from `MEATSUIT_TZ` in `.env` (default `Asia/Almaty`, the author's zone): set it to the zone of your exit country, because a site can compare the browser's zone with the zone of your IP address. The warm-up zone is separate: `tz` in `profiles/life.json`. Run `./verify.sh` before step 5 (it has not been tried with the override).
 
 ## Troubleshooting
 

@@ -20,6 +20,8 @@ const crypto = require('node:crypto');
 
 const MIN = 60000;
 const ACTIONS = new Set(['goto', 'click', 'fill', 'type', 'key', 'scroll', 'back', 'pause']);
+// Действия на сайте, которые считает потолок задачи; прокрутка, «назад» и пауза сайту ничего не делают.
+const COUNTED = new Set(['goto', 'click', 'fill', 'type', 'key']);
 const DRIVER_STATUSES = new Set([400, 403, 404, 409, 410, 422, 502, 503]); // что Driver вправе бросать (502 сайт не открылся, 503 браузер пропал), остальное — 500
 const HOST = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/;
 const GUARD_RU = { captcha: 'капча', blocked: 'сайт заподозрил бота и блокирует', login: 'слетел вход' };
@@ -123,6 +125,9 @@ function createJournal({ file, fs = nodeFs, now = Date.now, keep = 200, echo } =
 function createServer({
   driver, queue, limits, egress, clients, journal, notify = async () => ({ sent: false }), now = Date.now,
   tz = 'Asia/Almaty', needsHumanIdleMs = 30 * MIN, maxBodyBytes = 1 << 20, defaultWaitSec = 60, maxWaitSec = 300,
+  // Потолок действий в одной задаче: actionsBase + actionsPerCost × cost. Нужен как предохранитель от бота с ошибкой в цикле:
+  // лимиты площадки считают только begin, а cost клиент называет сам. Числа стартовые, не измеренные.
+  actionsBase = 100, actionsPerCost = 30, maxTextChars = 5000,
 }) {
   const roster = normalizeClients(clients).map((client) => ({ client, hash: crypto.createHash('sha256').update(client.token).digest() }));
 
@@ -308,7 +313,11 @@ function createServer({
       }
       const win = await driver.open({ site: key, allow });
       if (!win || win.id === undefined || win.id === null) throw new Error('driver.open не вернул id окна');
-      Object.assign(task.data, { driverId: win.id, allow });
+      if (task.data.killed) { // выход пропал, пока окно открывалось
+        try { await driver.close(win.id); } catch (err) { log('error', 'close_failed', { task, detail: scrub(err && err.message, []).slice(0, 300) }); }
+        throw new HttpError(503, task.data.killed);
+      }
+      Object.assign(task.data, { driverId: win.id, allow, cost, actions: 0 });
       opened = true;
       log('begin', 'ok', { task, cost });
       sendJson(res, 200, { task: task.id });
@@ -324,7 +333,10 @@ function createServer({
   // ---- действия
 
   function validateAction(a) {
-    const needText = () => { if (typeof a.text !== 'string') throw bad(`${a.do}: нужен text (строка)`); };
+    const needText = () => {
+      if (typeof a.text !== 'string') throw bad(`${a.do}: нужен text (строка)`);
+      if (a.text.length > maxTextChars) throw bad(`${a.do}: text длиннее ${maxTextChars} знаков (печатается как человек, то есть часами); разбейте на части`);
+    };
     const needTarget = () => {
       const t = a.target;
       const ok = (Number.isInteger(t) && t >= 0) || (typeof t === 'string' && t.length > 0 && t.length <= 500)
@@ -367,12 +379,23 @@ function createServer({
     if (!covers([task.info.site, ...task.data.allow], u.hostname)) throw new HttpError(403, 'forbidden', { reason: 'outside_task', message: 'goto: адрес вне сайтов задачи' });
   }
 
+  /** Потолок действий исчерпан: ни одного лишнего касания браузера, окно закрыто, слот свободен, владельцу сообщение. */
+  async function overCap(task) {
+    const cap = actionsBase + actionsPerCost * task.data.cost;
+    log('limit', 'actions', { task, cap });
+    tell(`meatsuit: задача «${task.info.task}» на ${task.info.site} закрыта: больше ${cap} действий при cost ${task.data.cost}. Похоже на зациклившийся скрипт.`);
+    await closeWindow(task, 'actions');
+    queue.release(task.id, 'actions');
+    throw new HttpError(429, 'limit', { reason: 'actions', message: `в задаче больше ${cap} действий при cost ${task.data.cost}; окно закрыто. Если так и задумано, укажите больший cost в begin` });
+  }
+
   async function perform(ctx, task, action) {
     const t0 = now();
     let code = 'ok';
     try {
       if (task.data.guard) throw new HttpError(409, 'needs_human', { guard: task.data.guard });
       if (action.do === 'goto') checkGoto(task, action.url);
+      if (COUNTED.has(action.do) && ++task.data.actions > actionsBase + actionsPerCost * task.data.cost) await overCap(task);
       let r;
       try { r = await driver.act(task.data.driverId, action); } catch (err) { throw afterDriverError(task, err); }
       if (r && r.guard) throw guardHit(task, String(r.guard));
@@ -443,8 +466,9 @@ function createServer({
 
   async function killActive(code) {
     const task = queue.active();
-    if (!task || task.data.driverId === undefined || task.data.closed) return; // задача ещё открывается: begin сам получит отказ
+    if (!task || task.data.closed) return;
     task.data.killed = code;
+    if (task.data.driverId === undefined) return; // окно ещё открывается: begin увидит killed и закроет его сам
     await closeWindow(task, code);
     queue.release(task.id, 'egress');
   }
@@ -456,7 +480,7 @@ function createServer({
         log('egress', is, { country: r.country, asn: r.asn, ...(r.detail ? { detail: String(r.detail).slice(0, 300) } : {}) });
         const who = [r.country, r.asn && `AS${r.asn}`].filter(Boolean).join(' ');
         tell(r.ok ? `meatsuit: выход в сеть восстановился (${who}), задачи принимаются.`
-          : r.error === 'egress_wrong' ? `meatsuit: выход в сеть не из Алматы (${who}). Задачи не берутся, идущая закрыта.`
+          : r.error === 'egress_wrong' ? `meatsuit: выход в сеть не тот, что в egress.json (${who}). Задачи не берутся, идущая закрыта.`
             : 'meatsuit: не удалось определить выход в сеть. Задачи не берутся, идущая закрыта.');
       }
       if (!r.ok) killActive(r.error).catch((err) => log('error', 'egress_close_failed', { detail: String(err && err.message).slice(0, 300) }));
@@ -507,7 +531,7 @@ table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:.25rem .
 <h1>meatsuit</h1>
 <h2>Выход в сеть</h2><p>${esc(egressLine(egress.last()))}</p>
 <h2>Очередь</h2><div class="wrap">${table(['', 'клиент', 'задача', 'площадка', ''], queueRows, 'пусто')}</div>
-<h2>Лимиты (часы по Алматы)</h2><div class="wrap">${table(['площадка', 'за сутки', 'за час', 'часы', ''], limRows, 'нет площадок')}</div>
+<h2>Лимиты (часы: ${esc(tz)})</h2><div class="wrap">${table(['площадка', 'за сутки', 'за час', 'часы', ''], limRows, 'нет площадок')}</div>
 <h2>Журнал</h2><div class="wrap">${table(['время', 'клиент', 'задача', 'площадка', 'событие', 'результат'], logRows, 'пока пусто')}</div>
 </body></html>`;
   }
@@ -590,6 +614,7 @@ async function main() {
   const { createLimits } = require('./limits.js');
   const { createEgress } = require('./egress.js');
   const { fromEnv } = require('./notify.js');
+  const { loadPersona } = require('./human/persona-file.js');
 
   const clients = normalizeClients(loadJson(opts.clients, 'токены клиентов; образец profiles/clients.example.json, настоящий файл держать вне git'));
   const sites = loadJson(opts.sites, 'лимиты площадок, образец profiles/sites.json');
@@ -603,6 +628,7 @@ async function main() {
   const limits = createLimits({ sites, file: path.join(opts.data, 'limits.json'), tz: opts.tz });
   const egress = createEgress({ expected });
   const queue = createQueue();
+  loadPersona(opts.data); // повадки рук те же, что у прогрева (data/persona.json), а не новые случайные при каждом запуске
   const driver = await loadDriver(opts);
   const server = createServer({ driver, queue, limits, egress, clients, journal, notify, tz: opts.tz });
 

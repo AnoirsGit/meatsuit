@@ -98,10 +98,10 @@ The session has a hard deadline: the sum of the site budgets times 1.25, plus pa
 
 What `guard` (`guard.js`) recognizes, judging by a snapshot of the page (URL, title, start of the text, whether a challenge frame is visible):
 
-- Always: a **visible** reCAPTCHA, hCaptcha or Cloudflare frame (the hidden one reCAPTCHA keeps on every page does not count: visibility, opacity and position are checked); a sign-in URL by its path (`/login`, `/signin`, Google sign-in). `?next=/login` is not a sign-in.
+- Always: a **visible** captcha frame: the reCAPTCHA "I'm not a robot" checkbox or its challenge popup, hCaptcha, Cloudflare, Arkose, DataDome, Yandex SmartCaptcha, or the `#px-captcha` block. The invisible reCAPTCHA badge that many sites keep on every page does not count (it is skipped by its `size=invisible` address and its `.grecaptcha-badge` container, and visibility, opacity and position are checked). The frame names of Arkose, DataDome, SmartCaptcha and PerimeterX come from general knowledge and are not verified on live sites; the reCAPTCHA ones are tested on a real Chromium with local stand-in pages, not on Google's own. A sign-in URL by its path (`/login`, `/signin`, Google sign-in): `?next=/login` and `/login-security-tips` are not a sign-in.
 - Only on short pages (under 2000 characters): titles like "Just a moment", error titles like "403", "Error 403", "429 Too Many Requests" (an article titled "403 - Wikipedia" or "429 AD" is not an error), URLs like `/captcha`, `/showcaptcha`, `/challenge`, `/sorry`, `/checkpoint`, `/blocked`, and phrases like "verify you are human", "Press & Hold", "unusual traffic" (and Russian ones). So an article about captchas does not stop warm-up, while a stub page does.
 
-Gaps: Arkose, `#px-captcha` and Yandex SmartCaptcha frames are not searched for; they are caught only by their text and URL. Checks run after a site opens and after each followed link, **not** while reading, so a captcha that appears mid-page is noticed at the next check.
+Gaps: a captcha that is not in an iframe or has a name not listed above is caught only by its text and URL. A sign-in shown as a pop-up over the same address (as some single-page apps do) is **not** a sign-in to this check. Checks run after a site opens and after each followed link, **not** while reading, so a captcha that appears mid-page is noticed at the next check.
 
 ## Configuration: `profiles/life.json`
 

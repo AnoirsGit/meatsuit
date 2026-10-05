@@ -18,7 +18,7 @@
  */
 const fs = require('node:fs');
 const path = require('node:path');
-const human = require('./human.js');
+const { loadPersona } = require('./human/persona-file.js');
 const { normalizeConfig } = require('./life/config.js');
 const { startOfLocalDay, localDay, planDay, planWeek, planSession } = require('./life/plan.js');
 const { createRunner, createStore, createJournal, loadEgress } = require('./life/runner.js');
@@ -39,16 +39,6 @@ function parseArgs(argv) {
 }
 
 const readJson = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
-
-/** Человек в браузере один: темп и повадки сохраняются, чтобы после перезапуска он остался тем же. Испорченный файл заменяется годными повадками. */
-function loadPersona(dir) {
-  const file = path.join(dir, 'persona.json');
-  const persona = human.restorePersona(readJson(file));
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(persona, null, 2));
-  human.usePersona(persona);
-  return persona;
-}
 
 const fmt = (ms, tz) => new Date(ms).toLocaleString('ru-RU', { timeZone: tz, dateStyle: 'short', timeStyle: 'short' });
 
