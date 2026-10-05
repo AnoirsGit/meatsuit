@@ -135,7 +135,7 @@ Exact fields and codes are in the [HTTP API](http-api.md).
 | Built, not verified | Warm-up on a multi-day schedule | Logic is tested on a virtual clock. No long live run. Not tried on Brave or real sites |
 | Built, not verified | Telegram messages | Tests use a local fake server. No live bot run is recorded |
 | Built, not verified | Pacing numbers | Untested starting values |
-| Not built | The HTTP service as a Docker service | Compose runs the mirror, warm-up and Tailscale. Run `node server.js` yourself, inside the browser's network namespace |
+| Built, not verified | The HTTP service as a Docker service | Compose has a `server` service (profile `api`) that `docker compose config` accepts; it has not been started in a container |
 | Not built | Warm-up that cooperates | It does not queue behind bot tasks, does not detect that the owner is in the mirror, uses a tab in the first window instead of its own window, and sends no Telegram message |
 | Not built | `paste` action | Long texts are typed key by key |
 | Not built | Model-assisted button finding | An idea only |

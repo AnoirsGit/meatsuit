@@ -102,7 +102,7 @@ const overlays = (page) => stable(page, () => page.evaluate(() => {
     return opacity(el) > 0.1 && getComputedStyle(el).visibility !== 'hidden';
   };
   const DIALOG = '[role=dialog],[role=alertdialog],[aria-modal=true],dialog[open]';
-  const CONSENT = /cookie|куки|consent|gdpr|персональн\w+ данн/i;
+  const CONSENT = /cookie|куки|consent|gdpr|персональн[а-яё]+ данн/i; // \w в JS знает только латиницу, поэтому для русских слов [а-яё]
 
   const cands = new Set(document.querySelectorAll(DIALOG));
   for (const top of document.body ? document.body.children : []) {
@@ -117,7 +117,7 @@ const overlays = (page) => stable(page, () => page.evaluate(() => {
     const r = el.getBoundingClientRect();
     const text = (el.innerText || '').trim();
     const visibleArea = Math.max(0, Math.min(r.right, W) - Math.max(r.left, 0)) * Math.max(0, Math.min(r.bottom, H) - Math.max(r.top, 0));
-    const dialogLike = el.matches(DIALOG), consent = CONSENT.test(text);
+    const dialogLike = el.matches(DIALOG), consent = CONSENT.test(text) && !el.querySelector('input[type=password]'); // форма с паролем — вход или регистрация, не баннер cookies
     if (!(dialogLike || visibleArea >= 0.2 * W * H || (consent && r.width >= 0.5 * W))) continue;
     const hit = document.elementFromPoint(Math.min(Math.max(r.x + r.width / 2, 1), W - 1), Math.min(Math.max(r.y + r.height / 2, 1), H - 1));
     if (!hit || !(el.contains(hit) || hit.contains(el))) continue; // закрыт другим слоем

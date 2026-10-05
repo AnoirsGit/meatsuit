@@ -58,7 +58,7 @@ The full deploy sequence, including binding the mirror to a private address, is 
 
 The rule: **no tunnel means no network.** If the tunnel or the exit node is down, the browser must not quietly leave from the server's own address.
 
-`docker/egress/killswitch.sh` enforces it. It runs in the Tailscale container before Tailscale starts and installs `iptables` rules on outgoing traffic, for IPv4 and IPv6: loopback and the tunnel interface are allowed, replies on established connections are allowed, anything run by root (that is `tailscaled`, which must reach the internet to build the tunnel) is allowed, and everything else is rejected. Neko and warm-up run as non-root users in the same namespace, so they have no route out except the tunnel. The catch: any process running as root in that namespace would bypass it.
+`docker/egress/killswitch.sh` enforces it. It runs in the Tailscale container before Tailscale starts and installs `iptables` rules on outgoing traffic, for IPv4 and IPv6 (the Tailscale container also switches IPv6 off with `sysctl`, and the script refuses to start if `ip6tables` is missing and IPv6 is not switched off; the rule order and this refusal are tested on stand-in commands, the real rules are not): loopback and the tunnel interface are allowed, replies on established connections are allowed, anything run by root (that is `tailscaled`, which must reach the internet to build the tunnel) is allowed, and everything else is rejected. Neko and warm-up run as non-root users in the same namespace, so they have no route out except the tunnel. The catch: any process running as root in that namespace would bypass it.
 
 Not verified, because the egress profile has never been run: that this rule does not break WebRTC, that the browser really stays silent when the tunnel is down, and that DNS goes through the tunnel (the aim: otherwise CDNs pick servers by the datacenter's resolver).
 
@@ -117,6 +117,6 @@ The rollback was not tested on a real server. Check that `tailscale` is in root'
 ## What is verified and what is not
 
 - **Verified:** `egress.js` and its use in `life.js` and `server.js`, by unit tests on a fake network (country and ASN match, fallback service, timeouts, caching, fail closed). The exit-node commands against Tailscale's documentation. The egress override as a configuration only (`docker compose config` accepts it).
-- **Not verified:** the egress profile has not been run at all: Tailscale inside the container, the chain warm-up, Neko, Tailscale in one network namespace, the kill switch, WebRTC and DNS through the tunnel. Also not run: `begin` returning `503` with a real exit node, and the SSH rollback script on a server.
+- **Not verified:** the egress profile has not been run at all: Tailscale inside the container, Neko, warm-up, the HTTP service and Tailscale in one network namespace, the kill switch, WebRTC and DNS through the tunnel. Also not run: `begin` returning `503` with a real exit node, and the SSH rollback script on a server.
 
 Russian original: [05-egress.md](05-egress.md).

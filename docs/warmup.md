@@ -67,7 +67,7 @@ The session has a hard deadline: the sum of the site budgets times 1.25, plus pa
 | Kind | What happens |
 |---|---|
 | `read` | Opens the page, closes popups, looks at the screen, scrolls the wheel 400 to 900 px at a time and lingers between scrolls (the hand twitches now and then). Time on a page grows with the text length, from 8 s to 4 min, never beyond the site's budget. Per visit it follows 0 to 3 links on the same site: about 45% none, 30% one, 17% two, 8% three. Links are clicked with the mouse, not opened with `goto`; a quarter go through the menu or header. On a followed page it either carries on from there or steps back (about half the time), rarely two steps |
-| `video` | Opens the configured URL, looks for a link containing `/watch?v=` or `/video/`, clicks it, stays on the video page for 30 s to 10 min (the site's budget, clamped, never beyond the deadline), and sometimes scrolls slightly "toward the comments". No such link: it leaves. Whether the video starts playing by itself is not verified |
+| `video` | Opens the configured URL, looks for a link containing `/watch?v=` or `/video/`, clicks it, stays on the video page for 30 s to 10 min (the site's budget, clamped, never beyond the deadline), and sometimes scrolls slightly "toward the comments". No such link: it leaves. Whether the video starts playing by itself is not verified. Use it only for a video site where the browser is **not** signed in: watching on YouTube while signed in to Google fills the account's watch history with random videos. The shipped file has no `video` site for that reason |
 | `search` | Finds a search field (`type=search`, `name` q, query, search or s, `role=searchbox`, or a placeholder containing "search" or "поиск"), clicks it, types a query from `queries` with real key events (with typos and corrections; Cyrillic through the Russian layout), presses Enter and reads the results like `read`. No visible field (for example it opens only when you click an icon): the site is skipped with the reason "нет поля поиска" ("no search field"). The query is chosen at planning time and journaled |
 
 **Why searches go to Wikipedia, not Google.** Google's policies prohibit automated queries ([spam policies](https://developers.google.com/search/docs/essentials/spam-policies)). The egress IP is your own home IP, so a flag would land on every device you use at home (our inference, not verified). If you want Google, search yourself in the mirror.
@@ -117,7 +117,7 @@ Gaps: a captcha that is not in an iframe or has a name not listed above is caugh
 | `cooldownHours` | Pause after a captcha or block | 24 | 72 |
 | `session.minutes` | `[min, max]` total session time | `[5, 14]` | `[5, 12]` |
 | `session.sites` | `[min, max]` sites per session | `[2, 4]` | same |
-| `sites` | List of `{url, kind, weight, queries}`. `kind` is `read` (default), `video` or `search`; `weight` is above zero (default 1); `queries` is a non-empty list of strings up to 60 characters, required for `search` | at least one | seven sites |
+| `sites` | List of `{url, kind, weight, queries}`. `kind` is `read` (default), `video` or `search`; `weight` is above zero (default 1); `queries` is a non-empty list of strings up to 60 characters, required for `search` | at least one | six sites |
 
 The config is loaded once at startup, so restart `run` after editing it. It is validated at startup and the program refuses to start when:
 
@@ -137,7 +137,6 @@ The config is loaded once at startup, so restart `run` after editing it. It is v
   "session": { "minutes": [5, 12], "sites": [2, 4] },
   "sites": [
     { "url": "https://news.ycombinator.com/", "kind": "read", "weight": 3 },
-    { "url": "https://www.youtube.com/", "kind": "video", "weight": 2 },
     { "url": "https://en.wikipedia.org/", "kind": "search", "weight": 3, "queries": ["Mountains", "Linux", "Chess"] }
   ]
 }
@@ -145,7 +144,7 @@ The config is loaded once at startup, so restart `run` after editing it. It is v
 
 What to put in `sites`:
 
-- Ordinary sites without sign-in that you read yourself: news, reference, blogs. The shipped file is the author's own taste (Russian- and Kazakh-language news sites, a video site, Russian Wikipedia for searches). Replace it. None of those sites has been run against for real.
+- Ordinary sites without sign-in that you read yourself: news, reference, blogs. The shipped file is the author's own taste (Russian- and Kazakh-language news sites and Russian Wikipedia for searches). Replace it. None of those sites has been run against for real.
 - Do not list sites where the browser is signed in. Reading there also leaves a trace in the account, and the code cannot tell account links from any others beyond the word list above. This is a rule of caution; the code does not enforce it.
 - Run `node life.js plan` and `now --dry` first to see what you would get.
 

@@ -14,7 +14,6 @@
     { "url": "https://ru.wikipedia.org/wiki/Special:Random", "kind": "read", "weight": 2 },
     { "url": "https://tengrinews.kz/", "kind": "read", "weight": 2 },
     { "url": "https://vc.ru/", "kind": "read", "weight": 1 },
-    { "url": "https://www.youtube.com/", "kind": "video", "weight": 2 },
     {
       "url": "https://ru.wikipedia.org/",
       "kind": "search",

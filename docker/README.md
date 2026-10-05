@@ -48,7 +48,7 @@ What it does not prove: that a real keyboard in a real web client works (it spea
 
 - Enter and shortcuts from a real keyboard in a web client (above).
 - Video and sound over WebRTC at an address other than `127.0.0.1` (for example a tailnet address): this needs `NEKO_WEBRTC_IP` and UDP ports 59000 to 59019.
-- The whole `egress` profile: Tailscale in a container; `docker-compose.egress.yml` (valid as configuration, **never run**); the chain `life` to `neko` to `tailscale` in one network; the kill switch (does it hurt WebRTC, does the browser stay silent when the tunnel is down); DNS through the tunnel.
+- The whole `egress` profile: Tailscale in a container; `docker-compose.egress.yml` (valid as configuration, **never run**); `neko`, `life` and `server` all sharing the `tailscale` container's network (each is pointed at it directly, no chain); the kill switch (does it hurt WebRTC, does the browser stay silent when the tunnel is down); DNS through the tunnel.
 - Speed and load on a weak server. Video is encoded on the CPU, so lower `NEKO_SCREEN` (default `1280x720@30`) and `NEKO_CPUS`.
 - Signing in and registering on real sites from the mirror. Sites may ask for SMS or a captcha.
 - Brave on real sites and on bot-detector sites, and a full warm-up session in this Brave.
@@ -70,8 +70,8 @@ Other deliberate differences from the stock Neko Brave image (all in `neko/brave
 
 | File | Purpose |
 |---|---|
-| `docker-compose.yml` | Neko with Brave (`neko`), warm-up (`life`, profile `warmup`), Tailscale (`tailscale`, profile `egress`) |
-| `docker-compose.egress.yml` | Laid over the main file: Neko and warm-up in the Tailscale container's network |
+| `docker-compose.yml` | Neko with Brave (`neko`), warm-up (`life`, profile `warmup`), the HTTP service (`server`, profile `api`), Tailscale (`tailscale`, profile `egress`) |
+| `docker-compose.egress.yml` | Laid over the main file: Neko, warm-up and the HTTP service in the Tailscale container's network |
 | `.env.example` | The main settings with comments; copy to `.env` (not in git). The Tailscale ones (`TS_*`) are not listed; add them by hand |
 | `neko/brave-start.sh` | Starts Brave: the real binary, the flags, profile fixes |
 | `neko/brave.conf` | Replaces the image's supervisord config so Neko takes the browser flags from the script |
@@ -91,6 +91,8 @@ Settings in `.env` (all optional except the passwords):
 | `NEKO_MEM`, `NEKO_CPUS` | `3g`, `2` | Ceilings for the Neko container |
 | `BRAVE_EXTRA_FLAGS` | empty | Extra Brave flags (no spaces inside values) |
 | `LIFE_CONFIG` | `/app/profiles/life.json` | Warm-up config path inside its container |
+| `MEATSUIT_API_PORT` | `8787` | Host port of the HTTP service (same address as `NEKO_BIND_IP`) |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | empty | Optional alerts from the HTTP service |
 | `NEKO_TAG`, `TS_TAG` | `3.1.6`, `stable` | Image tags (not in `.env.example`) |
 | `TS_AUTHKEY`, `TS_EXTRA_ARGS`, `TS_HOSTNAME` | empty, empty, `meatsuit` | Tailscale container settings (not in `.env.example`) |
 
@@ -107,6 +109,19 @@ docker compose --profile warmup stop life         # stop
 ```
 
 Before the first start on a server create `../profiles/egress.json` (`{"country":"DE","asn":[64496]}`: use your own country and ASN, see [egress.md](../docs/egress.md#the-egress-check)). Then every session first checks the exit and is skipped on a mismatch. Without the file `life` does not start (`--no-egress-check` is the explicit opt-out). The config is read at startup, so restart the service after editing `profiles/life.json`. Schedule and options are in [warmup.md](../docs/warmup.md). The journal and state live in the `life_data` volume.
+
+## HTTP service
+
+The service that your scripts call (`GET /view`, `POST /act`, see [http-api.md](../docs/http-api.md)) is the `server` service, profile `api`. It shares Neko's network, so it reaches the browser's CDP port at `127.0.0.1:9222`, and its port 8787 is published next to the mirror's, on `NEKO_BIND_IP` only.
+
+```sh
+cp ../profiles/clients.example.json ../profiles/clients.json    # your own long random tokens; the file is git-ignored
+# also needed in ../profiles: sites.json (limits per site) and egress.json (the exit you expect); without any of the three it will not start
+docker compose --profile api up -d --build
+curl -s http://127.0.0.1:8787/                                  # status page, no token needed
+```
+
+It uses the same `/data` volume as warm-up, so both share `persona.json` and the hands are the same "person". **Not verified:** this service was added to the compose file after the last real run; `docker compose config` accepts it (with and without the egress override), but it has not been started in a container.
 
 ## Deploying on a server
 

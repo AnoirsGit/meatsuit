@@ -17,7 +17,7 @@ const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
 const CLOSE = /^(×|✕|✖|x|close|dismiss|закрыть|не сейчас|позже|потом|no,? thanks|no thanks|not now|maybe later|skip|нет,? спасибо|пропустить|отмена|cancel|block|deny|не разрешать|нет|no)$/;
 const REJECT = /^(reject( all)?|decline( all)?|only (strictly )?necessary( cookies)?|necessary only|use necessary cookies only|отклонить( все)?|только необходимые|отказаться( от всех)?|не принимать)$/;
 const ACCEPT = /^(accept( all)?( cookies)?|allow( all)?( cookies)?|agree|i agree|ok|okay|got it|принять( все)?( cookies)?|согласен|согласна|понятно|хорошо|разрешить все)$/;
-const FORBIDDEN = /subscribe|sign.?up|install|download|get (the )?app|open (in )?app|log.?in|sign.?in|register|buy|продолж\w* с|подпис|установ|скача|в приложени|войти|регистр|купить|реклам|\bads?\b|sponsor/;
+const FORBIDDEN = /subscribe|sign.?up|install|download|get (the )?app|open (in )?app|log.?in|sign.?in|register|buy|продолж[а-яё]* с|подпис|установ|скача|в приложени|войти|регистр|купить|реклам|\bads?\b|sponsor/;
 
 /**
  * Какую кнопку нажать на всплывающем. overlay: { kind: 'consent'|'dialog', buttons: [{ref, name, corner}] }.

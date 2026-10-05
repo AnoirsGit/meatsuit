@@ -194,6 +194,27 @@ async function settle(net, { quietMs = 500, maxMs = 10000, now = Date.now, sleep
   }
 }
 
+/**
+ * Выбрать вариант в <select> настоящими событиями. selectOption у Playwright выставляет значение сам и шлёт
+ * синтетические input и change (isTrusted: false), страница это видит. Поэтому: мышь подходит к списку, он
+ * получает фокус, и вариант выбирается стрелками, как у человека, не раскрывая список (его окно у браузера
+ * с экраном рисуется отдельно, и мышью до него не дотянуться). Если стрелки не привели к нужному варианту
+ * (недоступные варианты в списке), вариант ставится через selectOption: верное значение важнее.
+ */
+async function chooseOption(page, el, index, hands) {
+  const at = () => el.evaluate((s) => s.selectedIndex);
+  const from = await at();
+  if (from === index) return;
+  await human.hover(page, el, hands);
+  await el.focus();
+  const key = index > from ? 'ArrowDown' : 'ArrowUp';
+  for (let i = Math.abs(index - from); i > 0; i--) {
+    await hands.sleep(between(hands.rnd, 140, 380));
+    await human.press(page, key, hands);
+  }
+  if (await at() !== index) await el.selectOption({ index });
+}
+
 // ---------------------------------------------------------------- Driver
 
 /**
@@ -330,7 +351,7 @@ async function createDriver({ cdpUrl, cdp, env = {}, settle: settleOpts = {} } =
           return at((x) => x.text.toLowerCase().includes(low));
         }, a.text);
         if (index < 0) throw bad(`fill: в списке нет варианта «${a.text.slice(0, 60)}»`);
-        await el.selectOption({ index });
+        await chooseOption(w.page, el, index, hands);
         return;
       }
       await human.click(w.page, el, hands); // клик в поле даёт фокус

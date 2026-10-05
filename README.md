@@ -75,7 +75,7 @@ node life.js plan
 node life.js now --dry
 ```
 
-The HTTP service needs a browser that exposes the Chrome DevTools Protocol (CDP). The Docker mirror already runs one inside its container. For a quick local try with any Chromium:
+The HTTP service needs a browser that exposes the Chrome DevTools Protocol (CDP). With the Docker mirror, run the service as a container too (`docker compose --profile api up -d`, see [docker/README.md](docker/README.md#http-service); not verified in a container yet). For a quick local try with any Chromium:
 
 ```sh
 chromium --remote-debugging-port=9222 &

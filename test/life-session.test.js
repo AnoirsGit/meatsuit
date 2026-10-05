@@ -108,7 +108,7 @@ test('всплывающее, которое нечем закрыть: сайт
   await runSession(page, [read('https://a.test/', 20000), read('https://b.test/', 20000)], { env, probe, log: (e) => journal.push(e) });
   assert.deepEqual(journal.filter((e) => e.event === 'step').map((e) => [e.url, e.result, e.reason]),
     [['https://a.test/', 'skipped', 'всплывающее не закрылось'], ['https://b.test/', 'ok', undefined]]);
-  assert.ok(!log.some((e) => e.op === 'down' && false), 'заглушка');
+  assert.ok(!log.some((e) => e.op === 'down'), 'нажал кнопку «Subscribe» (или что-то ещё): на этих страницах кликать было нечего');
 });
 
 test('баннер, появившийся посреди чтения, закрывается на следующем проходе', async () => {

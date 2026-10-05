@@ -42,6 +42,7 @@ services:
       # Только на этом адресе хоста. На сервере без egress поставьте сюда tailnet-адрес хоста.
       - ${NEKO_BIND_IP:-127.0.0.1}:${NEKO_PORT:-8080}:8080
       - ${NEKO_BIND_IP:-127.0.0.1}:59000-59019:59000-59019/udp
+      - ${NEKO_BIND_IP:-127.0.0.1}:${MEATSUIT_API_PORT:-8787}:8787 # HTTP-сервис (профиль api); пока он не запущен, порт пуст
     volumes:
       - brave_profile:/home/neko/.config/brave # профиль: куки, входы, история
       - ./neko/brave.conf:/etc/neko/supervisord/brave.conf:ro
@@ -80,6 +81,37 @@ services:
       - life_data:/data # состояние, журнал data/life.jsonl, повадки persona.json
     command: ["node", "life.js", "run", "--config", "${LIFE_CONFIG:-/app/profiles/life.json}", "--data", "/data"]
 
+  # HTTP-сервис: GET /view и POST /act для ваших скриптов (docs/http-api.md). Профиль api. Сеть общая с Neko
+  # (в egress-варианте с Tailscale), поэтому CDP браузера это http://127.0.0.1:9222, а порт 8787 публикуется
+  # у neko на NEKO_BIND_IP. Внутри общей сети сервис слушает все адреса, наружу его пускает только эта публикация.
+  # Нужны в ../profiles: clients.json (токены, в git не лежит), sites.json, egress.json; без любого из них сервис не стартует.
+  # Каталог /data тот же, что у life: в нём persona.json, чтобы руки были теми же.
+  server:
+    profiles: ["api"]
+    build:
+      context: ..
+      dockerfile: docker/life/Dockerfile
+    restart: unless-stopped
+    init: true
+    network_mode: "service:neko"
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 0.5
+    pids_limit: 256
+    depends_on:
+      neko:
+        condition: service_healthy
+    environment:
+      TZ: ${MEATSUIT_TZ:-Asia/Almaty}
+      MEATSUIT_TZ: ${MEATSUIT_TZ:-Asia/Almaty}
+      MEATSUIT_CDP: http://127.0.0.1:9222
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    volumes:
+      - ..:/app:ro
+      - life_data:/data
+    command: ["node", "server.js", "--host", "0.0.0.0", "--port", "8787", "--data", "/data"]
+
   # Выход через Tailscale. Только с профилем egress и вместе с docker-compose.egress.yml.
   tailscale:
     profiles: ["egress"]
@@ -91,6 +123,10 @@ services:
     command: ["/usr/local/bin/containerboot"]
     cap_add: [NET_ADMIN]
     devices: ["/dev/net/tun:/dev/net/tun"]
+    # IPv6 в общей сети закрыт совсем: выход идёт по IPv4, а открытый IPv6 был бы дырой мимо туннеля.
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: "1"
+      net.ipv6.conf.default.disable_ipv6: "1"
     mem_limit: 256m
     memswap_limit: 256m
     pids_limit: 256
