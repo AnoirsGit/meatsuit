@@ -5,5 +5,6 @@
 - [Цель](docs/02-goal.md)
 - [Что уже есть у нас и у других](docs/01-analysis.md)
 - [Как устроено и как пользоваться](docs/03-design.md)
+- [HTTP-интерфейс и технический дизайн](docs/04-http-api.md)
 
 Код пока: `human.js` (мышь, прокрутка, ввод) и его тест, `node test/human.test.js`.
