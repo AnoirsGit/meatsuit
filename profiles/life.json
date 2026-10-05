@@ -1,0 +1,25 @@
+{
+  "tz": "Asia/Almaty",
+  "hours": [9, 23],
+  "daysPerWeek": [3, 4],
+  "sessionsPerDay": [1, 2],
+  "minGapMinutes": 120,
+  "lateMinutes": 90,
+  "cooldownHours": 72,
+  "consent": "reject",
+  "session": { "minutes": [5, 12], "sites": [2, 4] },
+  "sites": [
+    { "url": "https://news.ycombinator.com/", "kind": "read", "weight": 3 },
+    { "url": "https://habr.com/ru/feed/", "kind": "read", "weight": 3 },
+    { "url": "https://ru.wikipedia.org/wiki/Special:Random", "kind": "read", "weight": 2 },
+    { "url": "https://tengrinews.kz/", "kind": "read", "weight": 2 },
+    { "url": "https://vc.ru/", "kind": "read", "weight": 1 },
+    { "url": "https://www.youtube.com/", "kind": "video", "weight": 2 },
+    {
+      "url": "https://ru.wikipedia.org/",
+      "kind": "search",
+      "weight": 3,
+      "queries": ["Алматы", "Тянь-Шань", "Иссык-Куль", "Node.js", "Linux", "Docker", "Шахматы", "Фотография", "Альпинизм", "Кофе"]
+    }
+  ]
+}

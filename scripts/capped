@@ -1,0 +1,8 @@
+#!/bin/sh
+# Запуск команды с жёстким потолком памяти и процессора: сорвавшийся процесс (бесконечный цикл,
+# разросшийся браузер) будет убит ядром, а не повесит машину.
+#   scripts/capped node --test
+#   CAP_MEM=6G CAP_CPU=300% scripts/capped <команда>
+exec systemd-run --user --scope --quiet \
+  -p MemoryMax="${CAP_MEM:-3G}" -p MemorySwapMax=0 -p CPUQuota="${CAP_CPU:-200%}" \
+  nice -n 10 "$@"

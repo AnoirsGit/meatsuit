@@ -1,0 +1,120 @@
+# meatsuit: Neko с Brave (зеркало и CDP) и автопрогрев life.js.
+#
+#   cp .env.example .env                       # заполнить пароли
+#   docker compose up -d                       # только зеркало
+#   docker compose --profile warmup up -d --build   # зеркало и автопрогрев
+#
+# Автопрогрев вынесен в профиль warmup и сам не стартует: пока выход в сеть не идёт через дом в Алматы,
+# он ушёл бы с адреса сервера. Выход через Tailscale: docker-compose.egress.yml и README.md.
+name: meatsuit
+
+services:
+  neko:
+    image: ghcr.io/m1k1o/neko/brave:${NEKO_TAG:-3.1.6}
+    restart: unless-stopped
+    # Время на корректное завершение: Brave при SIGINT сбрасывает на диск cookie и входы. Docker по умолчанию
+    # ждёт 10 с и убивает; тогда всё, что записано за последние секунды (свежий вход), пропадает.
+    stop_grace_period: 30s
+    shm_size: 2gb # Chromium без достаточного /dev/shm падает на тяжёлых страницах
+    # Потолки: сорвавшийся браузер (утечка, бесконечный цикл на странице) будет убит ядром, а не повесит хост.
+    # shm входит в память контейнера. Подкачка выключена: memswap_limit равен mem_limit.
+    mem_limit: ${NEKO_MEM:-3g}
+    memswap_limit: ${NEKO_MEM:-3g}
+    cpus: ${NEKO_CPUS:-2}
+    pids_limit: 1024
+    environment:
+      TZ: Asia/Almaty
+      NEKO_DESKTOP_SCREEN: ${NEKO_SCREEN:-1280x720@30} # кодирование видео идёт на процессоре: на слабом сервере берите меньше
+      # Neko 3: один пароль у участника, другой у админа (кто какой ввёл, тем и вошёл).
+      NEKO_MEMBER_MULTIUSER_USER_PASSWORD: ${NEKO_PASSWORD:?Задайте NEKO_PASSWORD в docker/.env}
+      NEKO_MEMBER_MULTIUSER_ADMIN_PASSWORD: ${NEKO_ADMIN_PASSWORD:?Задайте NEKO_ADMIN_PASSWORD в docker/.env}
+      # Кука входа по умолчанию «Secure»: по http://100.x.y.z (tailnet) браузер её не примет.
+      # Канал шифрует сам Tailscale, поэтому Secure выключена.
+      NEKO_SESSION_COOKIE_SECURE: "false"
+      # Управление мышью и клавиатурой берётся неявно: навёл на видео и работаешь. Без этого его надо
+      # просить кнопкой, а клавиатура в зеркале молчит (проверено: фокус не уходит в поле ввода).
+      NEKO_SESSION_IMPLICIT_HOSTING: "true"
+      # WebRTC: порты фиксированы (их и публикуем), адрес для клиента задаёт NEKO_WEBRTC_IP.
+      NEKO_WEBRTC_EPR: 59000-59019
+      NEKO_WEBRTC_NAT1TO1: ${NEKO_WEBRTC_IP:-127.0.0.1}
+      BRAVE_EXTRA_FLAGS: ${BRAVE_EXTRA_FLAGS:-}
+    ports:
+      # Только на этом адресе хоста. На сервере без egress поставьте сюда tailnet-адрес хоста.
+      - ${NEKO_BIND_IP:-127.0.0.1}:${NEKO_PORT:-8080}:8080
+      - ${NEKO_BIND_IP:-127.0.0.1}:59000-59019:59000-59019/udp
+    volumes:
+      - brave_profile:/home/neko/.config/brave # профиль: куки, входы, история
+      - ./neko/brave.conf:/etc/neko/supervisord/brave.conf:ro
+      - ./neko/brave-start.sh:/etc/neko/brave-start.sh:ro
+      - ./neko/policies.json:/etc/brave/policies/managed/policies.json:ro
+    healthcheck:
+      # Отвечает и веб-часть Neko, и порт CDP браузера.
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null && curl -fsS http://127.0.0.1:9222/json/version >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  # Автопрогрев: node life.js run. Сеть общая с Neko (и в egress-варианте с Tailscale):
+  # тогда CDP браузера доступен как http://127.0.0.1:9222, а своего выхода наружу у life нет.
+  life:
+    profiles: ["warmup"]
+    build:
+      context: ..
+      dockerfile: docker/life/Dockerfile
+    restart: unless-stopped
+    init: true # без этого Node как PID 1 не реагирует на SIGTERM
+    network_mode: "service:neko"
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 0.5
+    pids_limit: 256
+    depends_on:
+      neko:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Almaty
+      MEATSUIT_CDP: http://127.0.0.1:9222
+    volumes:
+      - ..:/app:ro # код из репозитория; зависимости (patchright) лежат в образе
+      - life_data:/data # состояние, журнал data/life.jsonl, повадки persona.json
+    command: ["node", "life.js", "run", "--config", "${LIFE_CONFIG:-/app/profiles/life.json}", "--data", "/data"]
+
+  # Выход через Tailscale. Только с профилем egress и вместе с docker-compose.egress.yml.
+  tailscale:
+    profiles: ["egress"]
+    image: tailscale/tailscale:${TS_TAG:-stable}
+    restart: unless-stopped
+    hostname: ${TS_HOSTNAME:-meatsuit}
+    # Перед запуском Tailscale ставит аварийный выключатель, затем отдаёт управление containerboot.
+    entrypoint: ["/bin/sh", "/killswitch.sh"]
+    command: ["/usr/local/bin/containerboot"]
+    cap_add: [NET_ADMIN]
+    devices: ["/dev/net/tun:/dev/net/tun"]
+    mem_limit: 256m
+    memswap_limit: 256m
+    pids_limit: 256
+    # DNS браузера идёт обычным запросом через общий маршрут, то есть через туннель.
+    dns: [1.1.1.1, 9.9.9.9]
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_HOSTNAME: ${TS_HOSTNAME:-meatsuit}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "false" # ядерный режим: настоящий интерфейс tailscale0, нужен для правила по владельцу
+      TS_ACCEPT_DNS: "false"
+      TS_EXTRA_ARGS: ${TS_EXTRA_ARGS:-}
+    volumes:
+      - tailscale_state:/var/lib/tailscale
+      - ./egress/killswitch.sh:/killswitch.sh:ro
+    healthcheck:
+      # Вошёл в tailnet И выбранный exit node в сети.
+      test: ["CMD-SHELL", "tailscale status --json | grep -q '\"BackendState\": \"Running\"' && tailscale status --json | awk '/\"ExitNodeStatus\"/{f=1} f&&/\"Online\"/{print;exit}' | grep -q true"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 40s
+
+volumes:
+  brave_profile:
+  life_data:
+  tailscale_state:
