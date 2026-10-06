@@ -41,15 +41,17 @@ What it does not prove: that a real keyboard in a real web client works (it spea
 | Control over Neko's protocol (what the web client sends) | `./verify.sh` | Ctrl+L, Ctrl+A, typing, Enter and wheel worked: article loaded, `scrollY` 30570 in one run |
 | Profile survives a stop and a re-create | Cookie over CDP, `stop`/`start`, `down`/`up` | Kept, including one set a second before the stop |
 | Warm-up container reaches Brave | `docker compose run life node life.js plan`, CDP connection | Works |
+| The mirror on a rented server (an OpenVZ container, 4 old CPU cores, no GPU), opened from a laptop over Tailscale | Mirror only (no `egress`), bound to the server's loopback and reached through the host's Tailscale in userspace mode; headless Chromium logged in and sampled one video pixel every second for 45 s | Healthy; the pixel changed with the server's screen, so the WebRTC video is live over the tailnet with the default UDP ports; the server idled at about 3.6% CPU and 310 MB for this container (one run) |
+| A throwaway container on that server | `/dev/net/tun`, `iptables -m owner`, `-m conntrack`, `ip6tables` | All accepted, so the kill switch rules can be installed there (Tailscale itself was **not** started) |
 
 **About Enter from the web client.** Neko's protocol accepts these keys and Brave handles them, but the author's test client (headless Chromium sending synthetic events) forwarded only letters, not Enter or Ctrl combinations. A real keyboard in a real browser should work, since it is Neko's standard use, but nobody has tried it. The first thing to do: in the mirror, type an address in the address bar and press Enter. If that fails, please open an issue (suspects: keyboard layout, or the client browser).
 
 **Not verified:**
 
 - Enter and shortcuts from a real keyboard in a web client (above).
-- Video and sound over WebRTC at an address other than `127.0.0.1` (for example a tailnet address): this needs `NEKO_WEBRTC_IP` and UDP ports 59000 to 59019.
+- Sound, and video in a real browser or on a phone over a tailnet address (only a headless Chromium on a laptop was tried; it needs `NEKO_WEBRTC_IP` and UDP ports 59000 to 59019).
 - The whole `egress` profile: Tailscale in a container; `docker-compose.egress.yml` (valid as configuration, **never run**); `neko`, `life` and `server` all sharing the `tailscale` container's network (each is pointed at it directly, no chain); the kill switch (does it hurt WebRTC, does the browser stay silent when the tunnel is down); DNS through the tunnel.
-- Speed and load on a weak server. Video is encoded on the CPU, so lower `NEKO_SCREEN` (default `1280x720@30`) and `NEKO_CPUS`.
+- Load while someone actually uses the mirror on a weak server (only the idle load above was measured). Video is encoded on the CPU, so lower `NEKO_SCREEN` (default `1280x720@30`) and `NEKO_CPUS`.
 - Signing in and registering on real sites from the mirror. Sites may ask for SMS or a captcha.
 - Brave on real sites and on bot-detector sites, and a full warm-up session in this Brave.
 
@@ -88,7 +90,7 @@ Settings in `.env` (all optional except the passwords):
 | `NEKO_BIND_IP`, `NEKO_PORT` | `127.0.0.1`, `8080` | Host address and port the mirror binds to (the WebRTC UDP ports follow the address) |
 | `NEKO_WEBRTC_IP` | `127.0.0.1` | The address clients use to reach the video: the same one you open the mirror at |
 | `NEKO_SCREEN` | `1280x720@30` | Resolution and frame rate; the browser window takes this size |
-| `NEKO_MEM`, `NEKO_CPUS` | `3g`, `2` | Ceilings for the Neko container |
+| `NEKO_MEM`, `NEKO_CPUS` | `3g`, `2` | Ceilings for the Neko container. `NEKO_CPUS=0` removes the CPU ceiling: on some hosts (an OpenVZ container, for example) the CPU quota is refused and the container does not start (`cpu.cfs_quota_us: invalid argument`). `LIFE_CPUS` and `SERVER_CPUS` (default `0.5`) do the same for warm-up and the HTTP service |
 | `BRAVE_EXTRA_FLAGS` | empty | Extra Brave flags (no spaces inside values) |
 | `LIFE_CONFIG` | `/app/profiles/life.json` | Warm-up config path inside its container |
 | `MEATSUIT_API_PORT` | `8787` | Host port of the HTTP service (same address as `NEKO_BIND_IP`) |

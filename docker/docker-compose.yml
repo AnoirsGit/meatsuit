@@ -68,7 +68,7 @@ services:
     network_mode: "service:neko"
     mem_limit: 512m
     memswap_limit: 512m
-    cpus: 0.5
+    cpus: ${LIFE_CPUS:-0.5} # 0 — без ограничения (на некоторых хостингах квота процессора не принимается)
     pids_limit: 256
     depends_on:
       neko:
@@ -96,7 +96,7 @@ services:
     network_mode: "service:neko"
     mem_limit: 256m
     memswap_limit: 256m
-    cpus: 0.5
+    cpus: ${SERVER_CPUS:-0.5}
     pids_limit: 256
     depends_on:
       neko:

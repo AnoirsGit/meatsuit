@@ -131,7 +131,7 @@ Exact fields and codes are in the [HTTP API](http-api.md).
 | Built, not verified | Driving Brave | Attaching Patchright to Brave to read tabs and cookies works ([`docker/verify.sh`](../docker/verify.sh)). Windows, clicks and typing were run on Chromium only |
 | Built, not verified | Patchright patches under `connectOverCDP`; detector sites; real sites | Nothing recorded |
 | Built, not verified | Exit-node stack (Tailscale container, kill switch, [compose file](../docker/docker-compose.egress.yml)) | The compose file validates. It was never run end to end. WebRTC and DNS through the tunnel are untested |
-| Built, not verified | Mirror from a real keyboard, and over a tailnet address | Only synthetic input was tried |
+| Built, partly verified | Mirror from a real keyboard, and over a tailnet address | Over a tailnet to a rented server the video is live (checked from a headless Chromium); only synthetic input was tried, no real keyboard, phone or sound |
 | Built, not verified | Warm-up on a multi-day schedule | Logic is tested on a virtual clock. No long live run. Not tried on Brave or real sites |
 | Built, not verified | Telegram messages | Tests use a local fake server. No live bot run is recorded |
 | Built, not verified | Pacing numbers | Untested starting values |
