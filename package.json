@@ -1,0 +1,28 @@
+{
+  "name": "meatsuit",
+  "version": "1.0.0",
+  "description": "Один прогретый браузер на сервере: я в нём живу (зеркало через Neko), мои боты из других проектов в нём работают человеческими руками.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "test"
+  },
+  "scripts": {
+    "test": "node test/human.test.js && node test/eyes.test.js && node test/hands.test.js && node test/guard.test.js && node test/telegram.test.js && node test/telegram-e2e.test.js && node test/task.test.js && node test/review.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AnoirsGit/meatsuit.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/AnoirsGit/meatsuit/issues"
+  },
+  "homepage": "https://github.com/AnoirsGit/meatsuit#readme",
+  "dependencies": {
+    "playwright-core": "^1.63.0"
+  }
+}

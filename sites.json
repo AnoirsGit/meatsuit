@@ -1,0 +1,12 @@
+{
+  "tinder.com": {
+    "perDay": 20,
+    "perHour": 5,
+    "hours": "10-23",
+    "maxCommands": 80,
+    "maxMinutes": 15
+  },
+  "linkedin.com": {
+    "perDay": 0
+  }
+}
