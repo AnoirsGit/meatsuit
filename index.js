@@ -23,6 +23,7 @@ const { openWindow } = require('./window.js');
 const { supervise, BudgetExceeded } = require('./supervise.js');
 const { signature, normalizeName, urlPattern } = require('./capture.js');
 const { ruleFor, reserve, charge, peek, lock, LimitReached } = require('./limits.js');
+const { loadPersona } = require('./human/persona-file.js');
 
 /**
  * Лимиты площадок принадлежат вызывающему проекту: путь к его sites.json (читается на каждую задачу,
@@ -54,6 +55,7 @@ async function connect({
   const loadSites = sitesSource({ sitesFile, sites }); // до подключения: без лимитов браузер не трогаем
   const browser = await chromium.connectOverCDP(cdpUrl);
   fs.mkdirSync(dir, { recursive: true });
+  loadPersona(dir); // повадки человека (темп руки и печати, опечатки) — в <dir>/persona.json: тот же человек после перезапуска
 
   // Пока есть подключение, Playwright сам отклоняет все диалоги во ВСЕХ вкладках, если на
   // контексте нет слушателя. Слушатель есть, и он трогает только окна бота: мои оставляет мне.
