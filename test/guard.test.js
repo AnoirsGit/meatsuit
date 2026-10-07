@@ -7,7 +7,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { check, telegramNotifier } = require('../guard.js');
+const { check } = require('../guard.js');
+const { telegramNotifier } = require('../index.js'); // экспорт для вызывающих сохранён (решение 3)
 const limits = require('../limits.js');
 
 const snap = (o) => ({ url: 'https://tinder.com/app/recs', title: 'Tinder', text: '', elements: [], dialogs: [], ...o });

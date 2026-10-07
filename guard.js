@@ -77,6 +77,4 @@ function check(s) {
   return null;
 }
 
-const { telegramNotifier } = require('./telegram.js'); // остаётся здесь для совместимости импорта
-
-module.exports = { check, NeedsHuman, telegramNotifier };
+module.exports = { check, NeedsHuman };

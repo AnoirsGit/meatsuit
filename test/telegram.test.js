@@ -128,5 +128,32 @@ const sleep = async (ms) => { sleeps.push(ms); };
   ]);
   await assert.rejects(findChats({ token: TOKEN, fetchImpl: fakeFetch({ ok: true, status: 200, json: async () => ({ ok: false, error_code: 409, description: `Conflict: webhook is active ${TOKEN}` }) }) }), (e) => !e.message.includes(TOKEN) && /webhook/.test(e.message));
 
+  // CLI для человека, который настраивает уведомления (tools/telegram-chats.js): токен из его окружения.
+  const http = require('node:http');
+  const cli = require('../tools/telegram-chats.js');
+  const hits = [];
+  const srv = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      hits.push({ url: req.url, body: JSON.parse(body || '{}') });
+      const result = req.url.endsWith('/getUpdates')
+        ? [{ message: { chat: { id: -100777, type: 'supergroup', title: 'Группа' }, is_topic_message: true, message_thread_id: 5 } }]
+        : { message_id: 1 };
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ ok: true, result }));
+    });
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const env = { TELEGRAM_BOT_TOKEN: TOKEN, TELEGRAM_CHAT_ID: '-100777', TELEGRAM_API_BASE: `http://127.0.0.1:${srv.address().port}` };
+  const out = [];
+  await cli.main([], env, (l) => out.push(l));
+  assert.deepEqual(out, ['-100777\tsupergroup\tГруппа\tтемы: 5']);
+  await cli.main(['send', 'проверка'], env, (l) => out.push(l));
+  assert.equal(hits.at(-1).url, `/bot${TOKEN}/sendMessage`);
+  assert.equal(hits.at(-1).body.text, 'проверка');
+  assert.equal(hits.at(-1).body.chat_id, '-100777');
+  srv.close();
+
   console.log('telegram.test: ok');
 })().catch((e) => { console.error(e); process.exit(1); });

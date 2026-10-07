@@ -5,8 +5,9 @@
  *   await tg.send('Нужен человек: капча на tinder.com');
  *   await tg.send('<b>отчёт</b>', { parseMode: 'HTML', silent: true });
  *
+ * Помощник для вызывающего проекта: токен и группу передаёт он, окружение здесь не читается.
  * Как узнать chatId группы: добавить бота в группу, написать там любое сообщение, затем
- *   TELEGRAM_BOT_TOKEN=… node telegram.js chats
+ *   TELEGRAM_BOT_TOKEN=… node tools/telegram-chats.js
  * Группы идут с отрицательным id (супергруппы -100…).
  *
  * Токен в тексты ошибок и логов не попадает. Сетевых зависимостей нет: только fetch.
@@ -48,7 +49,7 @@ function createTelegram({
   warn = console.warn,
 } = {}) {
   if (!token) throw new Error('telegram: нужен token');
-  if (!chatId) throw new Error('telegram: нужен chatId группы (см. «node telegram.js chats»)');
+  if (!chatId) throw new Error('telegram: нужен chatId группы (см. «node tools/telegram-chats.js»)');
   let chat = chatId;
   const scrub = (s) => String(s).split(token).join('***');
 
@@ -138,21 +139,3 @@ async function findChats({ token, fetchImpl = fetch, apiBase = API } = {}) {
 }
 
 module.exports = { createTelegram, telegramNotifier, findChats, chunk, escapeHtml, TelegramError };
-
-if (require.main === module) {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  const [cmd, ...rest] = process.argv.slice(2);
-  (async () => {
-    if (cmd === 'chats') {
-      const chats = await findChats({ token });
-      if (!chats.length) return console.log('Бот пока ничего не видел. Добавьте его в группу и напишите там сообщение, потом повторите.');
-      for (const c of chats) console.log(`${c.id}\t${c.type}\t${c.title}${c.threads.length ? `\tтемы: ${c.threads.join(', ')}` : ''}`);
-    } else if (cmd === 'send') {
-      const tg = createTelegram({ token, chatId: process.env.TELEGRAM_CHAT_ID, threadId: process.env.TELEGRAM_THREAD_ID, ...(process.env.TELEGRAM_API_BASE && { apiBase: process.env.TELEGRAM_API_BASE }) });
-      await tg.send(rest.join(' ') || 'meatsuit: проверка связи');
-      console.log('отправлено');
-    } else {
-      console.log('Использование:\n  TELEGRAM_BOT_TOKEN=… node telegram.js chats\n  TELEGRAM_BOT_TOKEN=… TELEGRAM_CHAT_ID=… [TELEGRAM_THREAD_ID=…] node telegram.js send "текст"');
-    }
-  })().catch((e) => { console.error(e.message); process.exit(1); });
-}

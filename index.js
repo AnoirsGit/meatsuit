@@ -144,4 +144,6 @@ async function connect({
   return { task, close: () => browser.close() };
 }
 
+// telegramNotifier и остальное из telegram.js — помощник для вызывающего (токен и группу передаёт он);
+// оставлены здесь для совместимости импорта, новым проектам проще require('meatsuit/telegram.js').
 module.exports = { connect, hands, replay, signature, normalizeName, urlPattern, NeedsHuman, LimitReached, BudgetExceeded, BadCommand, StaleElement, telegramNotifier, createTelegram, findChats, TelegramError };
