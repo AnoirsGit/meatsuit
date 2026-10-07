@@ -29,7 +29,8 @@ const {
   NeedsHuman, LimitReached, BudgetExceeded, BadCommand, StaleElement, // ошибки
   telegramNotifier, createTelegram, findChats, TelegramError,       // помощник Telegram
 } = require('meatsuit');
-const { validate } = require('meatsuit/hands.js');   // проверка команды без браузера
+const { validate } = require('meatsuit/hands.js');   // проверка команды без браузера:
+// validate(command, allowedHosts = [], { uploadDirs = [] } = {}) — бросает BadCommand
 ```
 
 Список экспортов закреплён тестом (`test/api.test.js`); меняется только вместе с вызывающими.
@@ -134,7 +135,10 @@ frames, hiddenFrames, screenshot? }`. Номера `id` действуют то�
 | `back` | — | назад по истории |
 | `goto` | `url` | только `https:` и только хост площадки или его поддомен |
 
-Возвращает diff снимка после команды.
+Возвращает diff снимка после команды. `dryRun: true`: `see` работает, `act` возвращает `{ dryRun: true,
+changed: false }` и только пишет в журнал (`upload` перед этим проверяет файл); исключение — `goto` выполняется.
+`dryRunNavigation: true` дополнительно выполняет `click` по элементу с ролью `tab` (переключение вида), если над
+ним нет ссылки, кнопки, поля или метки.
 
 ### fill в textarea (сопроводительное письмо)
 
@@ -203,11 +207,6 @@ frames, hiddenFrames, screenshot? }`. Номера `id` действуют то�
 человек. Испорченный файл заменяется годными повадками. Повадки общие на процесс: два `connect` с разными `dir`
 в одном процессе — последний задаёт человека. Файл вне репозитория (в `dir`), в git не попадает.
 
-`dryRun: true`: `see` работает, `act` возвращает `{ dryRun: true,
-changed: false }` и только пишет в журнал; исключение — `goto` выполняется. `dryRunNavigation: true`
-дополнительно выполняет `click` по элементу с ролью `tab` (переключение вида), если над ним нет ссылки,
-кнопки, поля или метки.
-
 ## Журнал, запись, архив
 
 - Журнал `<dir>/journal.jsonl`, строка на команду: `ts`, `dryRun`, `cmd`, `url`, `result: 'ok' | 'dry-run'`
@@ -245,6 +244,8 @@ changed: false }` и только пишет в журнал; исключени
 - Использовать только последний `gen`; после `act` брать `gen` и `elements` из ответа.
 - Проверять ответ модели до `act` (`validate` из `meatsuit/hands.js`).
 - Не класть в журнал и в модель лишние данные чужих профилей.
+- В `uploadDirs` класть только каталог с тем, что можно отправлять (резюме, письма): `upload` берёт оттуда любой
+  pdf/doc/docx по выбору модели.
 - Первый запуск на живой площадке — только `dryRun`.
 
 ## Ограничения
