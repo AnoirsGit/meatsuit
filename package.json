@@ -8,7 +8,7 @@
     "test": "test"
   },
   "scripts": {
-    "test": "node test/api.test.js && node test/human.test.js && node test/eyes.test.js && node test/hands.test.js && node test/guard.test.js && node test/telegram.test.js && node test/telegram-e2e.test.js && node test/task.test.js && node test/review.test.js && node test/capture.test.js && node test/save-tab.test.js && node test/single-tab.test.js",
+    "test": "node test/api.test.js && node test/human.test.js && node test/eyes.test.js && node test/hands.test.js && node test/guard.test.js && node test/telegram.test.js && node test/telegram-e2e.test.js && node test/task.test.js && node test/review.test.js && node test/capture.test.js && node test/save-tab.test.js && node test/single-tab.test.js && node test/forms.test.js",
     "test:extras": "npm --prefix extras test"
   },
   "repository": {
