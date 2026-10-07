@@ -1,5 +1,5 @@
 /**
- * Лимиты площадок: perDay, perHour и часы по Алматы, единица — cost, счётчики
+ * Лимиты площадок: perDay, perHour и часы по поясу (по умолчанию UTC+5), единица — cost, счётчики
  * переживают перезапуск, ответ несёт retry_at. Часы и файлы подставляются.
  *
  *   node --test
@@ -11,7 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { createLimits, normalizeSites } = require('../limits.js');
 
-/** Местное время Алматы (UTC+5) → миллисекунды UTC. */
+/** Местное время пояса по умолчанию (UTC+5) → миллисекунды UTC. */
 const at = (h, m = 0, day = 5) => Date.UTC(2026, 9, day, h - 5, m);
 
 const SITES = {
@@ -101,7 +101,7 @@ test('perHour скользящий: когда освободится, гово�
   assert.equal(limits.take('hh.kz', 1).ok, true, 'первое действие вышло из часа');
 });
 
-test('perDay: сутки по Алматы, retry_at — когда откроется окно следующих суток', () => {
+test('perDay: сутки по UTC+5, retry_at — когда откроется окно следующих суток', () => {
   const { limits, clock } = setup(at(10, 0));
   for (const [h, m] of [[10, 0], [10, 5], [11, 10], [11, 15], [12, 30]]) { clock.t = at(h, m); assert.equal(limits.take('hh.kz', 1).ok, true, `${h}:${m}`); }
   clock.t = at(14, 0);
@@ -109,12 +109,12 @@ test('perDay: сутки по Алматы, retry_at — когда открое
   assert.deepEqual([r.ok, r.reason, r.retry_at], [false, 'day', at(10, 0, 6)]);
 });
 
-test('сутки сбрасываются в полночь по Алматы, а не по UTC', () => {
+test('сутки сбрасываются в полночь по UTC+5, а не по UTC', () => {
   const { limits, clock } = setup(at(20, 0), { 'late.test': { perDay: 1 } });
   assert.equal(limits.take('late.test', 1).ok, true);
-  clock.t = at(23, 30); // 18:30 UTC: дата по UTC та же, по Алматы ещё те же сутки
+  clock.t = at(23, 30); // 18:30 UTC: дата по UTC та же, по UTC+5 ещё те же сутки
   assert.equal(limits.take('late.test', 1).ok, false);
-  clock.t = at(0, 30, 6); // 19:30 UTC: по UTC всё ещё 5 октября, по Алматы уже 6-е
+  clock.t = at(0, 30, 6); // 19:30 UTC: по UTC всё ещё 5 октября, по UTC+5 уже 6-е
   assert.equal(limits.take('late.test', 1).ok, true);
 });
 
@@ -249,7 +249,7 @@ test('snapshot: вне часов площадка не открыта', () => {
 // ---------------------------------------------------------------- поведение как у человека: рост, выходные, разброс, пауза
 
 const DAY = 86400000;
-/** Эффективный лимит и выходной на сутки `day` октября, в полдень по Алматы. */
+/** Эффективный лимит и выходной на сутки `day` октября, в полдень по UTC+5. */
 const st = (limits, name, day, h = 12) => limits.status(name, at(h, 0, day));
 /** Понедельник 5 октября 2026: с него считаем недели в тестах. */
 const MON = 5;
@@ -294,13 +294,13 @@ test('без новых полей всё как раньше: эффектив�
 
 const RAMP = { 'ramp.test': { perDay: 20, ramp: { days: 10, startShare: 0.5 } } };
 
-test('ramp: лимит растёт по суткам Алматы от первого успешного begin', () => {
+test('ramp: лимит растёт по суткам UTC+5 от первого успешного begin', () => {
   const { limits, clock } = setup(at(23, 50), RAMP);
   assert.equal(limits.status('ramp.test', at(12, 0, 9)).effective, 10, 'пока begin не было, идёт день 0');
   assert.equal(limits.take('ramp.test', 1).ok, true);
   const eff = (day, h = 12) => limits.status('ramp.test', at(h, 0, day)).effective;
   assert.equal(eff(5, 23), 10, 'день 0: половина');
-  assert.equal(eff(6, 0), 11, 'после полуночи по Алматы уже день 1, хотя прошло десять минут');
+  assert.equal(eff(6, 0), 11, 'после полуночи по UTC+5 уже день 1, хотя прошло десять минут');
   assert.equal(eff(10), 15, 'день 5: 20 × (0,5 + 0,5 × 5/10)');
   assert.equal(eff(15), 20, 'день 10: полный');
   assert.equal(eff(60), 20, 'дальше не растёт');
@@ -450,7 +450,7 @@ test('cost больше сегодняшнего лимита, но влезае
 
 const FREEZE = { 'hh.kz': { perDay: 5, perHour: 2, hours: '10-21' }, 'f.test': { perDay: 5, challengePauseDays: 2 }, 'g.test': { perDay: 5 } };
 
-test('challenge: площадка замирает до начала суток по Алматы + N суток (по умолчанию 3)', () => {
+test('challenge: площадка замирает до начала суток по UTC+5 + N суток (по умолчанию 3)', () => {
   const { limits, clock } = setup(at(14, 0), FREEZE);
   const c = limits.challenge('g.test', at(14, 0));
   assert.deepEqual([c.ok, c.site, c.until], [true, 'g.test', at(0, 0, 8)]);

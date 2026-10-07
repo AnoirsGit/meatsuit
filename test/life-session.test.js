@@ -219,7 +219,7 @@ test('поиск: поля нет — сайт пропущен с понятн�
 test('поиск: кириллический запрос идёт настоящими клавишами раскладки, поле получает его целиком', async () => {
   const { page, env, log } = fakePage();
   const probe = mkProbe({ searchBox: async () => SEARCH_BOX, boxOf: async () => ({ x: 400, y: 40, width: 300, height: 32 }) });
-  await runSession(page, [searchStep('https://wiki.test/', 'Алматы')], { env, probe, log: () => {}, wander: 0 });
+  await runSession(page, [searchStep('https://wiki.test/', 'Шахматы')], { env, probe, log: () => {}, wander: 0 });
   const cdp = log.filter((e) => e.op === 'cdp' && e.params.type === 'keyDown');
   const typed = cdp.reduce((t, e) => (e.params.key === 'Backspace' ? t.slice(0, -1) : e.params.text ? t + e.params.text : t), '');
   assert.ok(cdp.length >= 6, `клавиш кириллицы ${cdp.length}`);
