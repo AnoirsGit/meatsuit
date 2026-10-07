@@ -13,6 +13,7 @@ const path = require('node:path');
 const human = require('./human.js');
 const eyes = require('./eyes.js');
 const dom = require('./dom.js');
+const { createCapture } = require('./capture.js');
 
 class BadCommand extends Error {}
 class StaleElement extends Error {}
@@ -20,6 +21,15 @@ class StaleElement extends Error {}
 const MAX_TEXT = 1000;
 const MAX_WAIT = 15000;
 const KEYS = new Set(['Enter', 'Escape', 'Tab', 'Backspace', 'ArrowDown', 'ArrowUp', 'PageDown', 'PageUp']);
+
+// Копия SELECTOR из collect() в eyes.js: он локален в функции, которая выполняется в странице, и наружу не отдаётся.
+// Меняется там — поменять и здесь.
+const INTERACTIVE = [
+  'a[href]', 'button', 'input:not([type=hidden])', 'textarea', 'select', 'summary',
+  '[role=button]', '[role=link]', '[role=tab]', '[role=checkbox]', '[role=radio]',
+  '[role=switch]', '[role=menuitem]', '[role=option]', '[role=textbox]', '[contenteditable=""]',
+  '[contenteditable=true]',
+].join(',');
 
 const isId = (v) => Number.isInteger(v) && v > 0;
 const isGen = (v) => Number.isInteger(v) && v > 0;
@@ -54,7 +64,8 @@ function validate(c, allowedHosts = []) {
 }
 
 function hands(page, opts = {}) {
-  const { dryRun = false, logFile, recordDir, allowedHosts = [] } = opts;
+  const { dryRun = false, logFile, recordDir, allowedHosts = [], capture, dryRunNavigation = false } = opts;
+  const archive = capture && createCapture(capture); // { dir, htmlPerSignature, maxMB }
   let last = null;
   let world = null; // изолированный мир, где лежат элементы последнего снимка
   let seq = 0;
@@ -72,6 +83,13 @@ function hands(page, opts = {}) {
     fs.writeFileSync(path.join(recordDir, name), JSON.stringify({ cmd, snapshot }));
   };
 
+  // Архив не должен ронять задачу: сбой записи только в stderr.
+  const archived = async (snap, cmd) => {
+    if (!archive) return;
+    try { await archive.write(snap, cmd, () => page.content()); }
+    catch (e) { console.error('meatsuit: архив не записан:', e.message); }
+  };
+
   // Клик с переходом рвёт контекст страницы посреди снимка: ждём загрузку и повторяем.
   const look = async (o) => {
     for (let attempt = 0; ; attempt++) {
@@ -85,6 +103,24 @@ function hands(page, opts = {}) {
         await page.waitForLoadState('domcontentloaded').catch(() => {});
       }
     }
+  };
+
+  // SPA рисует после domcontentloaded: снимаем, пока набор элементов и текст не замрут на quietMs
+  // и элементов не станет не меньше minElements. По таймауту отдаём последний снимок, не бросаем.
+  const settled = async ({ minElements = 1, quietMs = 500, timeoutMs = 10000 }, rest) => {
+    timeoutMs = Math.min(Number.isFinite(timeoutMs) ? timeoutMs : 10000, MAX_WAIT); // supervise проверяет срок только перед вызовом
+    const key = (s) => JSON.stringify([s.url, s.text, s.elements.map((e) => [e.role, e.name])]);
+    const start = Date.now();
+    let snap = await look();
+    let prev = key(snap);
+    let since = Date.now();
+    while (Date.now() - start < timeoutMs && !(snap.elements.length >= minElements && Date.now() - since >= quietMs)) {
+      await new Promise((r) => setTimeout(r, 100));
+      snap = await look();
+      const k = key(snap);
+      if (k !== prev) { prev = k; since = Date.now(); }
+    }
+    return rest.screenshot ? look(rest) : snap; // снимок с картинкой — один, в конце
   };
 
   const serial = (fn) => (...args) => {
@@ -107,9 +143,43 @@ function hands(page, opts = {}) {
     return el;
   };
 
+  // Под точкой (x, y) целевой элемент или его потомок, и между ними нет другого интерактивного элемента?
+  // Нет — оверлей/тост/сдвиг вёрстки или вложенная кнопка («× закрыть чат»): клика не будет.
+  const hitsTarget = async (id, { x, y }) => {
+    let ok;
+    try {
+      ok = await dom.run(world, ([i, px, py, sel]) => {
+        const el = globalThis.__ms.els[i];
+        if (!el) return false;
+        let hit = document.elementFromPoint(px, py);
+        // elementFromPoint отдаёт хост: спускаемся внутрь открытых shadow-корней (как covered в eyes.js).
+        for (let s = hit && hit.shadowRoot; s; s = hit.shadowRoot) {
+          const inner = s.elementFromPoint(px, py);
+          if (!inner || inner === hit) break;
+          hit = inner;
+        }
+        // Вверх по составному дереву (слот, родитель, хост) до el.
+        let n = hit;
+        for (; n && n !== el; n = n.assignedSlot || n.parentNode || n.host) {
+          if (n.nodeType === 1 && n.matches(sel)) return false;
+        }
+        return n === el;
+      }, [id, x, y, INTERACTIVE]);
+    } catch (err) {
+      if (err instanceof dom.StaleWorld) throw new StaleElement('страница сменилась перед кликом');
+      throw err;
+    }
+    if (!ok) throw new StaleElement(`под курсором уже не элемент ${id}: клик отменён`);
+  };
+
   const run = async (c) => {
     switch (c.cmd) {
-      case 'click': return human.click(page, await target(c.id, c.gen));
+      case 'click': {
+        const el = await target(c.id, c.gen);
+        // dryRun: клик по tab — единственная настоящая запись; сверяем, что под курсором всё ещё он.
+        const verifyAt = dryRun ? (pt) => hitsTarget(c.id, pt) : undefined;
+        return human.click(page, el, { verifyAt });
+      }
       case 'fill': {
         const loc = await target(c.id, c.gen);
         await human.click(page, loc);
@@ -131,9 +201,10 @@ function hands(page, opts = {}) {
 
   /** Глаза. Запоминает снимок: по его номерам работают руки. */
   const see = serial(async (o) => {
-    const { since, ...rest } = o || {};
-    const snap = await look(rest);
+    const { since, settle, ...rest } = o || {};
+    const snap = settle ? await settled(settle, rest) : await look(rest);
     if (seq === 0) record(null, snap); // запись начинается с первого снимка
+    await archived(snap, null);
     return since ? eyes.diff(since, snap) : snap;
   });
 
@@ -141,7 +212,10 @@ function hands(page, opts = {}) {
   const act = serial(async (c) => {
     validate(c, allowedHosts);
     const url = page.url();
-    if (dryRun && c.cmd !== 'goto') { // навигация только читает страницу: без неё dryRun остаётся на about:blank и видеть нечего
+    // dryRunNavigation: клик по role=tab только переключает вид внутри страницы.
+    const tabClick = dryRunNavigation && c.cmd === 'click' && last && c.gen === last.gen
+      && last.elements.some((e) => e.id === c.id && e.role === 'tab');
+    if (dryRun && c.cmd !== 'goto' && !tabClick) { // навигация только читает страницу: без неё dryRun остаётся на about:blank и видеть нечего
       log({ cmd: c, url, result: 'dry-run' });
       return { dryRun: true, changed: false };
     }
@@ -156,6 +230,7 @@ function hands(page, opts = {}) {
       await page.waitForLoadState('domcontentloaded').catch(() => {});
       const snap = await look();
       record(c, snap);
+      await archived(snap, c);
       log({ cmd: c, url, result: 'ok', urlAfter: snap.url });
       return eyes.diff(before, snap);
     } catch (e) {

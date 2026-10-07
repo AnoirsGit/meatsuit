@@ -61,6 +61,49 @@ assert.equal(check(snap({ text: 'captcha '.repeat(200) })), null);
   assert.throws(() => limits.reserve('s', { perDay: 2 }, f, now), /на сегодня/);
   assert.equal(JSON.parse(fs.readFileSync(f, 'utf8')).s.length, 2, 'отказ не должен писаться');
 
+  // readOnly: тратит perHour, а не perDay; charge делает слот полным
+  const fr = path.join(dir, 'ro.json');
+  const ro = { perDay: 1, perHour: 3 };
+  limits.reserve('r', ro, fr, now, { readOnly: true });
+  limits.reserve('r', ro, fr, now, { readOnly: true }); // perDay: 1, а чтений уже два
+  limits.reserve('r', ro, fr, now); // полный слот дня всё ещё свободен... но час уже занят чтениями
+  assert.throws(() => limits.reserve('r', ro, fr, now, { readOnly: true }), /на час/);
+  assert.throws(() => limits.check('r', { perDay: 0 }, [], now, { readOnly: true }), /perDay 0/);
+  assert.throws(() => limits.check('r', rule, [], at(9), { readOnly: true }), /вне часов/);
+  const slot = at(12);
+  const fc = path.join(dir, 'ch.json');
+  limits.reserve('c', { perDay: 1 }, fc, slot, { readOnly: true });
+  limits.reserve('c', { perDay: 1 }, fc, slot, { readOnly: true }); // дневной остаток цел
+  limits.charge('c', { perDay: 1 }, fc, slot);
+  assert.throws(() => limits.reserve('c', { perDay: 1 }, fc, slot), /на сегодня/);
+  assert.throws(() => limits.charge('c', { perDay: 1 }, fc, slot), /на сегодня/); // день исчерпан: запись read-only задаче не проходит
+  limits.reserve('c', { perDay: 1 }, fc, slot, { readOnly: true }); // читать после записи можно
+  assert.equal(JSON.parse(fs.readFileSync(fc, 'utf8')).c.length, 1);
+
+  // supervise: запись — fill, type, Enter, клик не по вкладке; вкладка и чтение — нет
+  const { supervise } = require('../supervise.js');
+  const els = { gen: 1, url: 'about:blank', title: '', text: '', elements: [{ id: 1, role: 'tab', name: 'a' }, { id: 2, role: 'button', name: 'b' }] };
+  const fake = { see: async () => els, act: async () => ({ ...els, dryRun: false }) };
+  const writes = async (cmds) => {
+    let n = 0;
+    const { api } = supervise(fake, { name: 't', site: 's', notify() {}, maxCommands: 99, maxMinutes: 1, onWrite: () => n++ });
+    await api.see();
+    for (const c of cmds) await api.act(c);
+    return n;
+  };
+  assert.equal(await writes([{ cmd: 'click', id: 1, gen: 1 }, { cmd: 'press', key: 'Escape' }, { cmd: 'scroll' }, { cmd: 'goto', url: 'https://s/' }]), 0);
+  assert.equal(await writes([{ cmd: 'click', id: 2, gen: 1 }, { cmd: 'fill', id: 2, gen: 1, text: 'x' }]), 1, 'слот засчитывается один раз');
+  assert.equal(await writes([{ cmd: 'press', key: 'Enter' }]), 1);
+  assert.equal(await writes([{ cmd: 'type', text: 'x' }]), 1);
+  { // onWrite бросил LimitReached (день исчерпан) — команда до рук не доходит
+    let acted = 0;
+    const h = { see: async () => els, act: async () => { acted++; return { ...els, dryRun: false }; } };
+    const { api } = supervise(h, { name: 't', site: 's', notify() {}, maxCommands: 99, maxMinutes: 1, onWrite: () => { throw new limits.LimitReached('день'); } });
+    await api.see();
+    await assert.rejects(() => api.act({ cmd: 'click', id: 2, gen: 1 }), /день/);
+    assert.equal(acted, 0, 'запись не должна выполняться');
+  }
+
   // очередь: второй ждёт первого; замок мёртвого процесса забирается
   const lf = path.join(dir, 'q.lock');
   const order = [];
@@ -76,6 +119,50 @@ assert.equal(check(snap({ text: 'captcha '.repeat(200) })), null);
   fs.utimesSync(lf, old, old);
   (await limits.lock(lf, { pollMs: 20, timeoutMs: 1000, staleMs: 30000 }))();
   await assert.rejects(async () => { await limits.lock(lf, { pollMs: 20 }); await limits.lock(lf, { pollMs: 20, timeoutMs: 100 }); }, /очереди/);
+
+  // shadow DOM: признаки капчи и входа внутри open-корня доходят до guard через снимок eyes
+  const { chromium } = require('playwright-core');
+  const { see } = require('../eyes.js');
+  const browser = await chromium.launch();
+  try {
+    const shadowCase = async (inner, light = '') => {
+      const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
+      await page.setContent(`<body>${light}<div id="h"></div></body>`);
+      await page.evaluate((html) => { document.getElementById('h').attachShadow({ mode: 'open' }).innerHTML = html; }, inner);
+      const r = check(await see(page));
+      await page.close();
+      return r;
+    };
+    assert.equal(await shadowCase('<p>Подтвердите, что вы не робот</p>'), 'капча');
+    assert.equal(await shadowCase('<button aria-label="I\'m not a robot">Go</button>'), 'капча');
+    assert.equal(await shadowCase('<input type="password" aria-label="x">'), 'страница входа');
+    assert.equal(await shadowCase('<p>Привет, Аня</p>'), null);
+    // в text корней — только отрисованное: CSS не раздувает заглушку сверх лимита, скрытый шаблон не даёт ложный стоп
+    const css = '<style>' + '.bar{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;}'.repeat(10) + '</style><div>We use cookies</div>';
+    assert.match(await shadowCase(css, '<p>Too many requests. Try again later.</p>'), /подозрительная/);
+    assert.equal(await shadowCase('<div style="display:none">Verify you are human (captcha)</div><p>Привет, Аня</p>'), null);
+    assert.equal(await shadowCase('<slot>Подтвердите, что вы не робот</slot>'), 'капча', 'отрисованный display:contents (<slot>) не теряется');
+  } finally { await browser.close(); }
+
+  // гонка ждущих за брошенный замок: медленный процесс проверил возраст, быстрый забрал и взял замок,
+  // медленный не должен унести свежий замок и войти вместе с ним
+  {
+    const { spawn } = require('node:child_process');
+    const rf = path.join(dir, 'race.lock');
+    fs.writeFileSync(rf, '1');
+    fs.utimesSync(rf, old, old);
+    const child = `
+      const fs = require('fs'); const [role, f, lim] = process.argv.slice(1);
+      if (role === 'slow') { const o = fs.statSync; fs.statSync = function (p, ...a) { const r = o.call(this, p, ...a); if (String(p) === f) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400); return r; }; }
+      require(lim).lock(f, { pollMs: 20 }).then(async (rel) => {
+        try { fs.writeFileSync(f + '.in', 'x', { flag: 'wx' }); } catch { process.exit(3); }
+        await new Promise((r) => setTimeout(r, 800)); fs.unlinkSync(f + '.in'); rel();
+      });`;
+    const run = (role) => new Promise((res) => spawn(process.execPath, ['-e', child, role, rf, path.resolve(__dirname, '../limits.js')]).on('exit', res));
+    const slow = run('slow');
+    await new Promise((r) => setTimeout(r, 100));
+    assert.deepEqual(await Promise.all([slow, run('fast')]), [0, 0], 'двое держали замок одновременно');
+  }
 
   console.log('guard.test: ok');
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -20,7 +20,16 @@ const onSite = (url, site) => {
   try { const host = new URL(url).hostname; return host === site || host.endsWith('.' + site); } catch { return false; }
 };
 
-function supervise(h, { name, site, notify, maxCommands, maxMinutes }) {
+/** Команда записи: меняет что-то на площадке. Клик не по заведомой вкладке считается записью. */
+const isWrite = (c, els) => {
+  if (c.cmd === 'fill' || c.cmd === 'type') return true;
+  if (c.cmd === 'press') return c.key === 'Enter';
+  if (c.cmd === 'click') return !(els && els.gen === c.gen && els.elements.some((e) => e.id === c.id && e.role === 'tab'));
+  return false;
+};
+
+function supervise(h, { name, site, notify, maxCommands, maxMinutes, onWrite }) {
+  let els = null; // последний виденный список элементов: по нему отличаем клик по вкладке
   const state = { stopped: null, finished: false, commands: 0, finish() { state.finished = true; } };
   const deadline = Date.now() + maxMinutes * 60e3;
 
@@ -41,11 +50,13 @@ function supervise(h, { name, site, notify, maxCommands, maxMinutes }) {
   };
 
   const api = {
-    async see(o) { ensureOpen(); const s = await h.see(o); await stopIfNeeded(s); return s; },
+    async see(o) { ensureOpen(); const s = await h.see(o); await stopIfNeeded(s); if (s.elements) els = s; return s; },
     async act(c) {
       ensureOpen();
       if (++state.commands > maxCommands) throw new BudgetExceeded(`${name}: больше ${maxCommands} команд`);
+      if (onWrite && isWrite(c, els)) { const f = onWrite; onWrite = null; f(); } // до команды и один раз: слот один, дневной лимит может остановить запись
       const r = await h.act(c);
+      if (!r.dryRun && r.elements) els = r;
       if (!r.dryRun) await stopIfNeeded(r); // результат dryRun — не снимок, у него нет url: страница не менялась
 
       return r;

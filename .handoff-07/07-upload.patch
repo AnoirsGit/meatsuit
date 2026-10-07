@@ -1,0 +1,347 @@
+diff --git a/eyes.js b/eyes.js
+index 7eff754..3a95721 100644
+--- a/eyes.js
++++ b/eyes.js
+@@ -110,22 +110,33 @@ function collect({ textLimit, nameLimit, gen }) {
+   const pageText = () => [document.body ? document.body.innerText : '']
+     .concat(deepAll(document, (e) => e.shadowRoot).flatMap((h) => [...h.shadowRoot.children].map((c) => c.innerText))).join(' ');
+ 
++  // Прямоугольник, по которому элемент виден и не перекрыт; null — не показывать.
++  const shown = (el) => {
++    const r = visible(el);
++    return r && !(inViewport(r) && covered(el, r)) ? r : null;
++  };
++
+   const elements = [];
+   let n = 0;
+   for (const el of deepAll(document, (e) => e.matches(SELECTOR))) {
+-    const r = visible(el);
++    let r = shown(el);
++    // Скрытый <input type=file> показываем через видимую метку или кнопку рядом: ими и открывают выбор файла.
++    let near = null;
++    if (!r && el.matches('input[type=file i]')) {
++      for (const p of [...(el.labels || []), ...el.parentNode.querySelectorAll('button,[role=button]')]) if ((r = shown(p))) { near = p; break; }
++    }
+     if (!r) continue;
+     const seen = inViewport(r);
+-    if (seen && covered(el, r)) continue;
+     n += 1;
+     store.els[n] = el;
+     store.text[n] = norm(el);
+     const role = roleOf(el);
+-    const item = { id: n, role, name: nameOf(el), inView: seen };
++    const item = { id: n, role, name: nameOf(el) || (near ? nameOf(near) : ''), inView: seen };
+     const inputType = el.tagName === 'INPUT' ? (el.getAttribute('type') || 'text').toLowerCase() : undefined;
+     if (el.tagName === 'A' && el.getAttribute('href')) item.href = clip(el.getAttribute('href'), 200); // нужен проектам, чтобы узнавать страницы и записи по адресу
+     if (inputType === 'password') item.inputType = 'password'; // значение пароля модели не отдаём никогда
+     else if (role === 'textbox' || role === 'select') item.value = clip(el.value ?? el.textContent, nameLimit);
++    if (inputType === 'file') item.inputType = 'file'; // цель для upload; после загрузки value — C:\fakepath\имя
+     if (role === 'checkbox' || role === 'radio' || role === 'switch') {
+       item.checked = el.checked ?? el.getAttribute('aria-checked') === 'true';
+     }
+diff --git a/hands.js b/hands.js
+index f33773b..26e0bc0 100644
+--- a/hands.js
++++ b/hands.js
+@@ -1,7 +1,7 @@
+ /**
+  * Руки: закрытый набор команд по номерам из снимка глаз (eyes.js).
+  *
+- *   const h = hands(page, { dryRun, logFile, recordDir, allowedHosts });
++ *   const h = hands(page, { dryRun, logFile, recordDir, allowedHosts, uploadDirs });
+  *   const snap = await h.see();
+  *   const res  = await h.act({ cmd: 'click', id: 7, gen: snap.gen }); // diff снимка после действия
+  *
+@@ -21,6 +21,8 @@ class StaleElement extends Error {}
+ const MAX_TEXT = 1000;
+ const MAX_WAIT = 15000;
+ const KEYS = new Set(['Enter', 'Escape', 'Tab', 'Backspace', 'ArrowDown', 'ArrowUp', 'PageDown', 'PageUp']);
++const UPLOAD_MAX = 10 * 1024 * 1024;
++const UPLOAD_TYPES = { '.pdf': 'application/pdf', '.doc': 'application/msword', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' };
+ 
+ // Копия SELECTOR из collect() в eyes.js: он локален в функции, которая выполняется в странице, и наружу не отдаётся.
+ // Меняется там — поменять и здесь.
+@@ -37,7 +39,7 @@ const isGen = (v) => Number.isInteger(v) && v > 0;
+ const isText = (v) => typeof v === 'string' && v.length > 0 && v.length <= MAX_TEXT && !/[\r\n]/.test(v);
+ 
+ /** Проверка команды до выполнения. Бросает BadCommand. Чистая функция. */
+-function validate(c, allowedHosts = []) {
++function validate(c, allowedHosts = [], uploadDirs = []) {
+   const bad = (m) => { throw new BadCommand(`${c && c.cmd}: ${m}`); };
+   if (!c || typeof c !== 'object') throw new BadCommand('команда не объект');
+   switch (c.cmd) {
+@@ -50,6 +52,12 @@ function validate(c, allowedHosts = []) {
+       if (!(Number.isFinite(c.ms) && c.ms >= 0 && c.ms <= MAX_WAIT) && !isText(c.text)) bad(`нужен ms до ${MAX_WAIT} или text`);
+       break;
+     case 'back': break;
++    case 'upload':
++      if (!isId(c.id) || !isGen(c.gen)) bad('нужны id и gen из снимка');
++      if (!uploadDirs.length) bad('загрузка не разрешена: задача без uploadDirs');
++      if (typeof c.file !== 'string' || !path.isAbsolute(c.file)) bad('нужен абсолютный путь file');
++      if (!UPLOAD_TYPES[path.extname(c.file).toLowerCase()]) bad('расширение не из pdf, doc, docx');
++      break;
+     case 'goto': {
+       let u;
+       try { u = new URL(c.url); } catch { bad('некорректный url'); }
+@@ -63,9 +71,24 @@ function validate(c, allowedHosts = []) {
+   return c;
+ }
+ 
++/**
++ * Файл для upload: лежит внутри одного из roots (realpath — чтобы `..` и симлинки не выводили наружу,
++ * граница по каталогу: /a/up не пропускает /a/up-evil/x.pdf), обычный файл до UPLOAD_MAX. Бросает BadCommand.
++ */
++function readUpload(file, roots) {
++  const bad = (m) => { throw new BadCommand(`upload: ${m}`); };
++  let real;
++  try { real = fs.realpathSync(file); } catch { bad(`файла ${file} нет`); }
++  if (!roots.some((d) => real.startsWith(d + path.sep))) bad(`файл ${file} вне uploadDirs`);
++  const st = fs.statSync(real);
++  if (!st.isFile() || st.size > UPLOAD_MAX) bad(`${file}: не файл или больше ${UPLOAD_MAX / 1024 / 1024} МБ`);
++  return { name: path.basename(file), mimeType: UPLOAD_TYPES[path.extname(file).toLowerCase()], buffer: fs.readFileSync(real) };
++}
++
+ function hands(page, opts = {}) {
+-  const { dryRun = false, logFile, recordDir, allowedHosts = [], capture, dryRunNavigation = false } = opts;
++  const { dryRun = false, logFile, recordDir, allowedHosts = [], capture, dryRunNavigation = false, uploadDirs = [] } = opts;
+   const archive = capture && createCapture(capture); // { dir, htmlPerSignature, maxMB }
++  const uploadRoots = uploadDirs.map((d) => fs.realpathSync(d)); // нет каталога — ошибка конфигурации, падаем сразу
+   let last = null;
+   let world = null; // изолированный мир, где лежат элементы последнего снимка
+   let seq = 0;
+@@ -172,7 +195,19 @@ function hands(page, opts = {}) {
+     if (!ok) throw new StaleElement(`под курсором уже не элемент ${id}: клик отменён`);
+   };
+ 
+-  const run = async (c) => {
++  // Как injected.setInputFiles у Playwright, только в нашем мире (ручки Playwright на элемент снимка нет):
++  // файл собирается из байтов в странице, затем input и change, как после выбора руками.
++  // Путь браузеру не передаётся: он может жить в контейнере, где файлов хоста нет.
++  const setFiles = (id, { name, mimeType, buffer }) => dom.run(world, ([i, f]) => {
++    const input = globalThis.__ms.els[i];
++    const dt = new DataTransfer();
++    dt.items.add(new File([Uint8Array.from(atob(f.data), (ch) => ch.charCodeAt(0))], f.name, { type: f.mimeType }));
++    input.files = dt.files;
++    input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
++    input.dispatchEvent(new Event('change', { bubbles: true }));
++  }, [id, { name, mimeType, data: buffer.toString('base64') }]);
++
++  const run = async (c, upload) => {
+     switch (c.cmd) {
+       case 'click': {
+         const el = await target(c.id, c.gen);
+@@ -196,6 +231,13 @@ function hands(page, opts = {}) {
+         return human.sleep(c.ms);
+       case 'back': await human.pause(); return page.goBack({ waitUntil: 'domcontentloaded' });
+       case 'goto': await human.pause(); return page.goto(new URL(c.url).href, { waitUntil: 'domcontentloaded' });
++      case 'upload': {
++        const el = await target(c.id, c.gen);
++        if (last.elements.some((e) => e.id === c.id && e.inputType === 'file')) return setFiles(c.id, upload);
++        // Кнопка или метка: человеческий клик открывает выбор файла; подписка на событие стоит до клика, иначе его можно пропустить.
++        const [chooser] = await Promise.all([page.waitForEvent('filechooser', { timeout: MAX_WAIT }), human.click(page, el)]);
++        return chooser.setFiles(upload);
++      }
+     }
+   };
+ 
+@@ -210,7 +252,8 @@ function hands(page, opts = {}) {
+ 
+   /** Выполнить команду и вернуть, что изменилось на странице. */
+   const act = serial(async (c) => {
+-    validate(c, allowedHosts);
++    validate(c, allowedHosts, uploadRoots);
++    const upload = c.cmd === 'upload' ? readUpload(c.file, uploadRoots) : undefined; // до dryRun: путь проверяется и на репетиции
+     const url = page.url();
+     // dryRunNavigation: клик по role=tab только переключает вид внутри страницы (список чатов Тиндера).
+     const tabClick = dryRunNavigation && c.cmd === 'click' && last && c.gen === last.gen
+@@ -225,7 +268,7 @@ function hands(page, opts = {}) {
+     }
+     const before = last;
+     try {
+-      await run(c);
++      await run(c, upload);
+       await human.pause(250, 500); // дать клику начать переход
+       await page.waitForLoadState('domcontentloaded').catch(() => {});
+       const snap = await look();
+@@ -255,7 +298,7 @@ function replay(dir, opts = {}) {
+   return {
+     async see(o) { return o && o.since ? eyes.diff(o.since, snaps[i]) : snaps[i]; },
+     async act(c) {
+-      validate(c, opts.allowedHosts);
++      validate(c, opts.allowedHosts, opts.uploadDirs);
+       if (c.id !== undefined && (c.gen !== snaps[i].gen || !snaps[i].elements.some((e) => e.id === c.id))) {
+         throw new StaleElement(`элемента ${c.id} нет в снимке ${i}`);
+       }
+diff --git a/index.js b/index.js
+index ccd47fe..89dd684 100644
+--- a/index.js
++++ b/index.js
+@@ -70,7 +70,7 @@ async function connect({
+     } finally { await session.detach().catch(() => {}); }
+   }
+ 
+-  async function task(name, fn, { site, maxCommands = 60, maxMinutes = 10, dryRun = false, dryRunNavigation = false, readOnly = false, capture } = {}) {
++  async function task(name, fn, { site, maxCommands = 60, maxMinutes = 10, dryRun = false, dryRunNavigation = false, readOnly = false, capture, uploadDirs } = {}) {
+     if (!site) throw new Error('task: нужен site');
+     const rule = JSON.parse(fs.readFileSync(sitesFile, 'utf8'))[site];
+     // Потолок бюджета задаёт площадка, а не вызывающий проект.
+@@ -97,7 +97,7 @@ async function connect({
+       botPages.add(page);
+       onPopup = (p) => { botPages.add(p); p.close().catch(() => {}); }; // новые вкладки бот не ведёт
+       page.on('popup', onPopup);
+-      const h = hands(page, { dryRun, dryRunNavigation, logFile: path.join(dir, 'journal.jsonl'), allowedHosts: [site], capture });
++      const h = hands(page, { dryRun, dryRunNavigation, logFile: path.join(dir, 'journal.jsonl'), allowedHosts: [site], capture, uploadDirs });
+       run = supervise(h, { name, site, notify: (t) => emit('needsHuman', t), maxCommands, maxMinutes,
+         onWrite: readOnly && !dryRun ? () => charge(site, rule, limitsFile, slot) : null }); // read-only задача записала: полный слот задним числом
+       await emit('start', `meatsuit: «${name}» на ${site} запущена${dryRun ? ' (dryRun)' : ''}`);
+diff --git a/package.json b/package.json
+index f49712f..93e14f0 100644
+--- a/package.json
++++ b/package.json
+@@ -8,7 +8,7 @@
+     "test": "test"
+   },
+   "scripts": {
+-    "test": "node test/human.test.js && node test/eyes.test.js && node test/hands.test.js && node test/guard.test.js && node test/telegram.test.js && node test/telegram-e2e.test.js && node test/task.test.js && node test/review.test.js && node test/capture.test.js && node test/save-tab.test.js && node test/single-tab.test.js"
++    "test": "node test/human.test.js && node test/eyes.test.js && node test/hands.test.js && node test/guard.test.js && node test/telegram.test.js && node test/telegram-e2e.test.js && node test/task.test.js && node test/review.test.js && node test/capture.test.js && node test/save-tab.test.js && node test/single-tab.test.js && node test/upload.test.js"
+   },
+   "repository": {
+     "type": "git",
+diff --git a/supervise.js b/supervise.js
+index f5e2121..1aea0f2 100644
+--- a/supervise.js
++++ b/supervise.js
+@@ -22,7 +22,7 @@ const onSite = (url, site) => {
+ 
+ /** Команда записи: меняет что-то на площадке. Клик не по заведомой вкладке считается записью. */
+ const isWrite = (c, els) => {
+-  if (c.cmd === 'fill' || c.cmd === 'type') return true;
++  if (c.cmd === 'fill' || c.cmd === 'type' || c.cmd === 'upload') return true;
+   if (c.cmd === 'press') return c.key === 'Enter';
+   if (c.cmd === 'click') return !(els && els.gen === c.gen && els.elements.some((e) => e.id === c.id && e.role === 'tab'));
+   return false;
+diff --git a/test/upload.test.js b/test/upload.test.js
+new file mode 100644
+index 0000000..5439b31
+--- /dev/null
++++ b/test/upload.test.js
+@@ -0,0 +1,119 @@
++/**
++ * upload: файл только из uploadDirs, нужного типа и размера; цель — <input type=file>
++ * или кнопка, открывающая выбор файла; скрытый input виден через метку или кнопку,
++ * после загрузки в снимке видно имя файла.
++ *
++ *   node test/upload.test.js
++ */
++const assert = require('node:assert/strict');
++const fs = require('node:fs');
++const os = require('node:os');
++const path = require('node:path');
++const { chromium } = require('playwright-core');
++const { hands, validate, BadCommand } = require('../hands.js');
++
++// Три способа прикрепить файл: обычный input, скрытый input с меткой, скрытый input с кнопкой рядом.
++// Обработчик change пишет имя файла в текст страницы. Последние два поля показывать нельзя.
++const HTML = `
++<body style="margin:0">
++  <p>Форма отклика</p>
++  <input type="file" aria-label="Обычный файл" class="pick">
++  <label for="cv">Резюме</label><input id="cv" type="file" class="pick" style="display:none">
++  <div><input id="letter" type="file" class="pick" hidden><button onclick="document.getElementById('letter').click()">Прикрепить письмо</button></div>
++  <input type="file" style="display:none">
++  <input type="text" aria-label="Скрытое поле" style="display:none">
++  <p id="log"></p>
++  <script>
++    for (const i of document.querySelectorAll('.pick')) i.addEventListener('change', () => {
++      document.getElementById('log').textContent += ' прикреплён:' + i.files[0].name + ':' + i.files[0].size + ':' + i.files[0].type;
++    });
++  </script>
++</body>`;
++
++(async () => {
++  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meatsuit-up-'));
++  const up = path.join(tmp, 'up');
++  const evil = path.join(tmp, 'up-evil'); // общий префикс с up
++  const other = path.join(tmp, 'other');
++  for (const d of [up, evil, other]) fs.mkdirSync(d);
++  const pdf = path.join(up, 'cv.pdf');
++  const docx = path.join(up, 'letter.docx');
++  fs.writeFileSync(pdf, '%PDF-1.4 тест');
++  fs.writeFileSync(docx, 'docx');
++  fs.writeFileSync(path.join(up, 'notes.txt'), 'txt');
++  fs.writeFileSync(path.join(up, 'big.pdf'), Buffer.alloc(10 * 1024 * 1024 + 1));
++  fs.writeFileSync(path.join(evil, 'x.pdf'), 'x');
++  fs.writeFileSync(path.join(other, 'x.pdf'), 'x');
++  fs.symlinkSync(path.join(other, 'x.pdf'), path.join(up, 'link.pdf')); // симлинк наружу
++  const logFile = path.join(tmp, 'log.jsonl');
++
++  // Поля проверяются до выполнения; без uploadDirs команда не разрешена.
++  const ok = { cmd: 'upload', id: 1, gen: 1, file: pdf };
++  assert.throws(() => validate(ok), BadCommand, 'без uploadDirs');
++  assert.throws(() => validate({ ...ok, id: undefined }, [], [up]), BadCommand);
++  assert.throws(() => validate({ ...ok, file: 'cv.pdf' }, [], [up]), BadCommand, 'относительный путь');
++  assert.throws(() => validate({ ...ok, file: path.join(up, 'notes.txt') }, [], [up]), BadCommand, 'чужое расширение');
++  validate(ok, [], [up]);
++
++  const browser = await chromium.launch();
++  const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
++  await page.setContent(HTML);
++  const logged = () => page.evaluate(() => document.getElementById('log').textContent);
++
++  // Глаза: скрытый input виден через метку или кнопку рядом, с inputType: 'file'; без них и скрытое текстовое поле — нет.
++  const h = hands(page, { uploadDirs: [up], logFile });
++  const s0 = await h.see();
++  const files = s0.elements.filter((e) => e.inputType === 'file');
++  assert.deepEqual(files.map((e) => e.name), ['Обычный файл', 'Резюме', 'Прикрепить письмо']);
++  assert.equal(s0.elements.length, 4, 'фильтр видимости для остальных элементов сломан'); // три input и кнопка
++  assert.ok(files.every((e) => e.inView && e.value === ''));
++
++  // Без uploadDirs — BadCommand.
++  await assert.rejects(hands(page).act({ cmd: 'upload', id: files[0].id, gen: s0.gen, file: pdf }), BadCommand);
++
++  // Отказы до выполнения: вне uploadDirs (другой каталог, `..`, соседний каталог с общим префиксом, симлинк наружу), размер, нет файла.
++  const rejects = (file, label) => assert.rejects(h.act({ cmd: 'upload', id: files[0].id, gen: s0.gen, file }), BadCommand, label);
++  await rejects(path.join(other, 'x.pdf'), 'другой каталог');
++  await rejects(`${up}/../other/x.pdf`, '..');
++  await rejects(path.join(evil, 'x.pdf'), 'соседний каталог с общим префиксом');
++  await rejects(path.join(up, 'link.pdf'), 'симлинк наружу');
++  await rejects(path.join(up, 'big.pdf'), 'больше 10 МБ');
++  await rejects(path.join(up, 'none.pdf'), 'файла нет');
++  assert.equal(await logged(), '', 'отказ что-то загрузил');
++
++  // dryRun: не выполняется, только журнал; плохой путь отклоняется и на репетиции.
++  const dry = hands(page, { dryRun: true, uploadDirs: [up], logFile });
++  const d0 = await dry.see();
++  const cvId = d0.elements.find((e) => e.name === 'Резюме').id;
++  assert.deepEqual(await dry.act({ cmd: 'upload', id: cvId, gen: d0.gen, file: pdf }), { dryRun: true, changed: false });
++  await assert.rejects(dry.act({ cmd: 'upload', id: cvId, gen: d0.gen, file: path.join(other, 'x.pdf') }), BadCommand);
++  assert.equal(await logged(), '', 'dryRun загрузил');
++
++  // Обычный input: файл встаёт без клика; в снимке value с именем файла и имя в тексте.
++  const by = (snap, name) => snap.elements.find((e) => e.inputType === 'file' && e.name === name);
++  const s1 = await h.see();
++  const r1 = await h.act({ cmd: 'upload', id: by(s1, 'Обычный файл').id, gen: s1.gen, file: pdf });
++  assert.equal(r1.changed, true);
++  assert.ok(r1.text.includes('прикреплён:cv.pdf:17:application/pdf'), r1.text);
++  assert.equal(by(r1, 'Обычный файл').value, 'C:\\fakepath\\cv.pdf');
++
++  // Скрытый input с меткой: цель — сам input.
++  const r2 = await h.act({ cmd: 'upload', id: by(r1, 'Резюме').id, gen: r1.gen, file: docx });
++  assert.ok(r2.text.includes('прикреплён:letter.docx:4:application/vnd.openxmlformats-officedocument.wordprocessingml.document'), r2.text);
++  assert.equal(by(r2, 'Резюме').value, 'C:\\fakepath\\letter.docx');
++
++  // Кнопка, открывающая выбор файла: человеческий клик, выбор перехвачен.
++  const btn = r2.elements.find((e) => e.role === 'button' && e.name === 'Прикрепить письмо');
++  const r3 = await h.act({ cmd: 'upload', id: btn.id, gen: r2.gen, file: pdf });
++  assert.ok(r3.text.includes('прикреплён:cv.pdf:17:application/pdf прикреплён:letter.docx'), r3.text);
++  assert.equal(by(r3, 'Прикрепить письмо').value, 'C:\\fakepath\\cv.pdf');
++  assert.equal((await logged()).split('прикреплён').length - 1, 3, 'лишняя загрузка');
++
++  // Журнал: репетиция и три настоящих.
++  const lines = fs.readFileSync(logFile, 'utf8').trim().split('\n').map(JSON.parse).filter((l) => l.cmd.cmd === 'upload');
++  assert.equal(lines.filter((l) => l.result === 'dry-run').length, 1);
++  assert.equal(lines.filter((l) => l.result === 'ok').length, 3);
++
++  await browser.close();
++  console.log('upload.test: ok');
++})().catch((e) => { console.error(e); process.exit(1); });

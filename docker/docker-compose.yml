@@ -1,0 +1,25 @@
+# Зеркало браузера meatsuit (Neko + Chromium) для локальной проверки.
+# host-сеть: CDP Chromium слушает только 127.0.0.1:9222 (socat в образе нет), Neko — только 127.0.0.1:8080.
+# Пароли в docker/.env (в git не попадает). Профиль (входы) лежит в томе neko-profile и переживает перезапуск.
+services:
+  neko:
+    image: ghcr.io/m1k1o/neko/chromium:latest
+    container_name: meatsuit-neko
+    restart: unless-stopped
+    stop_grace_period: 30s   # Chromium успевает сбросить профиль на диск (иначе вход слетает)
+    network_mode: host
+    shm_size: 2gb
+    environment:
+      NEKO_SERVER_BIND: 127.0.0.1:8080
+      NEKO_DESKTOP_SCREEN: 1920x1080@30
+      NEKO_MEMBER_MULTIUSER_USER_PASSWORD: ${NEKO_USER_PASSWORD}
+      NEKO_MEMBER_MULTIUSER_ADMIN_PASSWORD: ${NEKO_ADMIN_PASSWORD}
+      NEKO_WEBRTC_EPR: 52000-52100
+      NEKO_WEBRTC_ICELITE: 1
+      NEKO_SESSION_IMPLICIT_HOSTING: "true"
+    volumes:
+      - neko-profile:/home/neko/.config/chromium
+      - ./chromium.conf:/etc/neko/supervisord/chromium.conf:ro
+      - ./policies.json:/etc/chromium/policies/managed/policies.json:ro
+volumes:
+  neko-profile:
