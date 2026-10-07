@@ -56,7 +56,7 @@ services:
       retries: 6
       start_period: 30s
 
-  # Автопрогрев: node life.js run. Сеть общая с Neko (и в egress-варианте с Tailscale):
+  # Автопрогрев: node extras/life.js run (заморожен, см. extras/). Сеть общая с Neko (и в egress-варианте с Tailscale):
   # тогда CDP браузера доступен как http://127.0.0.1:9222, а своего выхода наружу у life нет.
   life:
     profiles: ["warmup"]
@@ -79,7 +79,7 @@ services:
     volumes:
       - ..:/app:ro # код из репозитория; зависимости (patchright) лежат в образе
       - life_data:/data # состояние, журнал data/life.jsonl, повадки persona.json
-    command: ["node", "life.js", "run", "--config", "${LIFE_CONFIG:-/app/profiles/life.json}", "--data", "/data"]
+    command: ["node", "extras/life.js", "run", "--config", "${LIFE_CONFIG:-/app/profiles/life.json}", "--data", "/data"]
 
   # HTTP-сервис: GET /view и POST /act для ваших скриптов (docs/http-api.md). Профиль api. Сеть общая с Neko
   # (в egress-варианте с Tailscale), поэтому CDP браузера это http://127.0.0.1:9222, а порт 8787 публикуется
@@ -110,7 +110,7 @@ services:
     volumes:
       - ..:/app:ro
       - life_data:/data
-    command: ["node", "server.js", "--host", "0.0.0.0", "--port", "8787", "--data", "/data"]
+    command: ["node", "extras/server.js", "--host", "0.0.0.0", "--port", "8787", "--data", "/data"]
 
   # Выход через Tailscale. Только с профилем egress и вместе с docker-compose.egress.yml.
   tailscale:

@@ -1,17 +1,7 @@
 {
   "name": "meatsuit",
-  "version": "0.1.0",
   "private": true,
-  "description": "Один прогретый браузер на сервере: я в нём живу, мои боты в нём работают человеческими руками",
   "scripts": {
-    "test": "node --test --test-concurrency=1",
-    "test:e2e": "E2E=1 node --test --test-concurrency=1 test/e2e.test.js",
-    "life": "node life.js"
-  },
-  "dependencies": {
-    "patchright": "^1.63.0"
-  },
-  "engines": {
-    "node": ">=20"
+    "test:extras": "npm --prefix extras test"
   }
 }
