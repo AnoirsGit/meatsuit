@@ -14,4 +14,4 @@ Start with the [project README](../README.md), then read in this order:
 
 ## Notes in Russian
 
-The author's working notes in Russian are in [ru/](ru/): goal and analysis, design, API, warm-up. The English documents above are the maintained ones; where they differ, trust the code and the English documents.
+The author's working notes in Russian are in [ru/](ru/): goal and analysis, design, API, warm-up, and [how everything runs on a desktop](ru/07-desktop.md). The English documents above are the maintained ones; where they differ, trust the code and the English documents.
