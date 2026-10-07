@@ -10,9 +10,14 @@ meatsuit helps one person automate **their own** accounts at low volume with a r
 
 - Passwords, tokens, API keys, Tailscale auth keys, Telegram tokens.
 - Real IP addresses, hostnames of your machines, or personal details. This repository is public. Use documentation addresses (`203.0.113.7`, `198.51.100.9`) and example hosts in docs and tests.
-- `docker/.env`, `profiles/clients.json` and `data/` (they are already in `.gitignore`).
+- `docker/.env` (or wherever `MEATSUIT_CONFIG` points), `profiles/*.json` other than `*.example.json`, `sites.json`, `life.json`, `jobs.json`, archives and `data/` (they are already in `.gitignore`). Only `*.example.*` files are tracked.
 
-Before pushing, search your diff: `git diff --cached | grep -E '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+'`.
+`tools/secret-scan.sh` checks for this with no dependencies beyond `sh`, `git` and `awk`: typical API keys, Telegram bot tokens, private keys, `NEKO_*PASSWORD=` with a value, tailnet names and `100.64.0.0/10` addresses, real ASNs (documentation and private ranges are fine), `ssh user@host` with a real host name, and files that must not be tracked. It prints `file:line: rule` and never the value.
+
+- `npm test` runs it first (`pretest`) on tracked and new, not ignored files: a finding fails the tests.
+- `npm run hooks` installs it as a `pre-commit` hook that checks the staged content. Optional; `npm test` is the gate.
+- `sh tools/secret-scan.sh --history` checks every commit of every branch.
+- Personal words a pattern cannot know (your city, your machines' names, your home ASN) go into `.secret-scan.local` at the repository root, one per line. That file is git-ignored, because the list itself would be a leak.
 
 ## Running the tests
 
