@@ -7,7 +7,8 @@
 # Браузер выбирает MEATSUIT_BROWSER в файле деплоя: chrome (по умолчанию) или brave (browser-<имя>.yml).
 # Профиль у каждого свой: Chrome — том meatsuit_profile, Brave — meatsuit_brave_profile; после смены браузера
 # входить на сайты заново. Имена для вызывающих постоянные: контейнер meatsuit-browser (подключение —
-# network_mode: "container:meatsuit-browser", CDP на 127.0.0.1:9222) и том meatsuit_profile.
+# network_mode: "container:meatsuit-browser", CDP на 127.0.0.1:9222) и том meatsuit_profile (uid 1000), в нём
+# папка state/ — общий dir вызывающих: connect({ dir: '<том>/state' }).
 #
 # Необязательно: выход через Tailscale (MEATSUIT_EGRESS=tailscale в файле: up.sh добавит docker-compose.egress.yml
 # и профиль egress). Замороженные extras/: автопрогрев (профиль warmup) и HTTP-сервис (профиль api).
@@ -65,12 +66,16 @@ services:
       retries: 6
       start_period: 30s
 
-  # Одноразовый: отдаёт корень папки профиля пользователю neko (uid 1000) и выходит. Сети нет.
+  # Одноразовый, без сети: отдаёт пользователю neko (uid 1000) корень папки профиля текущего браузера и том
+  # meatsuit_profile с папкой state/ — там вызывающие держат общий dir (замок очереди, счётчики, журнал).
+  # Том создаётся и при Brave или MEATSUIT_PROFILE_DIR: вызывающие подключают его как external всегда.
   profile-init:
     extends:
       file: browser-${MEATSUIT_BROWSER:-chrome}.yml
       service: profile-owner
-    entrypoint: ["chown", "1000:1000", "/profile"]
+    entrypoint: ["sh", "-c", "mkdir -p /meatsuit/state && chown 1000:1000 /profile /meatsuit /meatsuit/state"]
+    volumes:
+      - profile:/meatsuit
     network_mode: none
     restart: "no"
 
