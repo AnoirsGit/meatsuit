@@ -7,6 +7,7 @@
     "pretest": "sh tools/secret-scan.sh",
     "secret-scan": "sh tools/secret-scan.sh",
     "hooks": "sh tools/hooks/install.sh",
+    "init": "node tools/init.js",
     "test": "node --test --test-concurrency=1",
     "test:e2e": "E2E=1 node --test --test-concurrency=1 test/e2e.test.js",
     "life": "node life.js"

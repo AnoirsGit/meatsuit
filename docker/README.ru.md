@@ -5,8 +5,8 @@
 ## Быстрый старт (на этой машине)
 
 ```sh
+npm run init                # из корня репозитория: docker/.env со случайными паролями, права 0600
 cd docker
-cp .env.example .env        # заполнить NEKO_PASSWORD и NEKO_ADMIN_PASSWORD (длинные, разные)
 docker compose up -d        # только зеркало
 ./verify.sh                 # проверка: открыть статью из зеркала, прокрутить, убедиться по CDP
 ```
@@ -97,7 +97,7 @@ curl -s http://127.0.0.1:8787/                                  # страниц
 ## Развернуть на сервере
 
 1. Docker и Docker Compose на сервере; Tailscale на хосте (вы уже в одном tailnet с ним).
-2. Склонировать репозиторий, `cd docker`, `cp .env.example .env`, пароли.
+2. Склонировать репозиторий, `npm run init` (пароли случайные; пароль участника: `grep NEKO_PASSWORD docker/.env`), `cd docker`. Файл можно держать вне репозитория: `MEATSUIT_CONFIG=<файл> npm run init` и `docker compose --env-file <файл> up -d`. Поправить: `npm run config`.
 3. Адреса. В `.env`: `NEKO_BIND_IP` и `NEKO_WEBRTC_IP` — **tailnet-адрес сервера** (`tailscale ip -4`, вида 100.x.y.z). Наружу в публичный интернет порты не открываются. Открывать зеркало с телефона и ноутбука по `http://100.x.y.z:8080`.
 4. `docker compose up -d`, затем `./verify.sh persistence`.
 5. Выход через дом: поднять exit node на домашнем устройстве ([../docs/egress.md](../docs/egress.md)), в `.env` задать `TS_AUTHKEY` и `TS_EXTRA_ARGS=--exit-node=<имя узла> --exit-node-allow-lan-access=false`, запустить `docker compose -f docker-compose.yml -f docker-compose.egress.yml --profile egress up -d`. **Не ставьте exit node на сам хост по SSH через публичный адрес** (сессия повиснет): правила и откат — в docs/egress.md.

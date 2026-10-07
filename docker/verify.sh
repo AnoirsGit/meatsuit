@@ -5,7 +5,7 @@
 # Нужны: запущенный `docker compose up -d` (зеркало) и docker/.env. Образ life собирается при первом запуске.
 set -eu
 cd "$(dirname "$0")"
-[ -f .env ] || { echo "нет docker/.env: cp .env.example .env и заполните пароли"; exit 2; }
+[ -f .env ] || { echo "нет docker/.env: npm run init в корне репозитория"; exit 2; }
 set -a; . ./.env; set +a
 RUN="docker compose --profile warmup run --rm --no-deps -T -e NEKO_PASSWORD -e URL -e SCROLL -e LOAD_MS --entrypoint node life"
 ok() { printf '  \033[32mOK\033[0m   %s\n' "$1"; }

@@ -43,8 +43,8 @@
 ## Запуск зеркала
 
 ```sh
+npm run init                # docker/.env: случайные пароли зеркала, права 0600; повторно ничего не трогает
 cd docker
-cp .env.example .env        # задать NEKO_PASSWORD и NEKO_ADMIN_PASSWORD: длинные, разные, без пробелов и знака $
 docker compose up -d        # первый раз качает образ Neko с Brave (на диске около 2,3 ГБ)
 ./verify.sh                 # сам открывает статью в зеркале, прокручивает и проверяет по CDP
 ```

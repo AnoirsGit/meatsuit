@@ -1,10 +1,10 @@
 # meatsuit: Neko с Brave (зеркало и CDP) и автопрогрев life.js.
 #
-#   cp .env.example .env                       # заполнить пароли
-#   docker compose up -d                       # только зеркало
+#   npm run init                               # docker/.env: права 0600, случайные пароли (повторно ничего не трогает)
+#   docker compose up -d                       # только зеркало; файл в другом месте: --env-file <файл>
 #   docker compose --profile warmup up -d --build   # зеркало и автопрогрев
 #
-# Автопрогрев вынесен в профиль warmup и сам не стартует: пока выход в сеть не идёт через дом в Алматы,
+# Автопрогрев вынесен в профиль warmup и сам не стартует: пока выход в сеть не идёт через дом,
 # он ушёл бы с адреса сервера. Выход через Tailscale: docker-compose.egress.yml и README.md.
 name: meatsuit
 
@@ -23,11 +23,11 @@ services:
     cpus: ${NEKO_CPUS:-2}
     pids_limit: 1024
     environment:
-      TZ: ${MEATSUIT_TZ:-Asia/Almaty} # часовой пояс браузера должен совпадать с поясом страны выхода
+      TZ: ${MEATSUIT_TZ:-UTC} # часовой пояс браузера должен совпадать с поясом страны выхода
       NEKO_DESKTOP_SCREEN: ${NEKO_SCREEN:-1280x720@30} # кодирование видео идёт на процессоре: на слабом сервере берите меньше
       # Neko 3: один пароль у участника, другой у админа (кто какой ввёл, тем и вошёл).
-      NEKO_MEMBER_MULTIUSER_USER_PASSWORD: ${NEKO_PASSWORD:?Задайте NEKO_PASSWORD в docker/.env}
-      NEKO_MEMBER_MULTIUSER_ADMIN_PASSWORD: ${NEKO_ADMIN_PASSWORD:?Задайте NEKO_ADMIN_PASSWORD в docker/.env}
+      NEKO_MEMBER_MULTIUSER_USER_PASSWORD: ${NEKO_PASSWORD:?Задайте NEKO_PASSWORD (npm run init)}
+      NEKO_MEMBER_MULTIUSER_ADMIN_PASSWORD: ${NEKO_ADMIN_PASSWORD:?Задайте NEKO_ADMIN_PASSWORD (npm run init)}
       # Кука входа по умолчанию «Secure»: по http://100.x.y.z (tailnet) браузер её не примет.
       # Канал шифрует сам Tailscale, поэтому Secure выключена.
       NEKO_SESSION_COOKIE_SECURE: "false"
@@ -44,7 +44,8 @@ services:
       - ${NEKO_BIND_IP:-127.0.0.1}:59000-59019:59000-59019/udp
       - ${NEKO_BIND_IP:-127.0.0.1}:${MEATSUIT_API_PORT:-8787}:8787 # HTTP-сервис (профиль api); пока он не запущен, порт пуст
     volumes:
-      - brave_profile:/home/neko/.config/brave # профиль: куки, входы, история
+      # профиль: куки, входы, история. MEATSUIT_PROFILE_DIR — папка на хосте вместо тома (uid 1000)
+      - ${MEATSUIT_PROFILE_DIR:-brave_profile}:/home/neko/.config/brave
       - ./neko/brave.conf:/etc/neko/supervisord/brave.conf:ro
       - ./neko/brave-start.sh:/etc/neko/brave-start.sh:ro
       - ./neko/policies.json:/etc/brave/policies/managed/policies.json:ro
@@ -74,7 +75,7 @@ services:
       neko:
         condition: service_healthy
     environment:
-      TZ: ${MEATSUIT_TZ:-Asia/Almaty} # часовой пояс браузера должен совпадать с поясом страны выхода
+      TZ: ${MEATSUIT_TZ:-UTC} # часовой пояс браузера должен совпадать с поясом страны выхода
       MEATSUIT_CDP: http://127.0.0.1:9222
     volumes:
       - ..:/app:ro # код из репозитория; зависимости (patchright) лежат в образе
@@ -102,8 +103,8 @@ services:
       neko:
         condition: service_healthy
     environment:
-      TZ: ${MEATSUIT_TZ:-Asia/Almaty}
-      MEATSUIT_TZ: ${MEATSUIT_TZ:-Asia/Almaty}
+      TZ: ${MEATSUIT_TZ:-UTC}
+      MEATSUIT_TZ: ${MEATSUIT_TZ:-UTC}
       MEATSUIT_CDP: http://127.0.0.1:9222
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
