@@ -1,162 +1,204 @@
-# Browser mirror: Neko + Brave
+# Browser mirror: Neko + Google Chrome or Brave
 
-One long-lived Brave browser in Docker. You open it from your ordinary browser (picture and sound over WebRTC), live in it and sign in to your accounts there. Your own scripts and the warm-up service attach to the same Brave over CDP.
+One long-lived browser in Docker. A person opens it from an ordinary browser (picture and sound over WebRTC), signs in to sites there once, and solves whatever a bot stops on. Callers' code attaches to the same browser over CDP with the meatsuit library.
 
-Terms: **Neko** is a self-hosted virtual browser that streams a desktop to a web page. **WebRTC** is the browser technology it uses for video and sound. **CDP** (Chrome DevTools Protocol) is the debugging port that automation libraries connect to. For the project as a whole see the [README](../README.md); for the warm-up service, [warmup.md](../docs/warmup.md); for sending the browser's traffic out through a home connection, [egress.md](../docs/egress.md). Everything here was checked on one Linux machine with Docker Compose, and the mirror alone was run once on a rented server; see [what was verified](#what-was-verified-and-what-was-not).
+Terms: **Neko** is a self-hosted virtual browser that streams a desktop to a web page. **WebRTC** is the browser technology it uses for video and sound. **CDP** (Chrome DevTools Protocol) is the debugging port that automation libraries connect to. For the project as a whole see the [README](../README.md); the library's API is in [04-contract.md](../docs/04-contract.md).
 
 meatsuit is personal automation of your own accounts at low volume. Platforms' terms apply, and you are responsible for them. A captcha is never solved by the software: you solve it yourself in the mirror.
 
 ## Quick start
 
 ```sh
-npm run init                # from the repository root: docker/.env with random passwords, mode 0600
-cd docker
-docker compose up -d        # the mirror only
-./verify.sh                 # opens an article through the mirror, scrolls, and confirms over CDP
+npm run init          # from the repository root: the deploy file docker/.env, random passwords, mode 0600
+docker/up.sh          # docker compose --env-file <deploy file> up -d
+docker/verify.sh      # opens an article through the mirror, scrolls, and confirms over CDP
 ```
 
 Open `http://127.0.0.1:8080`, enter any name and `NEKO_PASSWORD`. Control is taken implicitly: hover over the video and you are in control. The admin password is only needed for taking screenshots through Neko's API.
 
-Stop with `docker compose stop` (Brave exits cleanly in 1 to 2 s and writes its cookies to disk). `docker compose down -v` deletes everything, including the browser profile, the warm-up journal and the Tailscale identity.
+`docker/up.sh` takes any Compose command with the same deploy file: `docker/up.sh ps`, `docker/up.sh logs -f neko`, `docker/up.sh stop` (the browser exits cleanly and writes its cookies to disk), `docker/up.sh down`. `docker/up.sh down -v` deletes the profile volume too: every sign-in is lost.
+
+## The deploy file and `docker/up.sh`
+
+The settings of the mirror live in one git-ignored file: `docker/.env`, or the file `MEATSUIT_CONFIG` points to (the owner keeps it outside the repository). `npm run init` creates it once from [`.env.example`](.env.example); `npm run config` edits it through a temporary page on `127.0.0.1` (a host process, not in a container and not in the browser's network, so the mirrored browser cannot reach it; a one-time token in a header, no cookies, an `Origin` check, passwords never sent to the page, atomic writes with mode 0600, `409` on a concurrent edit, exit after 15 idle minutes).
+
+`docker/up.sh [compose command…]` runs `docker compose --env-file <file> -f docker-compose.yml …`, with `up -d` by default. With `MEATSUIT_EGRESS=tailscale` in the file it also adds `docker-compose.egress.yml` and the `egress` profile. Always start the stack through `up.sh`: a plain `docker compose up` would not know about the Tailscale overlay. Compose reads the file only on `up`, so run `docker/up.sh` again after a change.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `NEKO_PASSWORD`, `NEKO_ADMIN_PASSWORD` | required | Member and admin passwords of the mirror (random hex from `npm run init`) |
+| `NEKO_BIND_IP`, `NEKO_PORT` | `127.0.0.1`, `8080` | Host address and port the mirror binds to (the WebRTC UDP ports follow the address). Never `0.0.0.0` |
+| `NEKO_WEBRTC_IP` | `127.0.0.1` | The address clients use to reach the video: the same one you open the mirror at |
+| `MEATSUIT_BROWSER` | `chrome` | `chrome` (Google Chrome) or `brave`, see below |
+| `NEKO_TAG` | `3.1.6` | Neko image tag, the same for both browsers (`ghcr.io/m1k1o/neko/google-chrome` or `…/brave`) |
+| `MEATSUIT_PROFILE_DIR` | empty | A host folder for the profile instead of the volume. Absolute path; `profile-init` makes uid 1000 its owner. It belongs to the current browser: change it when you switch |
+| `MEATSUIT_TZ` | `UTC` | Time zone (IANA name) of the browser. Set the zone of the country your traffic exits from: a site can compare the two |
+| `NEKO_SCREEN` | `1280x720@30` | Resolution and frame rate. Video is encoded on the CPU: go lower on a weak server |
+| `NEKO_MEM`, `NEKO_CPUS` | `3g`, `2` | Ceilings for the browser container. `NEKO_CPUS=0` removes the CPU ceiling: some hosts (an OpenVZ container, for example) refuse the CPU quota (`cpu.cfs_quota_us: invalid argument`) |
+| `MEATSUIT_API_PORT` | `8787` | Host port of the frozen HTTP service (profile `api`) |
+| `MEATSUIT_EGRESS` | empty | `tailscale`: route the browser through a Tailscale exit node (below). Not in `.env.example`'s fields; add it by hand |
+| `TS_AUTHKEY`, `TS_EXTRA_ARGS`, `TS_HOSTNAME`, `TS_TAG` | empty, empty, `meatsuit`, `stable` | The Tailscale container (add by hand) |
+| `BRAVE_EXTRA_FLAGS` | empty | Extra Brave flags (no spaces inside values) |
+| `LIFE_CPUS`, `SERVER_CPUS`, `LIFE_CONFIG`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | | Settings of the frozen `extras/` services (below) |
+
+Values contain no spaces, quotes or `$`: the file is read by Compose and by `sh` (`verify.sh` sources it).
+
+## Choosing the browser
+
+`MEATSUIT_BROWSER` picks one of two small files that `docker-compose.yml` extends: [`browser-chrome.yml`](browser-chrome.yml) or [`browser-brave.yml`](browser-brave.yml). Compose itself reads the variable, so the choice works with `docker/up.sh` and with a plain `docker compose --env-file`.
+
+| | Google Chrome (default) | Brave |
+|---|---|---|
+| Image | `ghcr.io/m1k1o/neko/google-chrome:${NEKO_TAG}` | `ghcr.io/m1k1o/neko/brave:${NEKO_TAG}` |
+| Profile volume | `meatsuit_profile`, mounted at `/home/neko/.config/chrome-meatsuit` | `meatsuit_brave_profile`, at `/home/neko/.config/brave` |
+| Start and flags | [`chrome.conf`](chrome.conf) (supervisord) | [`neko/brave.conf`](neko/brave.conf) and [`neko/brave-start.sh`](neko/brave-start.sh) |
+| Policies | [`chrome-policies.json`](chrome-policies.json) → `/etc/opt/chrome/policies/managed/` | [`neko/policies.json`](neko/policies.json) → `/etc/brave/policies/managed/` |
+
+Why Chrome is the default: existing sign-ins were made in it. `chrome.conf` and `chrome-policies.json` are carried over unchanged from the setup those sign-ins live in. Chrome's profile folder is not the stock one on purpose: Chrome 136 and newer ignore the CDP port when the browser runs with its default profile folder.
+
+A profile does not move between browsers: switching means signing in again, and the other profile stays in its volume untouched. The Brave volume keeps the name the earlier Brave-only mirror used, so an existing Brave profile is picked up.
+
+`profile-init` is a one-shot container from the same image, without network: it makes uid 1000 (`neko`) the owner of the profile folder's root, creates `state/` in the `meatsuit_profile` volume for the callers (with Brave too) and exits; the browser starts after it. A new volume for Chrome would otherwise belong to root and Chrome could not write to it.
+
+## Attaching another stack
+
+The names below do not change; other projects rely on them.
+
+- Container `meatsuit-browser`. A caller's container joins its network with `network_mode: "container:meatsuit-browser"` and reaches CDP at `http://127.0.0.1:9222`. The mirror must be up first.
+- Volume `meatsuit_profile`, created by this stack with whichever browser, its root and its `state/` folder owned by uid 1000 (`profile-init` sees to it). Callers declare it `external: true` and keep their shared state in `state/`: `connect({ dir: '<mount point>/state' })`. With Chrome the same volume holds the browser profile, so mount it read-only wherever nothing needs to be written.
+- The CDP port is never published on the host. Whoever reaches CDP controls the browser and every signed-in account.
+
+```yaml
+# in the caller's docker-compose.yml
+services:
+  bot:
+    build: .
+    user: "1000:1000"                             # writes to state/ (or run as root)
+    network_mode: "container:meatsuit-browser"    # CDP: http://127.0.0.1:9222
+    volumes:
+      - meatsuit_profile:/meatsuit                # connect({ dir: '/meatsuit/state' })
+volumes:
+  meatsuit_profile:
+    external: true
+```
+
+All callers of one browser must pass the same `dir` to `connect()`: the queue lock lives there, and with different locks two bots would enter the browser at once. `peek(site, { sitesFile, dir })` from the library reads what is left of a site's limits without spending a slot ([04-contract.md](../docs/04-contract.md)).
+
+The container's host name is fixed too (`meatsuit-browser`): Chromium's profile lock remembers the host name, and after a re-create under a new name the browser would open a "profile in use on another computer" window. With the Tailscale overlay the browser shares the Tailscale container's network and host name instead (Docker allows no own host name there), which is just as stable.
+
+### Moving an existing Chrome profile in
+
+If a Chrome profile already lives in another volume (made with the same `chrome.conf`, mounted at `/home/neko/.config/chrome-meatsuit`), copy it once while both browsers are stopped:
+
+```sh
+docker run --rm -v <old volume>:/from:ro -v meatsuit_profile:/to ghcr.io/m1k1o/neko/google-chrome:3.1.6 \
+  sh -c 'cp -a /from/. /to/ && chown -R 1000:1000 /to && rm -f /to/SingletonLock /to/SingletonCookie /to/SingletonSocket'
+docker/up.sh
+```
+
+Then check the sign-ins in the mirror. Keep the old volume until you have. Not verified yet.
+
+## Exit through home: Tailscale (optional)
+
+Without it the browser's traffic leaves from the server's own address. With `MEATSUIT_EGRESS=tailscale`, `docker/up.sh` adds [`docker-compose.egress.yml`](docker-compose.egress.yml) and the `egress` profile: a Tailscale container uses an exit node at home, and the browser (and the frozen services) share its network namespace, so everything they send goes through the tunnel; [`egress/killswitch.sh`](egress/killswitch.sh) rejects any non-root connection that would leave another way.
+
+1. Set up the exit node on the home device ([egress.md](../docs/egress.md#recommended-setup)).
+2. In the deploy file add `MEATSUIT_EGRESS=tailscale`, `TS_AUTHKEY` (a one-time key) and `TS_EXTRA_ARGS=--exit-node=<home-node-name> --exit-node-allow-lan-access=false`.
+3. `docker/up.sh`. The browser waits until Tailscale is logged in and the exit node is online.
+4. Open `https://ipinfo.io` in the mirror: it must show your home connection.
+
+**Do not set the exit node on the host itself over an SSH session on its public address**: the session hangs ([egress.md](../docs/egress.md#ssh-safety-warning)). **Not verified:** the whole egress setup has never been run.
+
+## Deploying on a server
+
+1. Docker with Compose 2.24 or newer on the server, Tailscale on the host; your phone and laptop are in the same tailnet.
+2. Clone the repository, `npm ci`, `npm run init` (or `MEATSUIT_CONFIG=<file> npm run init` for a file outside the repository; then keep `MEATSUIT_CONFIG` exported for `docker/up.sh`).
+3. **Addresses.** Set `NEKO_BIND_IP` and `NEKO_WEBRTC_IP` to the server's tailnet address (`tailscale ip -4`), for example with `npm run config -- --tailnet` opened from your phone. Never publish the ports to the public internet: binding to the tailnet address is what keeps them private, and Docker's published ports bypass common host firewalls. The mirror runs over plain `http` with the login cookie's `Secure` flag off (`NEKO_SESSION_COOKIE_SECURE=false`), which is only safe because the tailnet encrypts the link.
+4. `docker/up.sh`, then the live check in [docs/acceptance.md](../docs/acceptance.md).
+5. Optionally, the Tailscale exit (above).
 
 ## What `verify.sh` proves
 
-It needs `docker/.env` and a running stack. It builds the small `life` image on first use, because the checks run inside it.
+It needs the deploy file and a running stack, and runs every Compose command through `up.sh`. Its checks run inside the image of the frozen warm-up service (`life`), which it builds on first use.
 
-1. **The mirror is up.** It waits up to two minutes for the container to be healthy, meaning both Neko's web part and Brave's CDP port answer.
-2. **The control channel works.** It logs in with the member password and drives the mirror over Neko's own protocol, the same events the web client sends: take control, Ctrl+L, Ctrl+A, type an article address key by key, Enter, then the mouse wheel. It then asks Brave itself over CDP: the tab's address must be the article and `scrollY` must be above 500. So the article really loaded from the internet and was scrolled, independently of any screenshot.
-3. **Persistence** (`./verify.sh persistence`). It sets a cookie over CDP, immediately runs `docker compose stop neko` and `start neko`, and checks the same cookie value is still there.
+1. **The mirror is up.** It waits up to two minutes for the browser container to be healthy: both Neko's web part and the browser's CDP port answer.
+2. **The control channel works.** It logs in with the member password and drives the mirror over Neko's own protocol, the same events the web client sends: take control, Ctrl+L, Ctrl+A, type an article address key by key, Enter, then the mouse wheel. Then it asks the browser itself over CDP: the tab's address must be the article and `scrollY` above 500.
+3. **Persistence** (`docker/verify.sh persistence`). It sets a cookie over CDP, immediately stops and starts the browser container, and checks the cookie is still there.
 
-What it does not prove: that a real keyboard in a real web client works (it speaks the protocol directly, not through the web client), that video and sound arrive, and anything about egress. It uses only `docker-compose.yml`; it was not tried with the egress override.
+It does not prove that a real keyboard in a real web client works, that video and sound arrive, or anything about egress.
 
 ## What was verified, and what was not
 
+The runs below were made with **Brave**, before the browser became a choice; this compose file with Chrome or Brave has not been started yet. What is tested now: `docker compose config` for both browsers, with and without the Tailscale overlay, and `docker/up.sh` (`test/docker.test.js`, `test/config.test.js`). `profile-init` was run for real with the Brave image on fresh volumes: `meatsuit_profile` and its `state/` came out owned by 1000:1000.
+
 | What | How | Result |
 |---|---|---|
-| Neko and Brave start, CDP port alive | healthcheck, `./verify.sh` | Healthy within about 15 s; about 750 MB of the 3 GB limit and about 10% CPU at idle (one machine, one run) |
-| The mirror shows the live Brave | Signed in from a Chromium, screenshots | Video plays, the "You took the controls" note appears |
-| Mouse from the web client | Clicked an address-bar suggestion | Worked |
-| Typing from the web client | Letters and a dot | Worked |
-| Enter, Ctrl+A, Ctrl+L from the web client | The author's test client sends synthetic events, and these did not arrive | **Not verified with a real keyboard** (see below) |
-| Control over Neko's protocol (what the web client sends) | `./verify.sh` | Ctrl+L, Ctrl+A, typing, Enter and wheel worked: article loaded, `scrollY` 30570 in one run |
+| Neko and Brave start, CDP port alive | healthcheck, `verify.sh` | Healthy within about 15 s; about 750 MB of the 3 GB limit and about 10% CPU at idle (one machine, one run) |
+| The mirror shows the live browser | Signed in from a Chromium, screenshots | Video plays, the "You took the controls" note appears |
+| Mouse and typing from the web client | Clicked an address-bar suggestion, typed letters and a dot | Worked |
+| Enter, Ctrl+A, Ctrl+L from the web client | The author's test client sends synthetic events, and these did not arrive | **Not verified with a real keyboard** |
+| Control over Neko's protocol | `verify.sh` | Ctrl+L, Ctrl+A, typing, Enter and wheel worked: the article loaded and scrolled |
 | Profile survives a stop and a re-create | Cookie over CDP, `stop`/`start`, `down`/`up` | Kept, including one set a second before the stop |
-| Warm-up container reaches Brave | `docker compose run life node life.js plan`, CDP connection | Works |
-| The mirror on a rented server (an OpenVZ container, 4 old CPU cores, no GPU), opened from a laptop over Tailscale | Mirror only (no `egress`), bound to the server's loopback and reached through the host's Tailscale in userspace mode; headless Chromium logged in and sampled one video pixel every second for 45 s | Healthy; the pixel changed with the server's screen, so the WebRTC video is live over the tailnet with the default UDP ports; the server idled at about 3.6% CPU and 310 MB for this container (one run) |
-| A throwaway container on that server | `/dev/net/tun`, `iptables -m owner`, `-m conntrack`, `ip6tables` | All accepted, so the kill switch rules can be installed there (Tailscale itself was **not** started) |
+| The mirror on a rented server (an OpenVZ container, 4 old CPU cores, no GPU), opened from a laptop over Tailscale | Mirror only, bound to the server's loopback and reached through the host's Tailscale; a headless Chromium logged in and sampled one video pixel every second for 45 s | Healthy; the video is live over the tailnet with the default UDP ports; about 3.6% CPU and 310 MB at idle (one run) |
+| A throwaway container on that server | `/dev/net/tun`, `iptables -m owner`, `-m conntrack`, `ip6tables` | Accepted, so the kill switch rules can be installed there (Tailscale itself was **not** started) |
 
-**About Enter from the web client.** Neko's protocol accepts these keys and Brave handles them, but the author's test client (headless Chromium sending synthetic events) forwarded only letters, not Enter or Ctrl combinations. A real keyboard in a real browser should work, since it is Neko's standard use, but nobody has tried it. The first thing to do: in the mirror, type an address in the address bar and press Enter. If that fails, please open an issue (suspects: keyboard layout, or the client browser).
+Separately, the library ran for one caller project against a Neko mirror with Google Chrome using the same `chrome.conf` and `chrome-policies.json`, started from that project's own compose file.
 
-**Not verified:**
+**Not verified:** this compose file with either browser; `profile-init` with the Chrome image; moving a profile in; Enter and shortcuts from a real keyboard; sound, and video in a real browser or on a phone; the whole Tailscale exit (container, overlay, kill switch, WebRTC and DNS through the tunnel); load while someone uses the mirror on a weak server.
 
-- Enter and shortcuts from a real keyboard in a web client (above).
-- Sound, and video in a real browser or on a phone over a tailnet address (only a headless Chromium on a laptop was tried; it needs `NEKO_WEBRTC_IP` and UDP ports 59000 to 59019).
-- The whole `egress` profile: Tailscale in a container; `docker-compose.egress.yml` (valid as configuration, **never run**); `neko`, `life` and `server` all sharing the `tailscale` container's network (each is pointed at it directly, no chain); the kill switch (does it hurt WebRTC, does the browser stay silent when the tunnel is down); DNS through the tunnel.
-- Load while someone actually uses the mirror on a weak server (only the idle load above was measured). Video is encoded on the CPU, so lower `NEKO_SCREEN` (default `1280x720@30`) and `NEKO_CPUS`.
-- Signing in and registering on real sites from the mirror. Sites may ask for SMS or a captcha.
-- Brave on real sites and on bot-detector sites, and a full warm-up session in this Brave.
+## Brave: six fixes that are not obvious
 
-## Six fixes that are not obvious
+Without these the Brave profile did not live (all in `neko/brave-start.sh` and the compose file). They cost hours, so they are written down.
 
-Without these the profile did not live. They cost hours, so they are written down.
+1. **Cookies were wiped on every stop.** The image's profile said "clear cookies on exit". `brave-start.sh` forces "keep" before each start, and the `DefaultCookiesSetting` policy says the same.
+2. **Brave never received the stop signal.** `/usr/bin/brave-browser` is a wrapper that starts the real binary without `exec`, so SIGINT never reached the browser and recent cookies were lost. The script runs the real binary with `exec`; stopping takes about 1 s. Docker waits up to 30 s (`stop_grace_period`).
+3. **The keyboard was silent in the mirror.** `NEKO_SESSION_IMPLICIT_HOSTING=true` makes control implicit (hover and work).
+4. **"Brave quit unexpectedly" after every re-create.** The script marks the profile as cleanly closed and removes stale profile locks; crash reporting is off by policy.
+5. **The window did not fill the screen.** Its size comes from `NEKO_DESKTOP_SCREEN`.
+6. **The first test run froze the machine.** Every container has memory, CPU and process ceilings, and swap is off: a runaway browser is killed by the kernel instead of hanging the host.
 
-1. **Cookies were wiped on every stop.** The image's profile said "clear cookies on exit" (`cookies: 4`). `brave-start.sh` now forces "keep" (`1`) in the profile before each start, and the `DefaultCookiesSetting` policy says the same. Checked: with `4` the cookies vanish.
-2. **Brave never received the stop signal.** `/usr/bin/brave-browser` is a bash wrapper that starts the real `brave` as a child process without `exec`, so supervisord's SIGINT never reached the browser. Stopping took 18 s (wait, then kill), and everything from the last seconds was lost because Brave never flushed its cookies to disk. The script now runs the real binary with `exec` (and sets the environment variables the wrapper used to set); stopping takes about 1 s. Docker waits up to 30 s (`stop_grace_period`) and supervisord up to 15 s.
-3. **The keyboard was silent in the mirror.** In Neko 3 you must ask for control with a button by default, and the focus did not reach the input field until you did. `NEKO_SESSION_IMPLICIT_HOSTING=true` makes it implicit (hover and work).
-4. **A "Brave quit unexpectedly" window after every re-create.** Before starting, the script marks the profile as cleanly closed, and crash reporting is off by policy (`MetricsReportingEnabled`). It also removes the profile lock files: they remember the previous container's host name and otherwise trigger "profile in use by another computer".
-5. **The browser window did not fill the screen.** The window size now comes from `NEKO_DESKTOP_SCREEN`.
-6. **The first test run froze the machine.** Every container has a ceiling: `NEKO_MEM` (3 GB) and `NEKO_CPUS` (2) for Neko, 512 MB and half a CPU (`LIFE_CPUS`) for warm-up, 256 MB and half a CPU (`SERVER_CPUS`) for the HTTP service, 256 MB for Tailscale, plus process limits. Swap is off (`memswap_limit` equals `mem_limit`). A runaway browser (a leak, an endless loop on a page) is then killed by the kernel instead of hanging the host. `/dev/shm` is 2 GB because Chromium crashes on heavy pages without enough, and it counts toward the container's memory.
-
-Other deliberate differences from the stock Neko Brave image (all in `neko/brave-start.sh`): no `--bwsi` (guest mode erases the profile on exit); `--password-store=basic` (so cookies decrypt after a re-create); `--lang=en-US` with `Accept-Language` set to `en-US,ru` in the profile (the flag and the `ForcedLanguages` policy did not work in this Brave on Linux); `--force-dark-mode` and `--disable-file-system` removed (pages can see them, and they set the browser apart); `--remote-debugging-port=9222` added. `--no-sandbox` stays, as in the stock image: the container is the boundary and the user is not root. The policies in `neko/policies.json` turn off guest mode, browser sign-in and sync, the password manager and autofill, block notifications, restrict downloads and block `file://`. Signing in to websites works normally.
+Other deliberate differences from the stock Neko Brave: no `--bwsi` (guest mode erases the profile), `--password-store=basic` (cookies decrypt after a re-create), `--lang=en-US` with `Accept-Language` `en-US,ru`, `--force-dark-mode` and `--disable-file-system` removed (pages can see them), `--remote-debugging-port=9222` added.
 
 ## What is where
 
 | File | Purpose |
 |---|---|
-| `docker-compose.yml` | Neko with Brave (`neko`), warm-up (`life`, profile `warmup`), the HTTP service (`server`, profile `api`), Tailscale (`tailscale`, profile `egress`) |
-| `docker-compose.egress.yml` | Laid over the main file: Neko, warm-up and the HTTP service in the Tailscale container's network |
-| `.env.example` | The settings with comments. `npm run init` creates `.env` from it (not in git, mode 0600, random passwords) and `npm run config` edits it. Optional variables (`TS_*`, `LIFE_CPUS`, `TELEGRAM_*` and others) are listed at its end; add them by hand |
-| `neko/brave-start.sh` | Starts Brave: the real binary, the flags, profile fixes |
-| `neko/brave.conf` | Replaces the image's supervisord config so Neko takes the browser flags from the script |
-| `neko/policies.json` | Brave policies (see above) |
-| `life/Dockerfile` | The warm-up image: Node and Patchright; the repository is mounted at `/app` |
-| `egress/killswitch.sh` | Kill switch: non-root processes may leave only through the tunnel ([egress.md](../docs/egress.md#fail-closed)) |
+| `docker-compose.yml` | The browser (`neko`, container `meatsuit-browser`), `profile-init` (owner of the profile and of `meatsuit_profile/state`), the frozen `life` (profile `warmup`) and `server` (profile `api`), Tailscale (profile `egress`) |
+| `browser-chrome.yml`, `browser-brave.yml` | Per-browser image, profile volume and config files, chosen by `MEATSUIT_BROWSER` |
+| `chrome.conf`, `chrome-policies.json` | Google Chrome under Neko: supervisord program and policies |
+| `neko/brave.conf`, `neko/brave-start.sh`, `neko/policies.json` | Brave under Neko |
+| `docker-compose.egress.yml`, `egress/killswitch.sh` | The optional Tailscale exit and its kill switch |
+| `up.sh` | `docker compose` with the deploy file, and the Tailscale overlay when asked |
 | `verify.sh`, `verify/` | The checks described above |
+| `life/Dockerfile` | The image of the frozen `extras/` services (Node and Patchright; the repository is mounted at `/app`) |
+| `.env.example` | The deploy file's template, with comments |
 
-Settings in `.env` (all optional except the passwords). The file can live elsewhere (the owner keeps it outside the repository): set `MEATSUIT_CONFIG=<file>` for `npm run init` and `npm run config`, and pass `--env-file <file>` to `docker compose`. Compose reads it only on `up`, so run `docker compose up -d` after a change.
+## Frozen services: warm-up and the HTTP service
 
-`npm run config` opens a temporary page to edit the file, with a hint under every field and the same checks as `config.js`. It is a process on the host, not in a container and not in the browser's network, so the mirrored browser cannot reach it. It listens on `127.0.0.1` (`--tailnet` binds to this machine's tailnet address instead, to open it from a phone), prints a link with a random token once, and exits after 15 idle minutes or the "Закончить" button. The token travels in a header, never in a cookie; a request from another origin gets 403. Passwords are never sent to the page: it shows whether one is set and lets you type or generate a new one. Writes are atomic with mode 0600, and an edit made elsewhere since the page loaded gets 409 instead of being overwritten.
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `NEKO_PASSWORD`, `NEKO_ADMIN_PASSWORD` | required | Member and admin passwords of the mirror |
-| `NEKO_BIND_IP`, `NEKO_PORT` | `127.0.0.1`, `8080` | Host address and port the mirror binds to (the WebRTC UDP ports follow the address) |
-| `NEKO_WEBRTC_IP` | `127.0.0.1` | The address clients use to reach the video: the same one you open the mirror at |
-| `MEATSUIT_TZ` | `UTC` | Time zone (IANA name) of the containers, so of the browser; the HTTP service also counts its day limits in it. Set the zone of your exit country. The warm-up schedule uses `tz` in `profiles/life.json` instead |
-| `NEKO_SCREEN` | `1280x720@30` | Resolution and frame rate; the browser window takes this size |
-| `NEKO_MEM`, `NEKO_CPUS` | `3g`, `2` | Ceilings for the Neko container. `NEKO_CPUS=0` removes the CPU ceiling: on some hosts (an OpenVZ container, for example) the CPU quota is refused and the container does not start (`cpu.cfs_quota_us: invalid argument`). `LIFE_CPUS` and `SERVER_CPUS` (default `0.5`) do the same for warm-up and the HTTP service |
-| `BRAVE_EXTRA_FLAGS` | empty | Extra Brave flags (no spaces inside values) |
-| `LIFE_CONFIG` | `/app/profiles/life.json` | Warm-up config path inside its container |
-| `MEATSUIT_API_PORT` | `8787` | Host port of the HTTP service (same address as `NEKO_BIND_IP`) |
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | empty | Optional alerts from the HTTP service |
-| `MEATSUIT_BROWSER` | `chrome` | Browser in the mirror, `chrome` or `brave`. Not read by `docker-compose.yml` yet: it still runs Brave |
-| `MEATSUIT_PROFILE_DIR` | empty | Host folder for the browser profile instead of the `brave_profile` volume. Absolute path, owned by uid 1000 |
-| `NEKO_TAG`, `TS_TAG` | `3.1.6`, `stable` | Image tags (`TS_TAG` is not in `.env.example`) |
-| `TS_AUTHKEY`, `TS_EXTRA_ARGS`, `TS_HOSTNAME` | empty, empty, `meatsuit` | Tailscale container settings (not in `.env.example`) |
-
-The CDP port (9222) listens only inside the container and is never published. The other containers of the stack share Neko's network (`network_mode: service:neko`). Whoever can reach CDP controls the browser, so do not publish it.
-
-## Warm-up service
-
-It does not start by default (profile `warmup`). Without the home exit it would leave from the server's own address, and the browser's first "history" would come from a datacenter.
+`extras/` keeps the warm-up scheduler and the HTTP service from an earlier line of the project. They are frozen: they work and are tested, but are not developed. In Compose they are the profiles `warmup` (`life`) and `api` (`server`); both share the browser's network and reach CDP at `127.0.0.1:9222`.
 
 ```sh
-cp ../profiles/life.example.json ../profiles/life.json   # once: your sites and hours, git-ignored
-docker compose --profile warmup up -d --build     # start
-docker compose --profile warmup logs -f life      # journal
-docker compose --profile warmup stop life         # stop
+cp profiles/life.example.json profiles/life.json      # warm-up: your sites and hours, git-ignored
+docker/up.sh --profile warmup up -d --build
 ```
 
-Before the first start on a server create `../profiles/egress.json` (`{"country":"DE","asn":[64496]}`: use your own country and ASN, see [egress.md](../docs/egress.md#the-egress-check)). Then every session first checks the exit and is skipped on a mismatch. Without the file `life` does not start (`--no-egress-check` is the explicit opt-out). The config is read at startup, so restart the service after editing `profiles/life.json`. Schedule and options are in [warmup.md](../docs/warmup.md). The journal and state live in the `life_data` volume.
-
-## HTTP service
-
-The service that your scripts call (`GET /view`, `POST /act`, see [http-api.md](../docs/http-api.md)) is the `server` service, profile `api`. It shares Neko's network, so it reaches the browser's CDP port at `127.0.0.1:9222`, and its port 8787 is published next to the mirror's, on `NEKO_BIND_IP` only.
-
-```sh
-cp ../profiles/clients.example.json ../profiles/clients.json    # your own long random tokens; the file is git-ignored
-cp ../profiles/sites.example.json ../profiles/sites.json        # your own limits per site; the file is git-ignored
-# also needed: ../profiles/egress.json (the exit you expect); without any of the three it will not start
-docker compose --profile api up -d --build
-curl -s http://127.0.0.1:8787/                                  # status page, no token needed
-```
-
-It uses the same `/data` volume as warm-up, so both share `persona.json` and the hands are the same "person". **Not verified:** this service was added to the compose file after the last real run; `docker compose config` accepts it (with and without the egress override), but it has not been started in a container.
-
-## Deploying on a server
-
-1. Install Docker with Compose on the server, and Tailscale on the host. Your phone and laptop are in the same tailnet.
-2. Clone the repository, `npm run init` (random passwords; read the member one with `grep NEKO_PASSWORD docker/.env`), `cd docker`.
-3. **Addresses.** In `.env` set `NEKO_BIND_IP` and `NEKO_WEBRTC_IP` to the server's **tailnet address** (`tailscale ip -4`, like `<your-tailnet-ip>`). Never publish the ports to the public internet: binding to the tailnet address is what keeps them private. Do not rely on a host firewall alone, because Docker's published ports bypass common firewall front ends. The mirror runs over plain `http`, with the login cookie's `Secure` flag turned off (`NEKO_SESSION_COOKIE_SECURE=false`, otherwise the browser refuses it over `http`); the tailnet encrypts the link, so this is only safe there. Open `http://<your-tailnet-ip>:8080`.
-4. `docker compose up -d`, then `./verify.sh persistence`.
-5. **Exit through home** ([egress.md](../docs/egress.md)). Set up the exit node on the home device first. Add `TS_AUTHKEY` and `TS_EXTRA_ARGS=--exit-node=<home-node-name> --exit-node-allow-lan-access=false` to `.env` (`TS_HOSTNAME` and `TS_TAG` are optional), then run `docker compose -f docker-compose.yml -f docker-compose.egress.yml --profile egress up -d`. The override uses the `!reset` tag, which needs Compose 2.24 or newer. **Do not set the exit node on the host itself over an SSH session on its public address**: the session hangs. The rules and a rollback are in egress.md.
-6. Check the exit: open `https://ipinfo.io` in the mirror; it must show your home country and ISP. Only then start warm-up and your bots.
-
-The browser's time zone comes from `MEATSUIT_TZ` in `.env` (default `UTC`): set it to the zone of your exit country, because a site can compare the browser's zone with the zone of your IP address. The warm-up zone is separate: `tz` in `profiles/life.json`. Run `./verify.sh` before step 5 (it has not been tried with the override).
+The HTTP service needs `profiles/clients.json`, `profiles/sites.json` and `profiles/egress.json` (all git-ignored, examples next to them). Details: [warmup.md](../docs/warmup.md), [http-api.md](../docs/http-api.md). Without the Tailscale exit, warm-up would leave from the server's address, so it does not start by default.
 
 ## Troubleshooting
 
 | Symptom | What to check |
 |---|---|
-| `docker compose up` stops with "Задайте NEKO_PASSWORD (npm run init)" | That is Russian for "set NEKO_PASSWORD". Run `npm run init`, or pass `--env-file` if the file lives elsewhere |
-| The container never becomes healthy | `docker compose logs neko`. The healthcheck needs Neko's `/health` and Brave's CDP port to answer; it allows 30 s to start |
+| `up.sh: нет файла деплоя …` | Run `npm run init`, or export `MEATSUIT_CONFIG` with the path of your file |
+| Compose stops with "Задайте NEKO_PASSWORD (npm run init)" | Russian for "set NEKO_PASSWORD": the file has no password. `npm run init` on an existing file only lists what is wrong |
+| The container never becomes healthy | `docker/up.sh logs neko`. The healthcheck needs Neko's `/health` and the browser's CDP port; it allows 30 s to start |
+| `profile-init` failed | `docker/up.sh logs profile-init`. With `MEATSUIT_PROFILE_DIR`, the path must be absolute and on a filesystem that allows `chown` |
 | `verify.sh` says the login failed | Use the member password (`NEKO_PASSWORD`), not the admin one |
 | Login works over `127.0.0.1` but not over a tailnet address | `NEKO_SESSION_COOKIE_SECURE` must stay `"false"` (the compose file sets it) |
-| No video or sound away from `127.0.0.1` | `NEKO_WEBRTC_IP` must be the address you type in the browser, and UDP 59000 to 59019 must reach the host. Over a tailnet the video worked in one run from a headless Chromium (table above); sound, a real browser and a phone are not verified |
-| Keys do nothing | Hover over the video first (implicit control). Then try the Enter test above |
-| Signed out after a restart | Did you run `down -v`? Run `./verify.sh persistence`. Prefer `docker compose stop` to killing the container |
-| "Brave quit unexpectedly" or "profile in use" appears | `brave-start.sh` clears both at every start; check that it is mounted (`docker compose config`) and read `docker compose logs neko` |
+| No video or sound away from `127.0.0.1` | `NEKO_WEBRTC_IP` must be the address you type in the browser, and UDP 59000 to 59019 must reach the host |
+| Signed out after a restart | Did you run `down -v`, or switch `MEATSUIT_BROWSER`? Run `docker/verify.sh persistence`. Prefer `docker/up.sh stop` to killing the container |
+| "Profile in use on another computer" | The profile came from a container with another host name: stop the browser and remove `SingletonLock`, `SingletonCookie`, `SingletonSocket` from the profile folder |
 | Choppy video, high CPU | Lower `NEKO_SCREEN` and `NEKO_CPUS` |
-| The container exits with code 137 | A memory ceiling was hit or something killed it. Raise `NEKO_MEM` if a heavy page needs it |
-| With the egress override nothing starts | Neko waits for `tailscale` to be healthy: it needs a valid `TS_AUTHKEY` and an approved, online exit node. `docker compose logs tailscale` |
+| The container exits with code 137 | A memory ceiling was hit. Raise `NEKO_MEM` if a heavy page needs it |
+| With the Tailscale exit nothing starts | The browser waits for `tailscale` to be healthy: it needs a valid `TS_AUTHKEY` and an approved, online exit node. `docker/up.sh logs tailscale` |
 
-Russian original: [README.ru.md](README.ru.md).
+Russian version: [README.ru.md](README.ru.md).

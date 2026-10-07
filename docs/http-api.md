@@ -1,15 +1,17 @@
 # HTTP API reference
 
+> **Frozen.** This page describes `extras/`: code from an earlier line of meatsuit that works and is tested (`npm --prefix extras ci`, then `npm run test:extras`) but is not developed. The modules named here live in `extras/` (`extras/server.js`, `extras/life.js`, `extras/limits.js` and so on) and run from the repository root as `node extras/<file>`. The maintained product is the library and the mirror: [README](../README.md), [04-contract.md](04-contract.md).
+
 meatsuit exposes one browser to your own scripts through a small HTTP service. A script asks for a task, looks at a page with `GET /view`, does things with `POST /act`, and ends the task. The service queues tasks, paces them, checks the network exit, and moves the mouse and keyboard like a person. For the idea behind this, see [architecture](architecture.md).
 
-Everything below follows the code in [`server.js`](../server.js), [`driver.js`](../driver.js) and [`view.js`](../view.js). Where a Russian note disagrees with the code, the code wins. The `message` field in error bodies is a human-readable hint that is currently in Russian. Match on `error` and the other fields, never on `message`.
+Everything below follows the code in [`server.js`](../extras/server.js), [`driver.js`](../extras/driver.js) and [`view.js`](../extras/view.js). Where a Russian note disagrees with the code, the code wins. The `message` field in error bodies is a human-readable hint that is currently in Russian. Match on `error` and the other fields, never on `message`.
 
 ## Running the service
 
-Requires Node 20+ and `npm install` (Patchright). The browser must already be running with its CDP port (Chrome DevTools Protocol) reachable at `--cdp`. With Docker, `docker compose --profile api up -d` runs it inside the browser's network (see [Docker notes](../docker/README.md#http-service); the compose definition has not been started in a container yet).
+Requires Node 20+ and `npm --prefix extras ci` (Patchright). The browser must already be running with its CDP port (Chrome DevTools Protocol) reachable at `--cdp`. With Docker, `docker/up.sh --profile api up -d --build` runs it inside the browser's network (see [Docker notes](../docker/README.md#frozen-services-warm-up-and-the-http-service); the compose definition has not been started in a container yet).
 
 ```sh
-node server.js [--host 127.0.0.1] [--port 8787] [--data data] [--cdp http://127.0.0.1:9222] \
+node extras/server.js [--host 127.0.0.1] [--port 8787] [--data data] [--cdp http://127.0.0.1:9222] \
                [--sites profiles/sites.json] [--clients profiles/clients.json] [--egress profiles/egress.json] \
                [--tz Europe/Berlin]
 ```

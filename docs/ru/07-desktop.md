@@ -1,5 +1,7 @@
 # Как всё работает на десктопе
 
+> **Заморожено.** Рабочая записка прежней линии meatsuit (HTTP-сервис, прогрев, проверка выхода, зеркало на Brave). Этот код теперь в `extras/`: запуск из корня репозитория — `node extras/<файл>`, зависимости — `npm --prefix extras ci`, тесты — `npm run test:extras`. Он работает, но не развивается. Продукт сейчас — библиотека и зеркало: [README.ru.md](../../README.ru.md), [04-contract.md](../04-contract.md), [docker/README.ru.md](../../docker/README.ru.md).
+
 Это про запуск meatsuit на вашем компьютере (не на сервере). Рабочая записка на русском. Что проверено, а что нет,
 написано рядом с каждым пунктом. Общая картина проекта: [03-design.md](03-design.md), HTTP-интерфейс:
 [04-http-api.md](04-http-api.md), прогрев: [06-warmup.md](06-warmup.md), Docker: [../../docker/README.ru.md](../../docker/README.ru.md).
