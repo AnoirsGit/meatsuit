@@ -1,7 +1,7 @@
 /**
  * Подключение проекта к общему браузеру.
  *
- *   const ms = await connect({ cdpUrl: 'http://browser:9222', notify });
+ *   const ms = await connect({ cdpUrl: 'http://browser:9222', sitesFile: './sites.json', notify });
  *   await ms.task('tinder:match-chat', async ({ see, act }) => {
  *     const snap = await see();
  *     await act({ cmd: 'click', id: 3, gen: snap.gen });
@@ -24,16 +24,34 @@ const { supervise, BudgetExceeded } = require('./supervise.js');
 const { signature, normalizeName, urlPattern } = require('./capture.js');
 const { ruleFor, reserve, charge, peek, lock, LimitReached } = require('./limits.js');
 
+/**
+ * Лимиты площадок принадлежат вызывающему проекту: путь к его sites.json (читается на каждую задачу,
+ * правка действует без перезапуска) или сам объект. Своего sites.json у meatsuit нет, только образец.
+ */
+function sitesSource({ sitesFile, sites }) {
+  const hint = 'образец: sites.example.json в meatsuit';
+  if (sitesFile && sites) throw new Error('connect: нужен либо sitesFile, либо sites, не оба');
+  if (sites) {
+    if (typeof sites !== 'object' || Array.isArray(sites)) throw new Error(`connect: sites — объект { "хост": { perDay, … } } (${hint})`);
+    return () => sites;
+  }
+  if (!sitesFile) throw new Error(`connect: нужен sitesFile (путь к своему sites.json) или sites (объект лимитов); ${hint}`);
+  if (!fs.existsSync(sitesFile)) throw new Error(`connect: нет файла лимитов ${sitesFile} (${hint})`);
+  return () => JSON.parse(fs.readFileSync(sitesFile, 'utf8'));
+}
+
 async function connect({
   cdpUrl,
   dir = path.join(os.homedir(), '.meatsuit'),
-  sitesFile = path.join(__dirname, 'sites.json'),
+  sitesFile, // свой sites.json вызывающего проекта…
+  sites, // …или объект лимитов; без одного из них connect не стартует
   notify = async () => {},
   // Какие события отправлять в notify(text, event). По умолчанию только плохие: на каждую
   // задачу-матч писать «ок» значило бы засыпать группу. Проект сам шлёт итог запуска.
   notifyOn = ['needsHuman', 'limit', 'error'],
 } = {}) {
   if (!cdpUrl) throw new Error('connect: нужен cdpUrl');
+  const loadSites = sitesSource({ sitesFile, sites }); // до подключения: без лимитов браузер не трогаем
   const browser = await chromium.connectOverCDP(cdpUrl);
   fs.mkdirSync(dir, { recursive: true });
 
@@ -72,7 +90,7 @@ async function connect({
 
   async function task(name, fn, { site, maxCommands = 60, maxMinutes = 10, dryRun = false, dryRunNavigation = false, readOnly = false, capture } = {}) {
     if (!site) throw new Error('task: нужен site');
-    const rule = ruleFor(JSON.parse(fs.readFileSync(sitesFile, 'utf8')), site); // своя запись или "*"
+    const rule = ruleFor(loadSites(), site); // своя запись или "*"
     // Потолок бюджета задаёт площадка, а не вызывающий проект.
     if (rule && rule.maxCommands) maxCommands = Math.min(maxCommands, rule.maxCommands);
     if (rule && rule.maxMinutes) maxMinutes = Math.min(maxMinutes, rule.maxMinutes);
