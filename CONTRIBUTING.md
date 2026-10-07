@@ -21,7 +21,7 @@ npm install
 npm test        # node --test, one file at a time
 ```
 
-Tests that need a real browser skip themselves unless Patchright (installed by `npm install`) and a Chromium are available. Patchright does not download a browser: install Chromium with your system's package manager (the tests look for `/usr/bin/chromium`, `chromium-browser`, `google-chrome`, or the path in `MEATSUIT_CHROMIUM`). Then:
+Tests that need a real browser skip themselves unless Patchright (installed by `npm install`) and a Chromium are available. Patchright does not download a browser: install Chromium with your system's package manager (the tests look for `/usr/bin/chromium`, `chromium-browser`, `google-chrome`, or the path in `MEATSUIT_CHROMIUM`; the end-to-end tests read the path from `CHROMIUM` instead). Then:
 
 ```sh
 npm test
