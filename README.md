@@ -64,11 +64,12 @@ npm install
 npm test
 
 # 2. The browser mirror
+npm run init                # docker/.env: random mirror passwords, mode 0600; a second run changes nothing
+npm run config              # optional: a page on 127.0.0.1 to review and edit it (prints a one-time link)
 cd docker
-cp .env.example .env        # set NEKO_PASSWORD and NEKO_ADMIN_PASSWORD
 docker compose up -d
 ./verify.sh                 # opens a page through the mirror, scrolls it, checks the browser really did
-# then open http://127.0.0.1:8080 (any name, the password you set)
+# then open http://127.0.0.1:8080 (any name, NEKO_PASSWORD from docker/.env)
 
 # 3. See what the warm-up would do (no browser needed)
 cd ..

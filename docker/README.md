@@ -9,8 +9,8 @@ meatsuit is personal automation of your own accounts at low volume. Platforms' t
 ## Quick start
 
 ```sh
+npm run init                # from the repository root: docker/.env with random passwords, mode 0600
 cd docker
-cp .env.example .env        # set NEKO_PASSWORD and NEKO_ADMIN_PASSWORD (long, different)
 docker compose up -d        # the mirror only
 ./verify.sh                 # opens an article through the mirror, scrolls, and confirms over CDP
 ```
@@ -74,7 +74,7 @@ Other deliberate differences from the stock Neko Brave image (all in `neko/brave
 |---|---|
 | `docker-compose.yml` | Neko with Brave (`neko`), warm-up (`life`, profile `warmup`), the HTTP service (`server`, profile `api`), Tailscale (`tailscale`, profile `egress`) |
 | `docker-compose.egress.yml` | Laid over the main file: Neko, warm-up and the HTTP service in the Tailscale container's network |
-| `.env.example` | The main settings with comments; copy to `.env` (not in git). The Tailscale ones (`TS_*`) are not listed; add them by hand |
+| `.env.example` | The settings with comments. `npm run init` creates `.env` from it (not in git, mode 0600, random passwords) and `npm run config` edits it. Optional variables (`TS_*`, `LIFE_CPUS`, `TELEGRAM_*` and others) are listed at its end; add them by hand |
 | `neko/brave-start.sh` | Starts Brave: the real binary, the flags, profile fixes |
 | `neko/brave.conf` | Replaces the image's supervisord config so Neko takes the browser flags from the script |
 | `neko/policies.json` | Brave policies (see above) |
@@ -82,21 +82,23 @@ Other deliberate differences from the stock Neko Brave image (all in `neko/brave
 | `egress/killswitch.sh` | Kill switch: non-root processes may leave only through the tunnel ([egress.md](../docs/egress.md#fail-closed)) |
 | `verify.sh`, `verify/` | The checks described above |
 
-Settings in `.env` (all optional except the passwords):
+Settings in `.env` (all optional except the passwords). The file can live elsewhere (the owner keeps it outside the repository): set `MEATSUIT_CONFIG=<file>` for `npm run init` and `npm run config`, and pass `--env-file <file>` to `docker compose`. Compose reads it only on `up`, so run `docker compose up -d` after a change.
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `NEKO_PASSWORD`, `NEKO_ADMIN_PASSWORD` | required | Member and admin passwords of the mirror |
 | `NEKO_BIND_IP`, `NEKO_PORT` | `127.0.0.1`, `8080` | Host address and port the mirror binds to (the WebRTC UDP ports follow the address) |
 | `NEKO_WEBRTC_IP` | `127.0.0.1` | The address clients use to reach the video: the same one you open the mirror at |
-| `MEATSUIT_TZ` | `Asia/Almaty` | Time zone (IANA name) of the containers, so of the browser; the HTTP service also counts its day limits in it. Set the zone of your exit country. The warm-up schedule uses `tz` in `profiles/life.json` instead |
+| `MEATSUIT_TZ` | `UTC` | Time zone (IANA name) of the containers, so of the browser; the HTTP service also counts its day limits in it. Set the zone of your exit country. The warm-up schedule uses `tz` in `profiles/life.json` instead |
 | `NEKO_SCREEN` | `1280x720@30` | Resolution and frame rate; the browser window takes this size |
 | `NEKO_MEM`, `NEKO_CPUS` | `3g`, `2` | Ceilings for the Neko container. `NEKO_CPUS=0` removes the CPU ceiling: on some hosts (an OpenVZ container, for example) the CPU quota is refused and the container does not start (`cpu.cfs_quota_us: invalid argument`). `LIFE_CPUS` and `SERVER_CPUS` (default `0.5`) do the same for warm-up and the HTTP service |
 | `BRAVE_EXTRA_FLAGS` | empty | Extra Brave flags (no spaces inside values) |
 | `LIFE_CONFIG` | `/app/profiles/life.json` | Warm-up config path inside its container |
 | `MEATSUIT_API_PORT` | `8787` | Host port of the HTTP service (same address as `NEKO_BIND_IP`) |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | empty | Optional alerts from the HTTP service |
-| `NEKO_TAG`, `TS_TAG` | `3.1.6`, `stable` | Image tags (not in `.env.example`) |
+| `MEATSUIT_BROWSER` | `chrome` | Browser in the mirror, `chrome` or `brave`. Not read by `docker-compose.yml` yet: it still runs Brave |
+| `MEATSUIT_PROFILE_DIR` | empty | Host folder for the browser profile instead of the `brave_profile` volume. Absolute path, owned by uid 1000 |
+| `NEKO_TAG`, `TS_TAG` | `3.1.6`, `stable` | Image tags (`TS_TAG` is not in `.env.example`) |
 | `TS_AUTHKEY`, `TS_EXTRA_ARGS`, `TS_HOSTNAME` | empty, empty, `meatsuit` | Tailscale container settings (not in `.env.example`) |
 
 The CDP port (9222) listens only inside the container and is never published. The other containers of the stack share Neko's network (`network_mode: service:neko`). Whoever can reach CDP controls the browser, so do not publish it.
@@ -131,19 +133,19 @@ It uses the same `/data` volume as warm-up, so both share `persona.json` and the
 ## Deploying on a server
 
 1. Install Docker with Compose on the server, and Tailscale on the host. Your phone and laptop are in the same tailnet.
-2. Clone the repository, `cd docker`, `cp .env.example .env`, set the passwords.
+2. Clone the repository, `npm run init` (random passwords; read the member one with `grep NEKO_PASSWORD docker/.env`), `cd docker`.
 3. **Addresses.** In `.env` set `NEKO_BIND_IP` and `NEKO_WEBRTC_IP` to the server's **tailnet address** (`tailscale ip -4`, like `<your-tailnet-ip>`). Never publish the ports to the public internet: binding to the tailnet address is what keeps them private. Do not rely on a host firewall alone, because Docker's published ports bypass common firewall front ends. The mirror runs over plain `http`, with the login cookie's `Secure` flag turned off (`NEKO_SESSION_COOKIE_SECURE=false`, otherwise the browser refuses it over `http`); the tailnet encrypts the link, so this is only safe there. Open `http://<your-tailnet-ip>:8080`.
 4. `docker compose up -d`, then `./verify.sh persistence`.
 5. **Exit through home** ([egress.md](../docs/egress.md)). Set up the exit node on the home device first. Add `TS_AUTHKEY` and `TS_EXTRA_ARGS=--exit-node=<home-node-name> --exit-node-allow-lan-access=false` to `.env` (`TS_HOSTNAME` and `TS_TAG` are optional), then run `docker compose -f docker-compose.yml -f docker-compose.egress.yml --profile egress up -d`. The override uses the `!reset` tag, which needs Compose 2.24 or newer. **Do not set the exit node on the host itself over an SSH session on its public address**: the session hangs. The rules and a rollback are in egress.md.
 6. Check the exit: open `https://ipinfo.io` in the mirror; it must show your home country and ISP. Only then start warm-up and your bots.
 
-The browser's time zone comes from `MEATSUIT_TZ` in `.env` (default `Asia/Almaty`, the author's zone): set it to the zone of your exit country, because a site can compare the browser's zone with the zone of your IP address. The warm-up zone is separate: `tz` in `profiles/life.json`. Run `./verify.sh` before step 5 (it has not been tried with the override).
+The browser's time zone comes from `MEATSUIT_TZ` in `.env` (default `UTC`): set it to the zone of your exit country, because a site can compare the browser's zone with the zone of your IP address. The warm-up zone is separate: `tz` in `profiles/life.json`. Run `./verify.sh` before step 5 (it has not been tried with the override).
 
 ## Troubleshooting
 
 | Symptom | What to check |
 |---|---|
-| `docker compose up` stops with "Задайте NEKO_PASSWORD в docker/.env" | That is Russian for "set NEKO_PASSWORD in docker/.env". Fill in both passwords |
+| `docker compose up` stops with "Задайте NEKO_PASSWORD (npm run init)" | That is Russian for "set NEKO_PASSWORD". Run `npm run init`, or pass `--env-file` if the file lives elsewhere |
 | The container never becomes healthy | `docker compose logs neko`. The healthcheck needs Neko's `/health` and Brave's CDP port to answer; it allows 30 s to start |
 | `verify.sh` says the login failed | Use the member password (`NEKO_PASSWORD`), not the admin one |
 | Login works over `127.0.0.1` but not over a tailnet address | `NEKO_SESSION_COOKIE_SECURE` must stay `"false"` (the compose file sets it) |
