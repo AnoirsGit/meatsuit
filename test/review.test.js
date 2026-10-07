@@ -25,7 +25,9 @@ const PAGES = {
 
 (async () => {
   // Чистые проверки.
-  assert.throws(() => validate({ cmd: 'fill', id: 1, gen: 1, text: 'hi\nthere' }), BadCommand);
+  // fill с переводом строки проходит validate, но выполняется только в textarea (иначе BadCommand до действия, test/forms.test.js).
+  validate({ cmd: 'fill', id: 1, gen: 1, text: 'hi\nthere' });
+  assert.throws(() => validate({ cmd: 'type', text: 'hi\nthere' }), BadCommand);
   assert.throws(() => validate({ cmd: 'type', text: 'a\rb' }), BadCommand);
   assert.throws(() => validate({ cmd: 'scroll', px: -300 }), BadCommand);
   const snap = (o) => ({ url: 'https://tinder.com/app/recs', title: '', text: '', elements: [], dialogs: [], frames: [], ...o });
