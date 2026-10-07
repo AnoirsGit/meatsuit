@@ -25,6 +25,8 @@ const FORM = `<body style="margin:0;font:16px sans-serif">
     <input type="file" id="f4" aria-label="Lever resume" style="position:absolute;inset:0;opacity:0;width:100%" onchange="${SHOW(4)}"></label> <span id="n4"></span></div>
   <div><button type="button" id="b5">Ничего не открывает</button></div>
   <div><input type="file" id="f6" aria-label="Недоступное" disabled></div>
+  <div style="position:relative;display:inline-block"><input type="file" id="f7" onchange="${SHOW(7)}">
+    <label for="f7" style="position:absolute;inset:0;background:#eee">Выбрать файл</label></div> <span id="n7"></span>
 </body>`;
 
 const readLog = (f) => fs.readFileSync(f, 'utf8').trim().split('\n').map(JSON.parse);
@@ -83,6 +85,7 @@ const byName = (s, name, inputType) => s.elements.find((e) => e.name === name &&
   assert.ok(byName(s0, 'Attach').inputType === undefined, 'сама кнопка Attach должна быть в снимке первой');
   assert.ok(byName(s0, 'Lever resume', 'file'), 'прозрачное поле поверх метки не в снимке');
   assert.ok(byName(s0, 'ATTACH RESUME/CV') === undefined || byName(s0, 'ATTACH RESUME/CV').inputType === 'file');
+  assert.ok(byName(s0, 'Выбрать файл', 'file'), 'видимое поле, накрытое своей меткой, не в снимке');
 
   // --- Отказы при выполнении, до любого действия: ссылка наружу, ссылка на чужой тип, больше 10 МБ, пустой, нет файла,
   // недоступное поле, не поле файла и не кнопка выбора. В сообщениях нет пути.
@@ -116,9 +119,13 @@ const byName = (s, name, inputType) => s.elements.find((e) => e.name === name &&
   assert.equal(await page.textContent('#n4'), `cv.pdf:${pdf.length}:application/pdf`);
   assert.equal(byName(r4, 'Lever resume', 'file').value, 'cv.pdf');
 
+  const r7 = await h.act({ cmd: 'upload', ...at(r4, 'Выбрать файл', 'file'), file: cv });
+  assert.equal(await page.textContent('#n7'), `cv.pdf:${pdf.length}:application/pdf`);
+  assert.equal(byName(r7, 'Выбрать файл', 'file').value, 'cv.pdf');
+
   // --- Кнопка, которая открывает выбор файла: человеческий клик, окно выбора перехвачено, файл встал.
-  const attach = r4.elements.find((e) => e.name === 'Attach' && e.inputType === undefined);
-  const r3 = await h.act({ cmd: 'upload', id: attach.id, gen: r4.gen, file: cv });
+  const attach = r7.elements.find((e) => e.name === 'Attach' && e.inputType === undefined);
+  const r3 = await h.act({ cmd: 'upload', id: attach.id, gen: r7.gen, file: cv });
   assert.equal(await page.textContent('#n3'), `cv.pdf:${pdf.length}:application/pdf`);
   assert.equal(byName(r3, 'Attach', 'file').value, 'cv.pdf');
   // Кнопка, которая окна выбора не открывает: BadCommand, ничего не прикреплено.

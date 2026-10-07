@@ -166,8 +166,12 @@ function collect({ textLimit, nameLimit, optionsLimit, gen }) {
   let n = 0;
   for (const el of deepAll(document, (e) => e.matches(SELECTOR))) {
     let r = visible(el);
-    const proxy = !r && isFile(el) ? fileProxy(el) : null;
-    if (proxy) r = proxy.rect;
+    let proxy = null;
+    if (isFile(el) && (!r || (inViewport(r) && covered(el, r)))) { // спрятано или накрыто своей же меткой
+      proxy = fileProxy(el);
+      if (!proxy) continue;
+      r = proxy.rect;
+    }
     if (!r) continue;
     const seen = inViewport(r);
     if (!proxy && seen && covered(el, r)) continue;
