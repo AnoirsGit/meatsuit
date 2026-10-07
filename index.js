@@ -22,7 +22,7 @@ const { telegramNotifier, createTelegram, findChats, TelegramError } = require('
 const { openWindow } = require('./window.js');
 const { supervise, BudgetExceeded } = require('./supervise.js');
 const { signature, normalizeName, urlPattern } = require('./capture.js');
-const { ruleFor, reserve, charge, peek, lock, LimitReached } = require('./limits.js');
+const { ruleFor, reserve, charge, peek: peekLimit, status: limitStatus, lock, LimitReached } = require('./limits.js');
 
 /**
  * Лимиты площадок принадлежат вызывающему проекту: путь к его sites.json (читается на каждую задачу,
@@ -40,9 +40,22 @@ function sitesSource({ sitesFile, sites }) {
   return () => JSON.parse(fs.readFileSync(sitesFile, 'utf8'));
 }
 
+const DEFAULT_DIR = path.join(os.homedir(), '.meatsuit');
+
+/**
+ * Сколько осталось у площадки — без браузера, без очереди и без траты слота (проверка перед запуском, отчёт).
+ * Те же sitesFile|sites и dir, что у connect(): ошибки файла лимитов те же. Счётчики не пишет.
+ * → { site, rule, ok, reason, usedDay, usedHour, leftDay, leftHour } (см. status() в limits.js).
+ */
+function peek(site, { sitesFile, sites, dir = DEFAULT_DIR, now = new Date(), readOnly = false } = {}) {
+  if (!site) throw new Error('peek: нужен site');
+  const rule = ruleFor(sitesSource({ sitesFile, sites })(), site);
+  return { site, rule: rule || null, ...limitStatus(site, rule, path.join(dir, 'limits.json'), now, { readOnly }) };
+}
+
 async function connect({
   cdpUrl,
-  dir = path.join(os.homedir(), '.meatsuit'),
+  dir = DEFAULT_DIR,
   sitesFile, // свой sites.json вызывающего проекта…
   sites, // …или объект лимитов; без одного из них connect не стартует
   notify = async () => {},
@@ -105,7 +118,7 @@ async function connect({
       const found = rule && rule.singleTab ? await siteTab(site) : null; // до reserve: сбой поиска не тратит слот
       const limitsFile = path.join(dir, 'limits.json');
       const slot = new Date();
-      try { (dryRun ? peek : reserve)(site, rule, limitsFile, slot, { readOnly }); } // репетиция квоту не тратит
+      try { (dryRun ? peekLimit : reserve)(site, rule, limitsFile, slot, { readOnly }); } // репетиция квоту не тратит
       catch (e) {
         if (e instanceof LimitReached) await emit('limit', `meatsuit: «${name}» не запущена: ${e.message}`);
         throw e;
@@ -146,4 +159,4 @@ async function connect({
 
 // telegramNotifier и остальное из telegram.js — помощник для вызывающего (токен и группу передаёт он);
 // оставлены здесь для совместимости импорта, новым проектам проще require('meatsuit/telegram.js').
-module.exports = { connect, hands, replay, signature, normalizeName, urlPattern, NeedsHuman, LimitReached, BudgetExceeded, BadCommand, StaleElement, telegramNotifier, createTelegram, findChats, TelegramError };
+module.exports = { connect, hands, replay, signature, normalizeName, urlPattern, NeedsHuman, LimitReached, BudgetExceeded, BadCommand, StaleElement, telegramNotifier, createTelegram, findChats, TelegramError, peek };

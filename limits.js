@@ -67,6 +67,28 @@ function peek(site, rule, file, now = new Date(), opts) {
 }
 
 /**
+ * Состояние площадки без траты слота: { ok, reason, usedDay, usedHour, leftDay, leftHour }.
+ * reason — текст LimitReached, с которым задача сейчас не запустилась бы (null — запустится).
+ * usedDay — задачи с записью с местной полуночи; usedHour — все задачи (и только читающие) за час.
+ * left* — сколько ещё можно: null — лимита нет; площадки нет в файле — 0. Кривое правило — Error, как у reserve.
+ */
+function status(site, rule, file, now = new Date(), { readOnly = false } = {}) {
+  const all = readStamps(file);
+  const stamps = all[site] || [];
+  const reads = all[READS + site] || [];
+  let reason = null;
+  try { check(site, rule, stamps, now, { reads, readOnly }); } catch (e) {
+    if (!(e instanceof LimitReached)) throw e;
+    reason = e.message;
+  }
+  const midnight = new Date(now).setHours(0, 0, 0, 0);
+  const usedDay = stamps.filter((t) => t >= midnight).length;
+  const usedHour = [...stamps, ...reads].filter((t) => t > +now - HOUR).length;
+  const left = (cap, used) => (!rule ? 0 : cap == null ? null : Math.max(0, cap - used));
+  return { ok: !reason, reason, usedDay, usedHour, leftDay: left(rule && rule.perDay, usedDay), leftHour: left(rule && rule.perHour, usedHour) };
+}
+
+/**
  * Проверить лимит и записать задачу. Вызывать под lock().
  * readOnly: слот пишется в reads и тратит только perHour; полным его делает charge().
  */
@@ -135,4 +157,4 @@ async function lock(file, { pollMs = 500, timeoutMs = 30 * 60e3, heartbeatMs = 5
   }
 }
 
-module.exports = { ruleFor, check, peek, reserve, charge, lock, LimitReached };
+module.exports = { ruleFor, check, peek, status, reserve, charge, lock, LimitReached };
