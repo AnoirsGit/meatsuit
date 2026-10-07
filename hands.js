@@ -1,7 +1,7 @@
 /**
  * Руки: закрытый набор команд по номерам из снимка глаз (eyes.js).
  *
- *   const h = hands(page, { dryRun, logFile, recordDir, allowedHosts });
+ *   const h = hands(page, { dryRun, logFile, recordDir, allowedHosts, uploadDirs });
  *   const snap = await h.see();
  *   const res  = await h.act({ cmd: 'click', id: 7, gen: snap.gen }); // diff снимка после действия
  *
@@ -23,6 +23,14 @@ const MAX_LONG_TEXT = 2000; // fill в textarea (сопроводительно�
 const MAX_WAIT = 15000;
 const MAX_OPTION = 200; // value или подпись варианта <select>
 const MAX_ARROWS = 25; // дальше вариант ищется первыми буквами подписи, как делает человек
+// upload: только эти типы и не больше 10 МБ (резюме и письма для форм работодателей).
+const UPLOAD_TYPES = {
+  '.pdf': 'application/pdf',
+  '.doc': 'application/msword',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+};
+const MAX_UPLOAD = 10 * 1024 * 1024;
+const CHOOSER_MS = 5000; // сколько ждать окна выбора файла после клика по кнопке
 const KEYS = new Set(['Enter', 'Escape', 'Tab', 'Backspace', 'ArrowDown', 'ArrowUp', 'PageDown', 'PageUp']);
 
 // Копия SELECTOR из collect() в eyes.js: он локален в функции, которая выполняется в странице, и наружу не отдаётся.
@@ -75,8 +83,38 @@ const isLongText = (v) => typeof v === 'string' && v.length > 0 && v.length <= M
 // У press и type цель необязательна: поле, которое должно быть в фокусе. Тогда id и gen вместе.
 const hasTarget = (c) => c.id !== undefined || c.gen !== undefined;
 
-/** Проверка команды до выполнения. Бросает BadCommand. Чистая функция. */
-function validate(c, allowedHosts = []) {
+// file лежит внутри dir (оба абсолютные и нормализованные): не сам dir, не «..», не соседний каталог с тем же началом.
+const within = (dir, file) => {
+  const rel = path.relative(dir, file);
+  return rel !== '' && rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel);
+};
+
+/**
+ * Файл для upload при выполнении: настоящий путь (ссылки раскрыты) внутри настоящего каталога из uploadDirs,
+ * тип по настоящему имени, обычный непустой файл до 10 МБ. read: false — только проверить (dryRun).
+ * В сообщениях нет пути: они попадают в журнал. Отдаётся буфер, не путь: браузер может жить в другом контейнере.
+ */
+function uploadFile(file, uploadDirs, { read = true } = {}) {
+  let real;
+  try { real = fs.realpathSync(file); } catch { throw new BadCommand('upload: нет файла'); }
+  const dirs = uploadDirs.map((d) => { try { return fs.realpathSync(d); } catch { return null; } }).filter(Boolean);
+  if (!dirs.some((d) => within(d, real))) throw new BadCommand('upload: файл вне uploadDirs (ссылка ведёт наружу)');
+  if (!UPLOAD_TYPES[path.extname(real).toLowerCase()]) throw new BadCommand('upload: только pdf, doc, docx (ссылка ведёт на другой тип)');
+  const st = fs.statSync(real);
+  if (!st.isFile()) throw new BadCommand('upload: не обычный файл');
+  if (st.size === 0) throw new BadCommand('upload: пустой файл');
+  if (st.size > MAX_UPLOAD) throw new BadCommand('upload: файл больше 10 МБ');
+  if (!read) return null;
+  const buffer = fs.readFileSync(real);
+  if (buffer.length === 0 || buffer.length > MAX_UPLOAD) throw new BadCommand('upload: файл изменился во время чтения');
+  return { name: path.basename(file), mimeType: UPLOAD_TYPES[path.extname(real).toLowerCase()], buffer };
+}
+
+/**
+ * Проверка команды до выполнения. Бросает BadCommand. Чистая функция (файловую систему не трогает).
+ * uploadDirs — каталоги, откуда upload может брать файлы; без них upload выключен.
+ */
+function validate(c, allowedHosts = [], { uploadDirs = [] } = {}) {
   const bad = (m) => { throw new BadCommand(`${c && c.cmd}: ${m}`); };
   if (!c || typeof c !== 'object') throw new BadCommand('команда не объект');
   const optTarget = () => { if (hasTarget(c) && (!isId(c.id) || !isGen(c.gen))) bad('id и gen из снимка — вместе или ни одного'); };
@@ -88,6 +126,13 @@ function validate(c, allowedHosts = []) {
       break;
     case 'type': if (!isText(c.text)) bad('нужен text до ' + MAX_TEXT); optTarget(); break;
     case 'press': if (!KEYS.has(c.key)) bad('клавиша не из списка'); optTarget(); break;
+    case 'upload':
+      if (!isId(c.id) || !isGen(c.gen)) bad('нужны id и gen из снимка');
+      if (!Array.isArray(uploadDirs) || !uploadDirs.length) bad('загрузка файлов выключена: нет uploadDirs в опциях task');
+      if (typeof c.file !== 'string' || !path.isAbsolute(c.file) || c.file.includes('\0')) bad('file — абсолютный путь к файлу');
+      if (!UPLOAD_TYPES[path.extname(c.file).toLowerCase()]) bad('только pdf, doc, docx');
+      if (!uploadDirs.some((d) => typeof d === 'string' && within(path.resolve(d), path.resolve(c.file)))) bad('файл вне uploadDirs');
+      break;
     case 'select': {
       if (!isId(c.id) || !isGen(c.gen)) bad('нужны id и gen из снимка');
       const byValue = c.value !== undefined, byLabel = c.label !== undefined;
@@ -115,7 +160,7 @@ function validate(c, allowedHosts = []) {
 }
 
 function hands(page, opts = {}) {
-  const { dryRun = false, logFile, recordDir, allowedHosts = [], capture, dryRunNavigation = false } = opts;
+  const { dryRun = false, logFile, recordDir, allowedHosts = [], uploadDirs = [], capture, dryRunNavigation = false } = opts;
   const archive = capture && createCapture(capture); // { dir, htmlPerSignature, maxMB }
   let last = null;
   let world = null; // изолированный мир, где лежат элементы последнего снимка
@@ -313,10 +358,45 @@ function hands(page, opts = {}) {
     }
   };
 
+  /**
+   * Файл в форму. Цель — <input type=file> (в том числе спрятанное за меткой): файл ставится в поле буфером,
+   * как setInputFiles у Playwright, после паузы «выбрал в окне». Иначе — кнопка или метка, которая открывает
+   * выбор файла: человеческий клик, окно выбора перехватывается и получает файл. Окна выбора нет — BadCommand.
+   */
+  const upload = async (c) => {
+    const file = uploadFile(c.file, uploadDirs);
+    const el = await target(c.id, c.gen);
+    const kind = await kindOf(c.id);
+    if (kind === 'file') {
+      if (await dom.run(world, (i) => globalThis.__ms.els[i].disabled, c.id)) throw new BadCommand('upload: поле файла недоступно');
+      await human.pause(800, 2500);
+      return dom.run(world, ([i, b64, name, type]) => {
+        const input = globalThis.__ms.els[i];
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+        const dt = new DataTransfer();
+        dt.items.add(new File([bytes], name, { type, lastModified: Date.now() }));
+        input.files = dt.files;
+        input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      }, [c.id, file.buffer.toString('base64'), file.name, file.mimeType]);
+    }
+    // Окно выбора перехватывается, только пока ждём его: слушатель ставится до клика.
+    const chooser = page.waitForEvent('filechooser', { timeout: CHOOSER_MS });
+    chooser.catch(() => {}); // клик мог не состояться (verifyAt): ожидание само истечёт
+    await human.click(page, el, { verifyAt: (pt) => hitsTarget(c.id, pt) });
+    let fc;
+    try { fc = await chooser; } catch { throw new BadCommand(`upload: клик по элементу ${c.id} не открыл выбор файла`); }
+    await human.pause(800, 2500);
+    return fc.setFiles(file);
+  };
+
   const run = async (c) => {
     switch (c.cmd) {
       case 'click': {
         const el = await target(c.id, c.gen);
+        if (await kindOf(c.id) === 'file') throw new BadCommand('click: поле файла открыло бы системное окно выбора — команда upload');
         // Мышь идёт до нескольких секунд: перед нажатием сверяем, что под курсором всё ещё цель (оверлей, сдвиг).
         // В dryRun клик по tab — единственная настоящая запись, там ещё и над вкладкой не должно быть ссылки или кнопки.
         return human.click(page, el, { verifyAt: (pt) => hitsTarget(c.id, pt, { nested: dryRun }) });
@@ -345,6 +425,7 @@ function hands(page, opts = {}) {
         if (hasTarget(c)) await focused(c.id); // после паузы, прямо перед клавишей
         return human.press(page, c.key);
       case 'select': return choose(c);
+      case 'upload': return upload(c);
       case 'scroll': return human.scroll(page, c.px);
       case 'wait':
         if (c.text) return page.getByText(c.text).first().waitFor({ state: 'visible', timeout: MAX_WAIT });
@@ -365,7 +446,8 @@ function hands(page, opts = {}) {
 
   /** Выполнить команду и вернуть, что изменилось на странице. */
   const act = serial(async (c) => {
-    validate(c, allowedHosts);
+    validate(c, allowedHosts, { uploadDirs });
+    if (c.cmd === 'upload') uploadFile(c.file, uploadDirs, { read: false }); // и в репетиции: нет файла — видно сразу
     const url = page.url();
     // dryRunNavigation: клик по role=tab только переключает вид внутри страницы.
     const tabClick = dryRunNavigation && c.cmd === 'click' && last && c.gen === last.gen
@@ -410,7 +492,7 @@ function replay(dir, opts = {}) {
   return {
     async see(o) { return o && o.since ? eyes.diff(o.since, snaps[i]) : snaps[i]; },
     async act(c) {
-      validate(c, opts.allowedHosts);
+      validate(c, opts.allowedHosts, { uploadDirs: opts.uploadDirs });
       if (c.id !== undefined && (c.gen !== snaps[i].gen || !snaps[i].elements.some((e) => e.id === c.id))) {
         throw new StaleElement(`элемента ${c.id} нет в снимке ${i}`);
       }
