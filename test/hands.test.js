@@ -60,7 +60,95 @@ const rejects = (c, hosts) => assert.throws(() => validate(c, hosts), BadCommand
   assert.equal(nav.url, 'https://example.test/x', 'dryRun goto не перешёл');
   await page.setContent(HTML);
 
+  // dryRunNavigation: клик по role=tab выполняется, остальное только в журнал; без опции tab тоже не кликается.
+  const TABS = `<body style="margin:0">
+    <div role="tab" onclick="document.title='tab'">Messages</div>
+    <button onclick="document.title='button'">Btn</button>
+    <a href="#x" onclick="document.title='link'">Lnk</a>
+    <input aria-label="Поле" onkeydown="document.title='key'">
+  </body>`;
+  const navLog = path.join(dir, 'nav.jsonl');
+  for (const [dryRunNavigation, label] of [[false, 'по умолчанию'], [true, 'с dryRunNavigation']]) {
+    await page.setContent(TABS);
+    const hn = hands(page, { dryRun: true, dryRunNavigation, logFile: navLog });
+    const t0 = await hn.see();
+    const by = (n) => t0.elements.find((e) => e.name === n).id;
+    for (const n of ['Btn', 'Lnk']) assert.deepEqual(await hn.act({ cmd: 'click', id: by(n), gen: t0.gen }), { dryRun: true, changed: false });
+    assert.deepEqual(await hn.act({ cmd: 'fill', id: by('Поле'), gen: t0.gen, text: 'x' }), { dryRun: true, changed: false });
+    assert.deepEqual(await hn.act({ cmd: 'press', key: 'Enter' }), { dryRun: true, changed: false });
+    assert.equal(await page.title(), '', `${label}: dryRun выполнил запись`);
+    const tab = await hn.act({ cmd: 'click', id: by('Messages'), gen: t0.gen });
+    if (dryRunNavigation) {
+      assert.equal(tab.dryRun, undefined);
+      assert.equal(await page.title(), 'tab', 'клик по tab не выполнен');
+    } else {
+      assert.deepEqual(tab, { dryRun: true, changed: false });
+      assert.equal(await page.title(), '', 'без опции tab кликнут');
+    }
+  }
+  const navLines = fs.readFileSync(navLog, 'utf8').trim().split('\n').map(JSON.parse);
+  assert.ok(navLines.some((l) => l.cmd.cmd === 'click' && l.result === 'ok' && l.dryRun === true), 'клик по tab должен быть в журнале как ok');
+  assert.equal(navLines.filter((l) => l.result === 'dry-run').length, 9);
+
+  // Оверлей появился, пока мышь шла к tab: клик по координатам попал бы в него. Клика нет, StaleElement.
+  await page.setContent(TABS);
+  const ho = hands(page, { dryRun: true, dryRunNavigation: true });
+  const o0 = await ho.see();
+  await page.evaluate(() => {
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed;inset:0;background:#0001';
+    d.onclick = () => { document.title = 'overlay'; };
+    document.body.append(d);
+  });
+  await assert.rejects(ho.act({ cmd: 'click', id: o0.elements.find((e) => e.name === 'Messages').id, gen: o0.gen }), StaleElement);
+  assert.equal(await page.title(), '', 'клик ушёл в оверлей');
+
+  // Вкладка в DOM или в open shadow; кнопка «закрыть» внутри неё занимает всю площадь, поэтому клик в любую точку вкладки попадает в кнопку.
+  const CLOSE = '<button aria-label="Закрыть" style="display:block;box-sizing:border-box;margin:0;width:100%;height:40px">×</button>';
+  const clickTab = async (html, shadow) => {
+    await page.setContent('<body style="margin:0"><div id="h"></div></body>');
+    await page.evaluate(([inner, sh]) => {
+      const host = document.getElementById('h');
+      const root = sh ? host.attachShadow({ mode: 'open' }) : host;
+      root.innerHTML = inner;
+      root.querySelector('[role=tab]').addEventListener('click', () => { document.title += 'tab'; });
+      root.querySelector('button')?.addEventListener('click', () => { document.title += 'close'; });
+    }, [html, shadow]);
+    const hx = hands(page, { dryRun: true, dryRunNavigation: true });
+    const x0 = await hx.see();
+    return hx.act({ cmd: 'click', id: x0.elements.find((e) => e.role === 'tab').id, gen: x0.gen });
+  };
+  // Вложенный интерактивный элемент вкладки: dryRun его не нажимает.
+  await assert.rejects(clickTab(`<div role="tab" aria-label="Messages">${CLOSE}</div>`, false), StaleElement);
+  assert.equal(await page.title(), '', 'dryRun нажал кнопку внутри tab');
+  // Shadow DOM: elementFromPoint отдаёт хост, проверка спускается в открытый корень; клик по tab проходит.
+  assert.equal((await clickTab('<div role="tab" style="padding:20px">Messages</div>', true)).dryRun, undefined);
+  assert.equal(await page.title(), 'tab', 'tab в shadow не кликнут');
+  await assert.rejects(clickTab(`<div role="tab" aria-label="Messages">${CLOSE}</div>`, true), StaleElement);
+  assert.equal(await page.title(), '', 'dryRun нажал кнопку внутри tab в shadow');
+
+  // see({ settle }): SPA рисует элементы через 2 с. Обычный see() видит пустоту, settle ждёт.
+  const LATE = '<body><script>setTimeout(()=>{for(const n of ["A","B","C"]){const b=document.createElement("button");b.textContent=n;document.body.append(b)}},2000)</script></body>';
+  await page.setContent(LATE);
+  const hs = hands(page);
+  assert.equal((await hs.see()).elements.length, 0, 'обычный see() должен вернуть как раньше');
+  const ready = await hs.see({ settle: { minElements: 3, quietMs: 300, timeoutMs: 8000 } });
+  assert.equal(ready.elements.length, 3, 'settle не дождался элементов');
+  // Таймаут не бросает: отдаёт последний снимок.
+  await page.setContent('<body>пусто</body>');
+  const t1 = Date.now();
+  const empty = await hs.see({ settle: { minElements: 3, timeoutMs: 600 } });
+  assert.equal(empty.elements.length, 0);
+  assert.ok(Date.now() - t1 < 3000, 'settle не уложился в таймаут');
+
+  // timeoutMs ограничен сверху (MAX_WAIT 15 с): settle не обходит maxMinutes задачи.
+  const t2 = Date.now();
+  await hs.see({ settle: { minElements: 3, timeoutMs: 600000 } });
+  const waited = Date.now() - t2;
+  assert.ok(waited >= 14000 && waited < 20000, `settle без потолка: ${waited} мс`);
+
   // Живые руки.
+  await page.setContent(HTML);
   const h = hands(page, { logFile, recordDir });
   const s0 = await h.see();
   const like = s0.elements.find((e) => e.name === 'Like');

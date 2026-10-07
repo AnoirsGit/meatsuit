@@ -117,6 +117,8 @@ async function click(page, locator, opts = {}) {
   }
   const [a, b] = SPEEDS[speed].dwell;
   await pause(a, b);
+  // Пока мышь шла, страница могла сдвинуться: вызывающий проверяет точку клика (бросает — клика нет).
+  if (opts.verifyAt) await opts.verifyAt(cursor.get(page) || {});
   await page.mouse.down();
   await sleep(rand(40, 130));
   await page.mouse.up();

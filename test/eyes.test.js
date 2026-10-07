@@ -87,6 +87,51 @@ const HTML = `
   const gone = diff({ ...s2, elements: [...s2.elements, { id: 99, role: 'button', name: 'Old' }] }, s2);
   assert.deepEqual(gone.removed, [{ role: 'button', name: 'Old' }]);
 
+  // open shadow DOM: элементы и текст внутри видны, нумерация и __ms.els работают, вложенные корни тоже.
+  const shadowPage = await browser.newPage({ viewport: { width: 800, height: 600 } });
+  await shadowPage.setContent(`<body style="margin:0"><button>Light</button><div id="host"></div><div id="closed"></div></body>`);
+  await shadowPage.evaluate(() => {
+    const r = document.getElementById('host').attachShadow({ mode: 'open' });
+    r.innerHTML = '<p>Текст в тени</p><button id="sb">Shadow btn</button><input aria-label="Shadow in" value="v"><div id="inner"></div>';
+    r.getElementById('sb').onclick = () => { window.clicked = true; };
+    const r2 = r.getElementById('inner').attachShadow({ mode: 'open' });
+    r2.innerHTML = '<a href="/deep">Deep link</a>';
+    const c = document.getElementById('closed').attachShadow({ mode: 'closed' });
+    c.innerHTML = '<button>Closed btn</button>';
+  });
+  const sh = await see(shadowPage);
+  assert.deepEqual(sh.elements.map((e) => e.name), ['Light', 'Shadow btn', 'Shadow in', 'Deep link'], 'open shadow: порядок документа, closed недоступен');
+  assert.ok(sh.text.includes('Текст в тени'), 'текст из shadow DOM не виден');
+  assert.equal(sh.elements[2].value, 'v');
+  assert.equal(sh.elements[3].href, '/deep');
+  const { observe } = require('../eyes.js');
+  const dom = require('../dom.js');
+  const { snap, world } = await observe(shadowPage);
+  const sid = snap.elements.find((e) => e.name === 'Shadow btn').id;
+  const el = dom.handle(world, sid);
+  assert.equal(await el.same(), true);
+  await el.scrollIntoViewIfNeeded();
+  const box = await el.boundingBox();
+  assert.ok(box && box.width > 0, 'boundingBox элемента в shadow');
+  await shadowPage.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  assert.equal(await shadowPage.evaluate(() => window.clicked), true, 'клик по координатам элемента в shadow не дошёл');
+  // перекрытие оверлеем над хостом скрывает и элементы внутри
+  await shadowPage.evaluate(() => document.body.insertAdjacentHTML('beforeend', '<div style="position:fixed;inset:0;background:#0008;z-index:9"></div>'));
+  assert.deepEqual((await see(shadowPage)).elements, [], 'оверлей должен перекрывать и shadow-элементы');
+  // оверлей внутри того же корня: elementFromPoint отдаёт хост, covered должен спуститься в корень
+  await shadowPage.setContent('<body style="margin:0"><div id="h"></div></body>');
+  await shadowPage.evaluate(() => {
+    document.getElementById('h').attachShadow({ mode: 'open' }).innerHTML =
+      '<button>Under</button><div style="position:fixed;inset:0;background:#0008;z-index:9"></div>';
+  });
+  assert.deepEqual((await see(shadowPage)).elements, [], 'оверлей в том же shadow-корне должен перекрывать кнопку');
+  // подпись кнопки приходит через <slot>: элементом из light DOM и голым текстом
+  await shadowPage.setContent('<body><my-btn id="a"><span>Label</span></my-btn><my-btn id="b">Bare</my-btn></body>');
+  await shadowPage.evaluate(() => {
+    for (const id of ['a', 'b']) document.getElementById(id).attachShadow({ mode: 'open' }).innerHTML = '<button style="padding:10px"><slot></slot></button>';
+  });
+  assert.deepEqual((await see(shadowPage)).elements.map((e) => `${e.role}|${e.name}`), ['button|Label', 'button|Bare'], 'кнопка со слотом: в снимке и с подписью из слота');
+
   await browser.close();
   console.log('eyes.test: ok');
 })().catch((e) => { console.error(e); process.exit(1); });

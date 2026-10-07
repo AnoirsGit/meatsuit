@@ -46,13 +46,34 @@ function collect({ textLimit, nameLimit, gen }) {
   const inViewport = (r) =>
     r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth;
 
+  // Предок в составном дереве: слотированный узел поднимается через свой <slot>, из shadow-корня — к хосту.
+  const inside = (anc, el) => {
+    for (let n = el; n; n = n.assignedSlot || n.parentNode || n.host) if (n === anc) return true;
+    return false;
+  };
+
+  // Элементы в порядке документа, с заходом в открытые shadow-корни (closed недоступны).
+  const deepAll = (root, test, out = []) => {
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+    for (let n = w.nextNode(); n; n = w.nextNode()) {
+      if (test(n)) out.push(n);
+      if (n.shadowRoot) deepAll(n.shadowRoot, test, out);
+    }
+    return out;
+  };
+
   // Элемент перекрыт, если в его центре лежит чужой элемент (модалка, оверлей).
   const covered = (el, r) => {
-    const top = document.elementFromPoint(
-      Math.min(Math.max(r.left + r.width / 2, 0), innerWidth - 1),
-      Math.min(Math.max(r.top + r.height / 2, 0), innerHeight - 1),
-    );
-    return !top || !(el === top || el.contains(top) || top.contains(el));
+    const x = Math.min(Math.max(r.left + r.width / 2, 0), innerWidth - 1);
+    const y = Math.min(Math.max(r.top + r.height / 2, 0), innerHeight - 1);
+    let top = document.elementFromPoint(x, y);
+    // elementFromPoint отдаёт хост: спускаемся внутрь открытых корней.
+    for (let s = top && top.shadowRoot; s; s = top.shadowRoot) {
+      const inner = s.elementFromPoint(x, y);
+      if (!inner || inner === top) break;
+      top = inner;
+    }
+    return !top || !(el === top || inside(el, top) || inside(top, el));
   };
 
   const roleOf = (el) => {
@@ -70,24 +91,38 @@ function collect({ textLimit, nameLimit, gen }) {
     return 'textbox';
   };
 
+  // innerText не заходит в <slot>: если внутри есть слот, собираем текст с назначенными ему узлами.
+  const textOf = (n) => n.nodeType === Node.TEXT_NODE ? n.data
+    : n.nodeType !== Node.ELEMENT_NODE ? ''
+    : n.tagName === 'SLOT' ? n.assignedNodes({ flatten: true }).map(textOf).join(' ')
+    : n.querySelector('slot') ? [...n.childNodes].map(textOf).join(' ')
+    : n.innerText || n.textContent;
+
   const nameOf = (el) => {
     const labelledby = el.getAttribute('aria-labelledby');
     if (labelledby) {
-      const t = labelledby.split(/\s+/).map((id) => document.getElementById(id)?.textContent || '').join(' ');
+      const t = labelledby.split(/\s+/).map((id) => el.getRootNode().getElementById?.(id)?.textContent || '').join(' ');
       if (t.trim()) return clip(t, nameLimit);
     }
     const aria = el.getAttribute('aria-label');
     if (aria) return clip(aria, nameLimit);
     if (el.labels && el.labels[0]) return clip(el.labels[0].textContent, nameLimit);
-    const own = clip(el.innerText || el.textContent, nameLimit);
+    const own = clip(textOf(el), nameLimit);
     if (own) return own;
     return clip(el.getAttribute('placeholder') || el.getAttribute('title') || el.getAttribute('alt')
       || el.querySelector('img[alt]')?.getAttribute('alt') || el.getAttribute('value'), nameLimit);
   };
 
+  // innerText не заходит в shadow-корни: их текст добавляем в конец (порядок документа теряется).
+  // У неотрисованного узла (<style>, display:none, скрытый хост) innerText равен textContent, поэтому берём
+  // только детей корня, чьё содержимое отрисовано. Range, а не checkVisibility: тот отбрасывает display:contents и <slot>.
+  const drawn = (e) => { const r = document.createRange(); r.selectNodeContents(e); return r.getClientRects().length > 0; };
+  const pageText = () => [document.body ? document.body.innerText : '']
+    .concat(deepAll(document, (e) => e.shadowRoot).flatMap((h) => [...h.shadowRoot.children].filter(drawn).map((c) => c.innerText))).join(' ');
+
   const elements = [];
   let n = 0;
-  for (const el of document.querySelectorAll(SELECTOR)) {
+  for (const el of deepAll(document, (e) => e.matches(SELECTOR))) {
     const r = visible(el);
     if (!r) continue;
     const seen = inViewport(r);
@@ -111,10 +146,10 @@ function collect({ textLimit, nameLimit, gen }) {
   }
 
   const dialogs = [];
-  for (const d of document.querySelectorAll('dialog[open],[role=dialog],[role=alertdialog],[aria-modal=true]')) {
+  for (const d of deepAll(document, (e) => e.matches('dialog[open],[role=dialog],[role=alertdialog],[aria-modal=true]'))) {
     if (!visible(d)) continue;
     const ids = [];
-    store.els.forEach((e, i) => { if (e && d.contains(e)) ids.push(i); });
+    store.els.forEach((e, i) => { if (e && inside(d, e)) ids.push(i); });
     dialogs.push({ name: nameOf(d) || clip(d.innerText, nameLimit), text: clip(d.innerText, 600), elements: ids });
   }
 
@@ -122,7 +157,7 @@ function collect({ textLimit, nameLimit, gen }) {
     gen,
     url: location.href,
     title: document.title,
-    text: clip(document.body ? document.body.innerText : '', textLimit),
+    text: clip(pageText(), textLimit),
     elements,
     dialogs,
   };

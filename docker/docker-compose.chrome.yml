@@ -1,0 +1,24 @@
+# То же зеркало Neko, но с настоящим Google Chrome вместо Debian Chromium (проверка: не слетает ли вход Тиндера).
+# Порты те же (host-сеть: 127.0.0.1:8080 Neko, 127.0.0.1:9222 CDP), поэтому одновременно с docker-compose.yml не запускать.
+services:
+  neko:
+    image: ghcr.io/m1k1o/neko/google-chrome:latest
+    container_name: meatsuit-neko-chrome
+    restart: unless-stopped
+    stop_grace_period: 30s
+    network_mode: host
+    shm_size: 2gb
+    environment:
+      NEKO_SERVER_BIND: 127.0.0.1:8080
+      NEKO_DESKTOP_SCREEN: 1920x1080@30
+      NEKO_MEMBER_MULTIUSER_USER_PASSWORD: ${NEKO_USER_PASSWORD}
+      NEKO_MEMBER_MULTIUSER_ADMIN_PASSWORD: ${NEKO_ADMIN_PASSWORD}
+      NEKO_WEBRTC_EPR: 52000-52100
+      NEKO_WEBRTC_ICELITE: 1
+      NEKO_SESSION_IMPLICIT_HOSTING: "true"
+    volumes:
+      - neko-chrome-profile:/home/neko/.config/chrome-meatsuit
+      - ./chrome.conf:/etc/neko/supervisord/google-chrome.conf:ro
+      - ./chrome-policies.json:/etc/opt/chrome/policies/managed/policies.json:ro
+volumes:
+  neko-chrome-profile:

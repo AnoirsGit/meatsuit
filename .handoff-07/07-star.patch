@@ -1,0 +1,157 @@
+diff --git a/docs/04-contract.md b/docs/04-contract.md
+index 76af05c..072ee0a 100644
+--- a/docs/04-contract.md
++++ b/docs/04-contract.md
+@@ -17,7 +17,7 @@ await ms.close();
+ |---|---|
+ | `cdpUrl` | адрес CDP общего браузера |
+ | `dir` | где замок очереди, счётчики лимитов, журнал (по умолчанию `~/.meatsuit`) |
+-| `sitesFile` | лимиты площадок (по умолчанию `sites.json` в meatsuit); `maxCommands` и `maxMinutes` в нём — потолок, ниже которого проект выбирать может, а выше нет; `singleTab: true` — режим одной вкладки (см. ниже) |
++| `sitesFile` | лимиты площадок (по умолчанию `sites.json` в meatsuit); `maxCommands` и `maxMinutes` в нём — потолок, ниже которого проект выбирать может, а выше нет; `singleTab: true` — режим одной вкладки (см. ниже); необязательный ключ `"*"` — правило для хостов, которых в файле нет (см. «Правило по умолчанию») |
+ | `notify(text, event)` | асинхронная функция уведомлений; `telegramNotifier({token, chatId, threadId?})` — готовая, шлёт в группу или тему форума. Сбой отправки задачу не роняет, пишется в stderr без токена |
+ | `notifyOn` | какие события слать: `'start'`, `'done'`, `'limit'`, `'error'`, `'needsHuman'`; по умолчанию `['needsHuman','limit','error']`, чтобы по каждому матчу не засыпать группу |
+ | `capture` | архив экранов, см. «Архив экранов»: `{ dir, htmlPerSignature = 5, maxMB = 500 }`; без него ничего не пишется |
+@@ -26,13 +26,15 @@ await ms.close();
+ 
+ `task` по порядку: встаёт в очередь (один бот за раз) → проверяет лимит площадки и записывает задачу → открывает отдельное окно → зовёт функцию → закрывает окно. Возвращает то, что вернула функция.
+ 
++**Правило по умолчанию.** Правило площадки ищется в `sites.json` по точному совпадению ключа с `site`. Необязательный ключ `"*"` — правило для хостов, которых в файле нет; это обычная запись со всеми полями (`perDay`, `perHour`, `hours`, потолки `maxCommands`/`maxMinutes`, `singleTab`). Счётчики при этом у каждого хоста свои: в `limits.json` ключ — сам хост, а не `"*"`. Явная запись заменяет `"*"` целиком и с ним не сливается: площадка с `"perDay": 0` остаётся закрытой при любом `"*"`, а запись без `hours` часов из `"*"` не получает. Без `"*"` неописанный хост даёт `LimitReached`, как раньше. Поддомен описанной площадки (`www.x.com` при описанном `x.com`) под `"*"` не попадает и запись `x.com` не наследует: это `LimitReached` «площадка не описана», с `"*"` и без него, так что закрытую площадку сменой `site` не обойти. Площадку нужно звать её ключом из файла (внутри задачи `goto` на её поддомены и так разрешён). `site: '*'` — не хост: `task` бросает ошибку, правило по умолчанию так не получить.
++
+ Площадка с `"singleTab": true` в `sites.json` (Тиндер: вторую вкладку он считает «открытой в новом окне» и гасит прежнюю) окно не открывает: задача идёт в уже открытой вкладке этой площадки (первая страница с хостом `site` или его поддомена), и вкладка после задачи не закрывается. Нет такой вкладки: открывается одна и остаётся; чтобы она нашлась в следующий раз, задача должна перейти на сайт (`goto`). Если вкладка на хосте есть, а Playwright её не видит (на Debian Chromium так было), `task` бросает ошибку, а не открывает дубль; вкладка ищется до траты слота лимита, окно открывается после. Если открытое задачей окно осталось не на площадке (задача упала до `goto`), оно закрывается, кроме остановки на NeedsHuman. Найденную вкладку задача берёт, только когда её снимок проходит guard (команды не выполняются, проверка идёт до траты слота); иначе `task` бросает NeedsHuman с уведомлением `needsHuman`, страница не тронута, слот не потрачен. Проверка идёт для любой найденной вкладки и ничего не помнит между задачами, поэтому не зависит от процесса: вкладку с капчей, оставленную человеку прошлым запуском (cron, новый процесс), следующий тоже не тронет. Без флага всё как раньше: окно на задачу.
+ 
+ Ошибки (все классы экспортируются из `meatsuit`):
+ 
+ | Ошибка | Когда | Что делать проекту |
+ |---|---|---|
+-| `LimitReached` | площадки нет в `sites.json`, `perDay: 0`, вне часов, лимит дня или часа | задачу не начинать, повторить позже |
++| `LimitReached` | площадки нет в `sites.json` (и нет правила `"*"`), `perDay: 0`, вне часов, лимит дня или часа | задачу не начинать, повторить позже |
+ | `NeedsHuman` (`.reason`, `.url`) | капча, страница входа, блокировка | остановиться, задачу отложить; окно осталось открытым, человек решает руками |
+ | `BudgetExceeded` | больше `maxCommands` команд или `maxMinutes` минут | считать задачу неудачной |
+ | `StaleElement` | `gen` команды не совпал с текущим снимком, элемента нет или содержимое узла изменилось после снимка | взять свежий снимок и выбрать заново |
+diff --git a/index.js b/index.js
+index ccd47fe..a006db7 100644
+--- a/index.js
++++ b/index.js
+@@ -22,7 +22,7 @@ const { telegramNotifier, createTelegram, findChats, TelegramError } = require('
+ const { openWindow } = require('./window.js');
+ const { supervise, BudgetExceeded } = require('./supervise.js');
+ const { signature, normalizeName, urlPattern } = require('./capture.js');
+-const { reserve, charge, peek, lock, LimitReached } = require('./limits.js');
++const { ruleFor, reserve, charge, peek, lock, LimitReached } = require('./limits.js');
+ 
+ async function connect({
+   cdpUrl,
+@@ -72,7 +72,7 @@ async function connect({
+ 
+   async function task(name, fn, { site, maxCommands = 60, maxMinutes = 10, dryRun = false, dryRunNavigation = false, readOnly = false, capture } = {}) {
+     if (!site) throw new Error('task: нужен site');
+-    const rule = JSON.parse(fs.readFileSync(sitesFile, 'utf8'))[site];
++    const rule = ruleFor(JSON.parse(fs.readFileSync(sitesFile, 'utf8')), site); // своя запись или "*"
+     // Потолок бюджета задаёт площадка, а не вызывающий проект.
+     if (rule && rule.maxCommands) maxCommands = Math.min(maxCommands, rule.maxCommands);
+     if (rule && rule.maxMinutes) maxMinutes = Math.min(maxMinutes, rule.maxMinutes);
+diff --git a/limits.js b/limits.js
+index 971eb2f..00a35cc 100644
+--- a/limits.js
++++ b/limits.js
+@@ -1,8 +1,8 @@
+ /**
+  * Лимиты площадки, часы работы и очередь «один бот за раз».
+  *
+- * check() — чистая функция (test/limits.test.js). Площадки нет в sites.json —
+- * значит нельзя: по умолчанию закрыто.
++ * check() — чистая функция (test/limits.test.js). Площадки нет в sites.json
++ * и нет правила "*" — значит нельзя: по умолчанию закрыто.
+  */
+ const fs = require('node:fs');
+ const path = require('node:path');
+@@ -18,6 +18,20 @@ function parseHours(s) {
+   return [+m[1], +m[2]];
+ }
+ 
++/**
++ * Правило площадки из разобранного sites.json: своя запись по точному ключу, иначе общее "*"
++ * (если есть), иначе undefined. Записи не сливаются: явная заменяет "*" целиком.
++ * Счётчики при этом всё равно ведутся по хосту, поэтому "*" — ключ правила, а не хост.
++ * Поддомен описанной площадки под "*" не попадает и её правило не наследует: undefined,
++ * иначе закрытую площадку обошли бы сменой site на www.
++ */
++function ruleFor(sites, site) {
++  if (site === '*') throw new Error('site: "*" — ключ правила по умолчанию, а не хост');
++  if (Object.hasOwn(sites, site)) return sites[site];
++  if (Object.keys(sites).some((k) => k !== '*' && site.endsWith('.' + k))) return undefined;
++  return sites['*'];
++}
++
+ /**
+  * Бросает LimitReached. stamps — времена прошлых задач с записью, мс.
+  * reads — времена read-only задач: они считаются только в perHour.
+@@ -121,4 +135,4 @@ async function lock(file, { pollMs = 500, timeoutMs = 30 * 60e3, heartbeatMs = 5
+   }
+ }
+ 
+-module.exports = { check, peek, reserve, charge, lock, LimitReached };
++module.exports = { ruleFor, check, peek, reserve, charge, lock, LimitReached };
+diff --git a/sites.json b/sites.json
+index cdd1404..a8cb0ee 100644
+--- a/sites.json
++++ b/sites.json
+@@ -8,5 +8,26 @@
+   },
+   "linkedin.com": {
+     "perDay": 0
++  },
++  "hh.kz": {
++    "perDay": 5,
++    "perHour": 2,
++    "hours": "10-20",
++    "maxCommands": 60,
++    "maxMinutes": 10
++  },
++  "hh.ru": {
++    "perDay": 5,
++    "perHour": 2,
++    "hours": "10-20",
++    "maxCommands": 60,
++    "maxMinutes": 10
++  },
++  "*": {
++    "perDay": 3,
++    "perHour": 2,
++    "hours": "9-21",
++    "maxCommands": 80,
++    "maxMinutes": 12
+   }
+ }
+diff --git a/test/guard.test.js b/test/guard.test.js
+index 7f663a5..f831afe 100644
+--- a/test/guard.test.js
++++ b/test/guard.test.js
+@@ -61,6 +61,27 @@ assert.equal(check(snap({ text: 'captcha '.repeat(200) })), null);
+   assert.throws(() => limits.reserve('s', { perDay: 2 }, f, now), /на сегодня/);
+   assert.equal(JSON.parse(fs.readFileSync(f, 'utf8')).s.length, 2, 'отказ не должен писаться');
+ 
++  // правило по умолчанию "*": неописанный хост берёт его, явная запись заменяет целиком, без "*" как раньше
++  const sites = { '*': rule, 'closed.example.test': { perDay: 0 }, 'own.example.test': { perDay: 1 } };
++  assert.equal(limits.ruleFor(sites, 'new.example.test'), rule);
++  limits.check('new.example.test', limits.ruleFor(sites, 'new.example.test'), [], at(12));
++  assert.throws(() => limits.check('closed.example.test', limits.ruleFor(sites, 'closed.example.test'), [], at(12)), /perDay 0/);
++  limits.check('own.example.test', limits.ruleFor(sites, 'own.example.test'), [], at(9)); // hours из "*" не подмешиваются
++  // поддомен описанной площадки под "*" не попадает: закрытую площадку не обойти сменой site
++  assert.equal(limits.ruleFor(sites, 'www.closed.example.test'), undefined);
++  assert.throws(() => limits.check('www.closed.example.test', limits.ruleFor(sites, 'www.closed.example.test'), [], at(12)), /не описана/);
++  assert.equal(limits.ruleFor(sites, 'a.b.own.example.test'), undefined);
++  assert.equal(limits.ruleFor(sites, 'xclosed.example.test'), rule, 'совпадение без точки — не поддомен');
++  assert.equal(limits.ruleFor({ 'a.example.test': rule }, 'b.example.test'), undefined);
++  assert.throws(() => limits.check('b.example.test', limits.ruleFor({ 'a.example.test': rule }, 'b.example.test'), [], at(12)), /не описана/);
++  assert.throws(() => limits.ruleFor(sites, '*'), (e) => !(e instanceof limits.LimitReached) && /не хост/.test(e.message), '"*" — ключ правила, а не хост');
++  const fstar = path.join(dir, 'star.json'); // счётчики у каждого "*"-хоста свои
++  const star = limits.ruleFor({ '*': { perDay: 1 } }, 'one.example.test');
++  limits.reserve('one.example.test', star, fstar, now);
++  assert.throws(() => limits.reserve('one.example.test', star, fstar, now), /на сегодня/);
++  limits.reserve('two.example.test', star, fstar, now);
++  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(fstar, 'utf8'))).sort(), ['one.example.test', 'two.example.test']);
++
+   // readOnly: тратит perHour, а не perDay; charge делает слот полным
+   const fr = path.join(dir, 'ro.json');
+   const ro = { perDay: 1, perHour: 3 };

@@ -85,6 +85,18 @@ const CAPTCHA = '<p>Verify you are human</p>';
   assert.equal(fs.readFileSync(limitsFile, 'utf8'), stampsBefore, 'dryRun записал отметку в limits.json');
   await assert.rejects(ms.task('t4c', async () => 1, { site: 'limited.test', dryRun: true }), LimitReached);
 
+  // 4d. readOnly: чтение не тратит perDay; запись внутри — тратит задним числом; без флага как раньше.
+  const RO = 'ro.test';
+  fs.writeFileSync(sitesFile, JSON.stringify({ [SITE]: { perDay: 100 }, 'limited.test': { perDay: 1 }, [RO]: { perDay: 1, perHour: 50 } }));
+  const dayLeft = () => (JSON.parse(fs.readFileSync(limitsFile, 'utf8'))[RO] || []).length;
+  await ms.task('ro1', async ({ see }) => { await see(); }, { site: RO, readOnly: true });
+  await ms.task('ro2', async ({ see }) => { await see(); }, { site: RO, readOnly: true });
+  assert.equal(dayLeft(), 0, 'чтение не должно тратить perDay');
+  await ms.task('ro3', async ({ see, act }) => { const s = await see(); await act({ cmd: 'click', id: s.elements[0].id, gen: s.gen }); }, { site: RO, readOnly: true });
+  assert.equal(dayLeft(), 1, 'запись внутри read-only задачи должна стоить слот');
+  await assert.rejects(ms.task('ro4', async () => 1, { site: RO }), LimitReached); // без флага — как раньше
+  await ms.task('ro5', async ({ see }) => { await see(); }, { site: RO, readOnly: true }); // а чтение после этого можно
+
   // 5. Ошибка в задаче не оставляет замок: следующая задача идёт.
   await assert.rejects(ms.task('t5', async () => { throw new Error('boom'); }, { site: SITE }), /boom/);
   assert.ok(byEvent('error').some((n) => /t5.*boom/.test(n.text)), 'сбой в проекте должен уходить в notify');
