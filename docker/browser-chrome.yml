@@ -12,8 +12,8 @@ services:
       - ./chrome.conf:/etc/neko/supervisord/google-chrome.conf:ro
       - ./chrome-policies.json:/etc/opt/chrome/policies/managed/policies.json:ro
 
-  # Хозяин папки профиля. Новый том создаётся от root (такой папки в образе нет), и Chrome от пользователя
-  # neko (uid 1000) не смог бы в него писать. Только корень папки, без -R.
+  # Для profile-init в docker-compose.yml: папка профиля этого браузера в /profile. Новый том создаётся от root
+  # (такой папки в образе нет), и Chrome от пользователя neko (uid 1000) не смог бы в него писать.
   profile-owner:
     image: ghcr.io/m1k1o/neko/google-chrome:${NEKO_TAG:-3.1.6}
     volumes:

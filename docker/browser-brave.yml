@@ -14,8 +14,8 @@ services:
       - ./neko/brave-start.sh:/etc/neko/brave-start.sh:ro
       - ./neko/policies.json:/etc/brave/policies/managed/policies.json:ro
 
-  # Хозяин папки профиля: у Brave папка есть в образе, и новый том и так принадлежит neko; нужен для
-  # MEATSUIT_PROFILE_DIR, которую Docker создаёт от root. Только корень папки, без -R.
+  # Для profile-init в docker-compose.yml: папка профиля этого браузера в /profile. У Brave папка есть в образе,
+  # новый том и так принадлежит neko; нужно для MEATSUIT_PROFILE_DIR, которую Docker создаёт от root.
   profile-owner:
     image: ghcr.io/m1k1o/neko/brave:${NEKO_TAG:-3.1.6}
     volumes:

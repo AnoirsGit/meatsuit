@@ -75,15 +75,18 @@ for (const [name, b] of Object.entries(BROWSERS)) {
     }
     const other = Object.values(BROWSERS).find((x) => x !== b);
     assert.ok(!neko.volumes.some((v) => v.target === other.profile), 'чужой профиль подключён');
-    assert.ok(!Object.values(m.volumes).some((v) => v.name === other.volume), 'том чужого браузера в модели');
+    if (other.volume !== 'meatsuit_profile') assert.ok(!Object.values(m.volumes).some((v) => v.name === other.volume), 'том чужого браузера в модели');
     assert.ok(!neko.ports.some((p) => p.target === 9222 || p.published === '9222'), 'порт CDP опубликован');
     assert.ok(neko.ports.every((p) => p.host_ip === '127.0.0.1'), JSON.stringify(neko.ports));
 
     const init = m.services['profile-init'];
     assert.equal(init.image, neko.image, 'профиль отдаёт тот же образ');
-    assert.deepEqual(init.entrypoint, ['chown', '1000:1000', '/profile']);
+    assert.deepEqual(init.entrypoint, ['sh', '-c', 'mkdir -p /meatsuit/state && chown 1000:1000 /profile /meatsuit /meatsuit/state']);
     assert.equal(init.network_mode, 'none');
     assert.equal(init.volumes.find((v) => v.target === '/profile').source, prof.source);
+    // том вызывающих: meatsuit_profile с папкой state/ — при любом браузере
+    const shared = init.volumes.find((v) => v.target === '/meatsuit');
+    assert.deepEqual([shared.type, m.volumes[shared.source].name], ['volume', 'meatsuit_profile']);
     assert.equal(neko.depends_on['profile-init'].condition, 'service_completed_successfully');
   });
 }
@@ -102,7 +105,9 @@ test('папка на хосте вместо тома: у обоих брауз
     const m = model(file);
     const prof = m.services.neko.volumes.find((v) => v.target === BROWSERS[name].profile);
     assert.deepEqual([prof.type, prof.source], ['bind', '/srv/meatsuit/profile'], name);
-    assert.equal(m.services['profile-init'].volumes[0].source, '/srv/meatsuit/profile', name);
+    const init = m.services['profile-init'].volumes;
+    assert.equal(init.find((v) => v.target === '/profile').source, '/srv/meatsuit/profile', name);
+    assert.equal(m.volumes[init.find((v) => v.target === '/meatsuit').source].name, 'meatsuit_profile', 'том вызывающих есть и с папкой на хосте');
   }
 });
 
