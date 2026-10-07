@@ -193,6 +193,14 @@ function collect({ textLimit, nameLimit, gen }) {
  */
 let standaloneGen = 0;
 
+/** <iframe> кадра сейчас скрыт: visibility: hidden, display: none или нулевой размер. Кадр исчез — считаем показанным, guard не ослабляем. */
+async function frameHidden(frame) {
+  let el;
+  try { el = await frame.frameElement(); return !(await el.isVisible()); }
+  catch { return false; }
+  finally { if (el) await el.dispose().catch(() => {}); }
+}
+
 /**
  * Снимок и мир, в котором лежат его элементы (нужен рукам).
  * opts.screenshot — добавить сжатый JPEG (base64).
@@ -203,8 +211,12 @@ async function observe(page, opts = {}) {
   const world = await openWorld(page);
   const snap = await run(world, collect, { textLimit: TEXT_LIMIT, nameLimit: NAME_LIMIT, gen });
   // Чужие iframe (капча, Arkose) в DOM страницы не видны, поэтому отдаём их адреса.
-  snap.frames = page.frames().filter((f) => f !== page.mainFrame()).map((f) => f.url())
-    .filter((u) => u && u !== 'about:blank');
+  // page.frames() отдаёт все кадры, в том числе скрытые. Какие из них человек сейчас не видит,
+  // отдаём отдельно: по этому guard отличает спрятанное задание reCAPTCHA от показанного.
+  const frames = page.frames().filter((f) => f !== page.mainFrame() && f.url() && f.url() !== 'about:blank');
+  snap.frames = frames.map((f) => f.url());
+  const hidden = await Promise.all(frames.map(frameHidden));
+  snap.hiddenFrames = snap.frames.filter((u, i) => hidden[i]);
   if (opts.screenshot) {
     const buf = await page.screenshot({ type: 'jpeg', quality: 60, scale: 'css' });
     snap.screenshot = buf.toString('base64');
@@ -243,6 +255,7 @@ function diff(prev, next) {
   }
   if (JSON.stringify(prev.dialogs) !== JSON.stringify(next.dialogs)) out.dialogs = next.dialogs;
   out.frames = next.frames;
+  out.hiddenFrames = next.hiddenFrames;
   if (next.screenshot) out.screenshot = next.screenshot;
   out.changed = out.urlChanged || out.added.length > 0 || out.removed.length > 0
     || 'text' in out || 'dialogs' in out;

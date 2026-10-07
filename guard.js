@@ -19,6 +19,30 @@ const CAPTCHA_FRAME = /recaptcha|hcaptcha|arkoselabs|funcaptcha|challenges\.clou
 const LOGIN_URL = /\/(log-?in|sign-?in)(\/|$|\?)/i;
 const PASSWORD = /password|пароль/i;
 
+// reCAPTCHA на формах — это два iframe: якорь (anchor) и задание (bframe). Невидимый якорь
+// (size=invisible, v3 и Enterprise) у человека ничего не просит, а bframe висит в DOM скрытым
+// рядом с любым якорем и показывается только вместе с заданием. Поэтому стоп — это галочка
+// «I'm not a robot» (якорь без size=invisible) или показанный bframe. Адрес разбираем через URL:
+// size=invisible в чужом параметре, во фрагменте или не на хосте reCAPTCHA ничего не меняет.
+const RECAPTCHA_HOST = /(^|\.)(google\.com|recaptcha\.net)$/i;
+const RECAPTCHA_PATH = /^\/recaptcha\/(api2|enterprise)\/(anchor|bframe)$/;
+const recaptcha = (u) => {
+  let x; try { x = new URL(u); } catch { return null; }
+  const m = RECAPTCHA_HOST.test(x.hostname) && RECAPTCHA_PATH.exec(x.pathname);
+  return m ? { frame: m[2], invisible: x.searchParams.get('size') === 'invisible' } : null;
+};
+
+/** Есть ли среди frames капча, которую человек видит. Без hiddenFrames кадр считается показанным. */
+function captchaFrame(frames, hiddenFrames) {
+  const count = (arr, u) => arr.filter((x) => x === u).length;
+  return frames.some((u) => {
+    const rc = recaptcha(u);
+    if (!rc) return CAPTCHA_FRAME.test(u);
+    if (rc.frame === 'anchor') return !rc.invisible;
+    return count(frames, u) > count(hiddenFrames, u); // bframe: хотя бы один такой кадр показан
+  });
+}
+
 // Страницы-заглушки малы. Длинный текст — это профили и переписка, а в
 // био у человека может быть слово «captcha»: по нему не останавливаемся.
 const BLOCK_PAGE_MAX_TEXT = 600;
@@ -46,7 +70,7 @@ function check(s) {
   const short = shortText(s);
   const haystack = [s.title, dialogs, short, names].filter(Boolean).join(' ');
 
-  if (CAPTCHA.test(haystack) || (s.frames || []).some((u) => CAPTCHA_FRAME.test(u))) return 'капча';
+  if (CAPTCHA.test(haystack) || captchaFrame(s.frames || [], s.hiddenFrames || [])) return 'капча';
   if (SUSPICIOUS.test(haystack)) return 'подозрительная активность или ограничение аккаунта';
   const passwordField = (s.elements || []).some((e) => e.inputType === 'password' || (e.role === 'textbox' && PASSWORD.test(e.name)));
   if (passwordField || (s.url && LOGIN_URL.test(urlPath(s.url)))) return 'страница входа';

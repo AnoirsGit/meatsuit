@@ -184,6 +184,54 @@ assert.equal(check(snap({ text: `${bio} Привет`, textParts: [bio.length, '
     }
   } finally { await browser.close(); }
 
+  // reCAPTCHA в iframe: невидимый якорь (size=invisible) и скрытый bframe — не капча; галочка,
+  // показанный bframe, hCaptcha и Turnstile — капча. Адрес разбирается через URL, а не подстрокой.
+  {
+    const anchor = (path, q) => `https://www.google.com/recaptcha/${path}/anchor?ar=1&k=KEY&co=aHR0cHM&hl=en&v=V&${q}`;
+    const invisible = anchor('api2', 'size=invisible&cb=x');
+    const bframe = 'https://www.google.com/recaptcha/api2/bframe?hl=en&v=V&k=KEY';
+    const frames = (frames, hiddenFrames) => check(snap({ frames, hiddenFrames }));
+    assert.equal(frames([invisible]), null, 'невидимый якорь api2');
+    assert.equal(frames([anchor('enterprise', 'size=invisible&cb=x')]), null, 'невидимый якорь enterprise');
+    assert.equal(frames(['https://www.recaptcha.net/recaptcha/enterprise/anchor?k=KEY&size=invisible']), null, 'невидимый якорь на recaptcha.net');
+    assert.equal(frames([anchor('api2', 'cb=x')]), 'капча', 'галочка «I\'m not a robot»');
+    assert.equal(frames([anchor('api2', 'size=normal&cb=x')]), 'капча');
+    assert.equal(frames([anchor('api2', 'cb=size=invisible')]), 'капча', 'size=invisible в чужом параметре');
+    assert.equal(frames([anchor('api2', 'cb=x#size=invisible')]), 'капча', 'size=invisible во фрагменте');
+    assert.equal(frames(['https://evil.example/recaptcha/api2/anchor?size=invisible']), 'капча', 'не хост reCAPTCHA');
+    assert.equal(frames(['https://newassets.hcaptcha.com/captcha/v1/abc/static/hcaptcha.html#frame=checkbox&size=invisible']), 'капча', 'hCaptcha');
+    assert.equal(frames(['https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/if/ov2/av0/rcv/x/0x4AAAA/auto/fbE/new/normal/auto/']), 'капча', 'Turnstile');
+    assert.equal(frames([invisible, bframe], [bframe]), null, 'скрытый bframe рядом с невидимым якорем');
+    assert.equal(frames([invisible, bframe], []), 'капча', 'показанный bframe — задание');
+    assert.equal(frames([bframe]), 'капча', 'без hiddenFrames кадр считается показанным');
+    assert.equal(frames([bframe, bframe], [bframe]), 'капча', 'два одинаковых bframe, один показан');
+
+    // Признак видимости приходит из eyes: форма с невидимой reCAPTCHA (бейдж и скрытый bframe), сеть заглушена.
+    const { diff } = require('../eyes.js');
+    const browser = await chromium.launch();
+    try {
+      const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
+      await page.route('**/*', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: '<p>stub</p>' }));
+      await page.setContent(`<body><form><input aria-label="Имя"></form>
+        <div style="position:fixed;bottom:14px;right:14px;width:256px;height:60px;overflow:hidden"><iframe src="${invisible}" width="256" height="60"></iframe></div>
+        <div id="challenge" style="visibility:hidden;position:absolute;top:-10000px;left:0;width:100%;opacity:0"><iframe src="${bframe}" width="400" height="580"></iframe></div>
+      </body>`);
+      await page.waitForLoadState('networkidle');
+      const quiet = await see(page);
+      assert.deepEqual(quiet.frames, [invisible, bframe], 'в frames все кадры, скрытый тоже');
+      assert.deepEqual(quiet.hiddenFrames, [bframe]);
+      assert.equal(check(quiet), null, 'невидимая reCAPTCHA не останавливает');
+      // Задание показалось: контейнер bframe стал видимым.
+      await page.evaluate(() => { const c = document.getElementById('challenge'); c.style.visibility = 'visible'; c.style.opacity = '1'; c.style.top = '0'; });
+      const shown = await see(page);
+      assert.deepEqual(shown.hiddenFrames, []);
+      assert.equal(check(shown), 'капча', 'показанное задание — стоп');
+      // Результат act — diff: признак видимости в нём тот же, guard проверяет и его.
+      assert.equal(check(diff(quiet, shown)), 'капча');
+      assert.equal(check(diff(shown, quiet)), null);
+    } finally { await browser.close(); }
+  }
+
   // гонка ждущих за брошенный замок: медленный процесс проверил возраст, быстрый забрал и взял замок,
   // медленный не должен унести свежий замок и войти вместе с ним
   {
