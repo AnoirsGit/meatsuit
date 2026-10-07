@@ -120,8 +120,16 @@ const CAPTCHA = '<p>Verify you are human</p>';
   assert.deepEqual(all.map((n) => n.event), ['start', 'done']);
   assert.match(all[1].text, /t6.*завершена.*команд: 1/);
 
+  // Лимиты объектом вместо файла (sites): правило берётся из него, perDay 0 закрывает площадку.
+  const ms3 = await connect({ cdpUrl: `http://127.0.0.1:${PORT}`, dir: path.join(tmp, 'state3'), sites: { [SITE]: { perDay: 0 }, 'open.test': { perDay: 1 } } });
+  await assert.rejects(ms3.task('t7', async () => 1, { site: SITE }), (e) => e instanceof LimitReached && /perDay 0/.test(e.message));
+  assert.equal(await ms3.task('t8', async () => 'ok', { site: 'open.test' }), 'ok');
+  await settle();
+  assert.equal(windows(), 1, 'окно задачи с sites-объектом закрылось');
+
   await ms.close();
   await ms2.close();
+  await ms3.close();
   await ctx.close();
   console.log('task.test: ok');
 })().catch((e) => { console.error(e); process.exit(1); });
