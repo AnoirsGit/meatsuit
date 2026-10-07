@@ -106,6 +106,7 @@ The CDP port (9222) listens only inside the container and is never published. Th
 It does not start by default (profile `warmup`). Without the home exit it would leave from the server's own address, and the browser's first "history" would come from a datacenter.
 
 ```sh
+cp ../profiles/life.example.json ../profiles/life.json   # once: your sites and hours, git-ignored
 docker compose --profile warmup up -d --build     # start
 docker compose --profile warmup logs -f life      # journal
 docker compose --profile warmup stop life         # stop
@@ -119,7 +120,8 @@ The service that your scripts call (`GET /view`, `POST /act`, see [http-api.md](
 
 ```sh
 cp ../profiles/clients.example.json ../profiles/clients.json    # your own long random tokens; the file is git-ignored
-# also needed in ../profiles: sites.json (limits per site) and egress.json (the exit you expect); without any of the three it will not start
+cp ../profiles/sites.example.json ../profiles/sites.json        # your own limits per site; the file is git-ignored
+# also needed: ../profiles/egress.json (the exit you expect); without any of the three it will not start
 docker compose --profile api up -d --build
 curl -s http://127.0.0.1:8787/                                  # status page, no token needed
 ```

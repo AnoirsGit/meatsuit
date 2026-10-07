@@ -72,6 +72,7 @@ docker compose up -d        # только зеркало
 Сам не стартует (профиль `warmup`): без выхода через Алматы он ушёл бы с адреса сервера.
 
 ```sh
+cp ../profiles/life.example.json ../profiles/life.json   # один раз: свои сайты и часы, в git не попадает
 docker compose --profile warmup up -d --build     # запустить
 docker compose --profile warmup logs -f life      # журнал
 docker compose --profile warmup stop life         # остановить
@@ -85,7 +86,8 @@ docker compose --profile warmup stop life         # остановить
 
 ```sh
 cp ../profiles/clients.example.json ../profiles/clients.json    # свои длинные случайные токены; файл в git не попадает
-# ещё нужны в ../profiles: sites.json (лимиты) и egress.json (ожидаемый выход); без любого из трёх сервис не стартует
+cp ../profiles/sites.example.json ../profiles/sites.json        # свои лимиты площадок; файл в git не попадает
+# ещё нужен ../profiles/egress.json (ожидаемый выход); без любого из трёх сервис не стартует
 docker compose --profile api up -d --build
 curl -s http://127.0.0.1:8787/                                  # страница статуса, токен не нужен
 ```

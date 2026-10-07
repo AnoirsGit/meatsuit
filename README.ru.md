@@ -68,6 +68,7 @@ docker compose up -d
 # затем http://127.0.0.1:8080 (имя любое, пароль из .env)
 
 cd ..
+cp profiles/life.example.json profiles/life.json   # своя копия, в git не попадает
 node life.js plan            # что сделал бы прогрев (браузер не нужен)
 node life.js now --dry
 ```

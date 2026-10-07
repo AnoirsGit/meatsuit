@@ -72,7 +72,7 @@ CDP is the Chrome DevTools Protocol, the interface Playwright-style tools use to
 | Hands | Mouse curves, wheel scrolling, typing with typos. They are computed as pure "plans" and then replayed on the page. | [`human.js`](../human.js), [`human/`](../human/) |
 | Guard | Recognises a captcha, a block page or a login page from a snapshot of the page. | [`guard.js`](../guard.js) |
 | Queue | One task at a time, tickets for waiters, idle timeout. | [`queue.js`](../queue.js) |
-| Limits | Per-site pacing that behaves like a person (see below). | [`limits.js`](../limits.js), [`profiles/sites.json`](../profiles/sites.json) |
+| Limits | Per-site pacing that behaves like a person (see below). | [`limits.js`](../limits.js), [`profiles/sites.example.json`](../profiles/sites.example.json) |
 | Egress check | Confirms the traffic really leaves from the expected country and provider. | [`egress.js`](../egress.js), [egress notes](egress.md) |
 | Notifier | Telegram message when a human is needed. | [`notify.js`](../notify.js) |
 | Warm-up | Separate command that reads ordinary sites at random hours. | [`life.js`](../life.js), [`life/`](../life/), [notes](warmup.md) |
