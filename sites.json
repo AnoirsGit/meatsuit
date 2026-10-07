@@ -8,5 +8,26 @@
   },
   "linkedin.com": {
     "perDay": 0
+  },
+  "hh.kz": {
+    "perDay": 5,
+    "perHour": 2,
+    "hours": "10-20",
+    "maxCommands": 60,
+    "maxMinutes": 10
+  },
+  "hh.ru": {
+    "perDay": 5,
+    "perHour": 2,
+    "hours": "10-20",
+    "maxCommands": 60,
+    "maxMinutes": 10
+  },
+  "*": {
+    "perDay": 3,
+    "perHour": 2,
+    "hours": "9-21",
+    "maxCommands": 80,
+    "maxMinutes": 12
   }
 }
