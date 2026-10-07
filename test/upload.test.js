@@ -123,9 +123,14 @@ const byName = (s, name, inputType) => s.elements.find((e) => e.name === name &&
   assert.equal(await page.textContent('#n7'), `cv.pdf:${pdf.length}:application/pdf`);
   assert.equal(byName(r7, 'Выбрать файл', 'file').value, 'cv.pdf');
 
+  // Поле исчезло, пока «выбирался файл» (пауза перед вставкой): StaleElement, файл никуда не встал.
+  await page.evaluate(() => setTimeout(() => document.getElementById('f2').remove(), 400));
+  await assert.rejects(h.act({ cmd: 'upload', ...at(r7, 'Прикрепить письмо', 'file'), file: cv }), (e) => e.constructor.name === 'StaleElement', 'исчезнувшее поле');
+  const r7b = await h.see();
+
   // --- Кнопка, которая открывает выбор файла: человеческий клик, окно выбора перехвачено, файл встал.
-  const attach = r7.elements.find((e) => e.name === 'Attach' && e.inputType === undefined);
-  const r3 = await h.act({ cmd: 'upload', id: attach.id, gen: r7.gen, file: cv });
+  const attach = r7b.elements.find((e) => e.name === 'Attach' && e.inputType === undefined);
+  const r3 = await h.act({ cmd: 'upload', id: attach.id, gen: r7b.gen, file: cv });
   assert.equal(await page.textContent('#n3'), `cv.pdf:${pdf.length}:application/pdf`);
   assert.equal(byName(r3, 'Attach', 'file').value, 'cv.pdf');
   // Кнопка, которая окна выбора не открывает: BadCommand, ничего не прикреплено.
