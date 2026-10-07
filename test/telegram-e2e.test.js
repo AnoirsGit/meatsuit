@@ -1,7 +1,7 @@
 /**
  * Сквозная проверка уведомлений: настоящий Chromium, настоящая задача meatsuit,
  * настоящий HTTP до локального сервера, который изображает Telegram Bot API.
- * (Реальный Telegram здесь не нужен; проверка с живым ботом: `node telegram.js send`.)
+ * (Реальный Telegram здесь не нужен; проверка с живым ботом: `node tools/telegram-chats.js send`.)
  *
  *   node test/telegram-e2e.test.js
  */

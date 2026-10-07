@@ -40,5 +40,14 @@ const NO_BROWSER = 'http://127.0.0.1:1'; // до подключения дело
   const leaked = Object.keys(require.cache).filter((k) => k.startsWith(extras));
   assert.deepEqual(leaked, [], 'ядро загрузило модули из extras/');
 
+  // Ядро не читает окружение и не запускается как программа: креды и настройки приносит вызывающий
+  // аргументами, программы для человека лежат в tools/.
+  for (const f of core) {
+    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    assert.doesNotMatch(src, /process\.env/, `${f} читает process.env`);
+    assert.doesNotMatch(src, /require\.main === module/, `${f}: CLI место в tools/`);
+  }
+  assert.ok(!('telegramNotifier' in require('../guard.js')), 'guard.js больше не реэкспортирует telegramNotifier');
+
   console.log('api.test: ok');
 })().catch((e) => { console.error(e); process.exit(1); });
