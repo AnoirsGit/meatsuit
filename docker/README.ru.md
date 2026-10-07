@@ -1,6 +1,6 @@
 # Зеркало браузера: Neko + Brave
 
-05.10.2026. Один постоянный Brave в Docker. Вы открываете его в обычном браузере (картинка и звук по WebRTC), живёте в нём и логинитесь, а боты и автопрогрев подключаются к тому же Brave по CDP. Общий замысел — [../docs/ru/03-design.md](../docs/ru/03-design.md), выход в сеть через дом — [../docs/05-egress.md](../docs/05-egress.md). Поддерживаемая английская версия — [README.md](README.md).
+05.10.2026. Один постоянный Brave в Docker. Вы открываете его в обычном браузере (картинка и звук по WebRTC), живёте в нём и логинитесь, а боты и автопрогрев подключаются к тому же Brave по CDP. Общий замысел — [../docs/ru/03-design.md](../docs/ru/03-design.md), выход в сеть через дом — [../docs/egress.md](../docs/egress.md). Поддерживаемая английская версия — [README.md](README.md).
 
 ## Быстрый старт (на этой машине)
 
@@ -98,7 +98,7 @@ curl -s http://127.0.0.1:8787/                                  # страниц
 2. Склонировать репозиторий, `cd docker`, `cp .env.example .env`, пароли.
 3. Адреса. В `.env`: `NEKO_BIND_IP` и `NEKO_WEBRTC_IP` — **tailnet-адрес сервера** (`tailscale ip -4`, вида 100.x.y.z). Наружу в публичный интернет порты не открываются. Открывать зеркало с телефона и ноутбука по `http://100.x.y.z:8080`.
 4. `docker compose up -d`, затем `./verify.sh persistence`.
-5. Выход через дом: поднять exit node на домашнем устройстве ([../docs/05-egress.md](../docs/05-egress.md)), в `.env` задать `TS_AUTHKEY` и `TS_EXTRA_ARGS=--exit-node=<имя узла> --exit-node-allow-lan-access=false`, запустить `docker compose -f docker-compose.yml -f docker-compose.egress.yml --profile egress up -d`. **Не ставьте exit node на сам хост по SSH через публичный адрес** (сессия повиснет): правила и откат — в docs/05.
+5. Выход через дом: поднять exit node на домашнем устройстве ([../docs/egress.md](../docs/egress.md)), в `.env` задать `TS_AUTHKEY` и `TS_EXTRA_ARGS=--exit-node=<имя узла> --exit-node-allow-lan-access=false`, запустить `docker compose -f docker-compose.yml -f docker-compose.egress.yml --profile egress up -d`. **Не ставьте exit node на сам хост по SSH через публичный адрес** (сессия повиснет): правила и откат — в docs/egress.md.
 6. Проверить выход: в зеркале открыть `https://ipinfo.io` — должен быть ваш город и ваш провайдер. Только после этого запускать автопрогрев и ботов.
 
 ## Не проверено (только на сервере или руками)
