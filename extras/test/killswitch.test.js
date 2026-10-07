@@ -12,7 +12,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const SCRIPT = path.join(__dirname, '..', 'docker', 'egress', 'killswitch.sh');
+const SCRIPT = path.join(__dirname, '..', '..', 'docker', 'egress', 'killswitch.sh'); // docker/ остался в корне репозитория
 
 /** Каталог с заглушками; has — какие из iptables и ip6tables есть, v6off — закрыт ли IPv6 через sysctl. */
 function run({ has = ['iptables', 'ip6tables'], v6off = false, failing = null } = {}) {
