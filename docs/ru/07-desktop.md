@@ -80,7 +80,7 @@ docker compose up -d        # первый раз качает образ Neko �
 |---|---|---|
 | `clients.json` | кто может звать: `[{"name":"my-bot","token":"<длинная случайная строка>","sites":["example.com"]}]`, токен из `openssl rand -hex 24` | нет |
 | `sites.json` | лимиты площадок: `perDay`, `perHour`, `hours`, рост, выходные. Скопируйте образец `sites.example.json` (в нём `example.com`, `jobs.example.com` и закрытая `closed.example` с `perDay: 0`) и впишите свои площадки. Площадку, которой нет в файле, сервис не откроет никому (`403`, `reason: site_unknown`) | нет |
-| `egress.json` | выход, который вы ожидаете: `{"country":"KZ","asn":[<номер провайдера>]}`; страна и номер из `curl -s https://ipinfo.io/json` | нет |
+| `egress.json` | выход, который вы ожидаете: `{"country":"DE","asn":[<номер провайдера>]}`; страна и номер из `curl -s https://ipinfo.io/json` | нет |
 
 `profiles/sites.json`, `profiles/egress.json` и `profiles/clients.json` содержат ваши данные и в репозиторий не попадают; в git лежат только образцы `*.example.json`.
 

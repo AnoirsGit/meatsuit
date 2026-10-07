@@ -210,7 +210,7 @@ before(async () => {
     '/popped': '<h1>Всплывшая страница</h1>',
     '/form': `<form action="/submitted"><label>Запрос <input name="q"></label></form>
       <label for="msg">Сообщение</label><textarea id="msg"></textarea>
-      <label for="city">Город</label><select id="city" name="city" oninput="selmark.textContent += 'input:' + event.isTrusted + ' '" onchange="selmark.textContent += 'change:' + event.isTrusted + ' '"><option>Алматы</option><option>Астана</option><option>Шымкент</option></select><p id="selmark"></p>
+      <label for="city">Город</label><select id="city" name="city" oninput="selmark.textContent += 'input:' + event.isTrusted + ' '" onchange="selmark.textContent += 'change:' + event.isTrusted + ' '"><option>Берлин</option><option>Мадрид</option><option>Рим</option></select><p id="selmark"></p>
       <input type="checkbox" id="ok"><label for="ok">Согласен</label>`,
     '/submitted': (req, res) => {
       const q = new URL(req.url, 'http://x').searchParams.get('q') || '';
@@ -386,16 +386,16 @@ test('fill: клик в поле, очистка, ввод; подпись на�
   await driver.act(id, { do: 'fill', target: 'Сообщение', text: 'строка для textarea' });
   assert.ok((await driver.view(id)).html.includes('>строка для textarea</textarea>'));
 
-  await driver.act(id, { do: 'fill', target: 'Город', text: 'Астана' });
-  assert.ok((await driver.view(id)).html.includes('<option selected>Астана</option>'), 'select: вариант по тексту');
+  await driver.act(id, { do: 'fill', target: 'Город', text: 'Мадрид' });
+  assert.ok((await driver.view(id)).html.includes('<option selected>Мадрид</option>'), 'select: вариант по тексту');
   // События выбора должны быть настоящими (isTrusted): selectOption у Playwright шлёт синтетические, их видно из страницы.
   const marks = async () => ((await driver.view(id)).html.match(/(?:input|change):(?:true|false)/g) || []).join(' ');
   assert.match(await marks(), /change:true/, `выбор варианта: change не настоящий (${await marks()})`);
   assert.doesNotMatch(await marks(), /false/, 'ни одно событие выбора не должно быть синтетическим');
-  await driver.act(id, { do: 'fill', target: 'Город', text: 'Шымкент' }); // на два варианта вниз
-  assert.ok((await driver.view(id)).html.includes('<option selected>Шымкент</option>'), 'select: два шага вниз');
-  await driver.act(id, { do: 'fill', target: 'Город', text: 'Алматы' }); // вверх
-  assert.ok((await driver.view(id)).html.includes('<option selected>Алматы</option>'), 'select: вверх');
+  await driver.act(id, { do: 'fill', target: 'Город', text: 'Рим' }); // на два варианта вниз
+  assert.ok((await driver.view(id)).html.includes('<option selected>Рим</option>'), 'select: два шага вниз');
+  await driver.act(id, { do: 'fill', target: 'Город', text: 'Берлин' }); // вверх
+  assert.ok((await driver.view(id)).html.includes('<option selected>Берлин</option>'), 'select: вверх');
   assert.doesNotMatch(await marks(), /false/, 'и при выборе вверх события настоящие');
   await rejects(driver.act(id, { do: 'fill', target: 'Город', text: 'Париж' }), 400, 'bad_request');
   await rejects(driver.act(id, { do: 'fill', target: 'Согласен', text: 'x' }), 400, 'bad_request');

@@ -23,10 +23,10 @@ echo "1. зеркало поднято"
 wait_healthy && ok "Neko и порт CDP отвечают (healthcheck)" || { bad "контейнер не стал здоровым за 2 минуты: docker compose logs neko"; exit 1; }
 
 echo "2. открыть статью и прокрутить через зеркало"
-URL="en.wikipedia.org/wiki/almaty" SCROLL=8 $RUN /app/docker/verify/mirror.mjs >/dev/null 2>&1 && ok "команды отправлены (вход, управление, адрес, Enter, колесо)" || bad "не удалось войти или отправить команды: проверьте NEKO_PASSWORD"
+URL="en.wikipedia.org/wiki/web_browser" SCROLL=8 $RUN /app/docker/verify/mirror.mjs >/dev/null 2>&1 && ok "команды отправлены (вход, управление, адрес, Enter, колесо)" || bad "не удалось войти или отправить команды: проверьте NEKO_PASSWORD"
 STATE=$($RUN /app/docker/verify/cdp-read.js 2>&1 | tail -1)
 echo "   Brave сейчас: $STATE"
-echo "$STATE" | grep -q 'wikipedia.org/wiki/Almaty' && ok "адрес набран из зеркала и страница загружена (интернет есть)" || bad "Brave не открыл статью"
+echo "$STATE" | grep -q 'wikipedia.org/wiki/Web_browser' && ok "адрес набран из зеркала и страница загружена (интернет есть)" || bad "Brave не открыл статью"
 Y=$(echo "$STATE" | sed -n 's/.*"scrollY":\([0-9]*\).*/\1/p' | head -1)
 [ "${Y:-0}" -gt 500 ] && ok "страница прокручена колесом из зеркала (scrollY=$Y)" || bad "страница не прокрутилась (scrollY=${Y:-нет})"
 

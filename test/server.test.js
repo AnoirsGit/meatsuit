@@ -17,7 +17,7 @@ const { createLimits } = require('../limits.js');
 const { createEgress } = require('../egress.js');
 
 const MIN = 60000, H = 3600000;
-/** Местное время Алматы (UTC+5) → миллисекунды UTC. */
+/** Местное время пояса по умолчанию (UTC+5) → миллисекунды UTC. */
 const at = (h, m = 0, day = 5) => Date.UTC(2026, 9, day, h - 5, m);
 
 const SITES = {
@@ -448,7 +448,7 @@ test('429: лимит площадки исчерпан, в ответе retry_a
 
 test('429: вне часов площадки; закрытая площадка (perDay 0) — без retry_at', async (t) => {
   const s = await boot(t);
-  await s.clock.tick(10 * H); // 22:00 по Алматы
+  await s.clock.tick(10 * H); // 22:00 по UTC+5
   const late = await s.act(CVS, { do: 'begin', task: 'x', site: 'hh.kz' });
   assert.deepEqual([late.status, late.json.reason, late.json.retry_at], [429, 'hours', new Date(at(10, 0, 6)).toISOString()]);
   const closed = await s.act(CVS, { do: 'begin', task: 'x', site: 'linkedin.com' });
@@ -463,7 +463,7 @@ test('cost списывается целиком: сессия на 60 не вл
   assert.equal(s.limits.snapshot()['greenhouse.io'].usedDay, 0);
 });
 
-test('503: выход не из Алматы или не определился; браузер не трогается, лимит не списан, слот свободен', async (t) => {
+test('503: выход не тот или не определился; браузер не трогается, лимит не списан, слот свободен', async (t) => {
   const s = await boot(t);
   s.echo.reply = NL;
   const wrong = await s.act(CVS, { do: 'begin', task: 'x', site: 'hh.kz' });
@@ -840,7 +840,7 @@ test('клиент со звёздочкой в sites допускается н�
 
 // ---------------------------------------------------------------- часовой пояс сервиса
 
-test('parseArgs: часовой пояс — по умолчанию Алматы, из MEATSUIT_TZ или из --tz', () => {
+test('parseArgs: часовой пояс — по умолчанию зашитый в server.js, из MEATSUIT_TZ или из --tz', () => {
   assert.equal(parseArgs([], {}).tz, 'Asia/Almaty');
   assert.equal(parseArgs([], { MEATSUIT_TZ: 'Europe/Berlin' }).tz, 'Europe/Berlin');
   assert.equal(parseArgs(['--tz', 'America/New_York'], { MEATSUIT_TZ: 'Europe/Berlin' }).tz, 'America/New_York');

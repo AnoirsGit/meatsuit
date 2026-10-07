@@ -8,7 +8,7 @@ Terms: **egress** is the address websites see when your traffic leaves your netw
 
 - A website sees the address of the real connection. An IP cannot be faked, only routed through.
 - A server in a datacenter has an address from a hosting range, which is the most visible sign that traffic does not come from a person at home. This is plausible but **not verified**: the source the project originally relied on ("IP, protocol and behaviour are the main bot signals") is not in the repository.
-- Your own residential address is the one most consistent with the rest of your life, since it is the address your other devices already use. That is reasoning, not a measurement. Keep the rest consistent too: the containers' time zone (`TZ`) comes from `MEATSUIT_TZ` in `docker/.env` (default `Asia/Almaty`, the author's), and `docker/neko/brave-start.sh` sets the browser languages to `en-US,ru`. Change both to match where your exit is and how you browse.
+- Your own residential address is the one most consistent with the rest of your life, since it is the address your other devices already use. That is reasoning, not a measurement. Keep the rest consistent too: the containers' time zone (`TZ`) comes from `MEATSUIT_TZ` in `docker/.env` (default `UTC`), and `docker/neko/brave-start.sh` sets the browser languages to `en-US,ru`. Change both to match where your exit is and how you browse.
 
 ## The options
 
