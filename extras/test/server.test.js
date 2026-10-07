@@ -17,7 +17,9 @@ const { createLimits } = require('../limits.js');
 const { createEgress } = require('../egress.js');
 
 const MIN = 60000, H = 3600000;
-/** Местное время пояса по умолчанию (UTC+5) → миллисекунды UTC. */
+/** Пояс тестов: UTC+5 без перевода часов (Etc/GMT-5, знак у Etc наоборот). Умолчание в коде — UTC. */
+const TZ = 'Etc/GMT-5';
+/** Местное время пояса тестов (UTC+5) → миллисекунды UTC. */
 const at = (h, m = 0, day = 5) => Date.UTC(2026, 9, day, h - 5, m);
 
 const SITES = {
@@ -83,7 +85,7 @@ async function boot(t, over = {}) {
   const clock = fakeClock(at(12));
   const driver = over.driver || stubDriver();
   const queue = createQueue({ now: clock.now, setTimer: clock.setTimer, clearTimer: clock.clearTimer, idleMs: 5 * MIN, ticketTtlMs: MIN });
-  const limits = createLimits({ sites: over.sites || SITES, file: null, now: clock.now });
+  const limits = createLimits({ tz: TZ, sites: over.sites || SITES, file: null, now: clock.now });
   const echo = { reply: KZ, calls: 0 };
   const echoFetch = async () => {
     echo.calls++;
@@ -98,7 +100,7 @@ async function boot(t, over = {}) {
   const notified = [];
   const journal = createJournal({ file: over.journalFile, now: clock.now });
   const server = createServer({
-    driver, queue, limits, egress, clients: CLIENTS, journal, now: clock.now, maxBodyBytes: 4096,
+    driver, queue, limits, egress, clients: CLIENTS, journal, now: clock.now, maxBodyBytes: 4096, tz: TZ,
     notify: async (text) => { notified.push(text); return { sent: true }; },
     ...over.server,
   });
@@ -840,8 +842,8 @@ test('клиент со звёздочкой в sites допускается н�
 
 // ---------------------------------------------------------------- часовой пояс сервиса
 
-test('parseArgs: часовой пояс — по умолчанию зашитый в server.js, из MEATSUIT_TZ или из --tz', () => {
-  assert.equal(parseArgs([], {}).tz, 'Asia/Almaty');
+test('parseArgs: часовой пояс — по умолчанию UTC, из MEATSUIT_TZ или из --tz', () => {
+  assert.equal(parseArgs([], {}).tz, 'UTC');
   assert.equal(parseArgs([], { MEATSUIT_TZ: 'Europe/Berlin' }).tz, 'Europe/Berlin');
   assert.equal(parseArgs(['--tz', 'America/New_York'], { MEATSUIT_TZ: 'Europe/Berlin' }).tz, 'America/New_York');
 });

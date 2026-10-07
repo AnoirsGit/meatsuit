@@ -169,7 +169,7 @@ A refusal is `429` with `reason`: `closed`, `too_big`, `hour`, `day`, `hours`, `
 
 **The numbers are the author's untested starting values.** Platforms do not publish thresholds for account behavior. Tune them for yourself and treat them as a way to behave moderately, not as a guarantee.
 
-**Time zone.** Day boundaries and `hours` use one zone for the whole service: `--tz` or `MEATSUIT_TZ`, an IANA name such as `Europe/Berlin`. The default built into `server.js` is the author's zone, so **set yours**. An unknown name stops the service at start. Pick the zone of the place your exit is in, since that is where the account "lives". The flag is covered by unit tests of argument parsing; it has not been run against a live service in another zone.
+**Time zone.** Day boundaries and `hours` use one zone for the whole service: `--tz` or `MEATSUIT_TZ`, an IANA name such as `Europe/Berlin`. Without them the service counts in `UTC`, so **set yours**. An unknown name stops the service at start. Pick the zone of the place your exit is in, since that is where the account "lives". The flag is covered by unit tests of argument parsing; it has not been run against a live service in another zone.
 
 ## Egress check
 

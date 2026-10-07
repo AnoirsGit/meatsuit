@@ -14,7 +14,7 @@ test('умолчания подставляются, заданное не за�
   const cfg = normalizeConfig({ sites, hours: [10, 22], session: { minutes: [3, 6] } });
   assert.deepEqual(
     [cfg.tz, cfg.hours, cfg.sessionsPerDay, cfg.minGapMinutes, cfg.lateMinutes, cfg.cooldownHours, cfg.session.minutes, cfg.session.sites],
-    ['Asia/Almaty', [10, 22], [2, 5], 60, 90, 24, [3, 6], [2, 4]],
+    ['UTC', [10, 22], [2, 5], 60, 90, 24, [3, 6], [2, 4]],
   );
   assert.deepEqual(cfg.sites, [{ url: 'https://a.test/', kind: 'read', weight: 1 }]);
 });

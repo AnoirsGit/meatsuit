@@ -257,9 +257,9 @@ node life.js run           # по расписанию, пока не остан
 | Потолок действий в задаче (добавлен позже, 05.10.2026) | считаются `goto`, `click`, `fill`, `type`, `key`; сверх `100 + 30 × cost` — `429 limit`, `reason: actions`, окно закрыто, очередь свободна, мне сообщение; дальше задача отвечает `404 no_task`, `reason: actions` |
 | Длина `text` у `fill` и `type` | не больше 5000 знаков, иначе `400`: печать идёт с человеческой скоростью |
 | Повадки рук | общие с прогревом: `data/persona.json` (`human/persona-file.js`), если у сервиса и `life.js` один каталог `--data` |
-| Часовой пояс | `--tz` или `MEATSUIT_TZ` вместо зашитого пояса автора |
+| Часовой пояс | `--tz` или `MEATSUIT_TZ`; без них `UTC` |
 
-Переменные окружения: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `MEATSUIT_PORT` (по умолчанию 8787), `MEATSUIT_HOST` (по умолчанию `127.0.0.1`), `MEATSUIT_CDP` (по умолчанию `http://127.0.0.1:9222`), `MEATSUIT_TZ` (пояс для суток и `hours`, по умолчанию пояс автора, зашитый в `server.js`; неизвестное имя — отказ на старте). Те же значения задают флаги `--port`, `--host`, `--cdp`, `--tz`; ещё есть `--data`, `--sites`, `--clients`, `--egress`. Реальные токены клиентов лежат в `profiles/clients.json` (вне git, образец `profiles/clients.example.json`). Выход в сеть проверяется по `profiles/egress.json` (`{"country":"DE","asn":[64500]}`): файла в репозитории нет, его создаёт тот, кто разворачивает.
+Переменные окружения: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `MEATSUIT_PORT` (по умолчанию 8787), `MEATSUIT_HOST` (по умолчанию `127.0.0.1`), `MEATSUIT_CDP` (по умолчанию `http://127.0.0.1:9222`), `MEATSUIT_TZ` (пояс для суток и `hours`, по умолчанию `UTC`; неизвестное имя — отказ на старте). Те же значения задают флаги `--port`, `--host`, `--cdp`, `--tz`; ещё есть `--data`, `--sites`, `--clients`, `--egress`. Реальные токены клиентов лежат в `profiles/clients.json` (вне git, образец `profiles/clients.example.json`). Выход в сеть проверяется по `profiles/egress.json` (`{"country":"DE","asn":[64500]}`): файла в репозитории нет, его создаёт тот, кто разворачивает.
 
 ## Открытые вопросы
 

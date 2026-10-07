@@ -1,5 +1,5 @@
 /**
- * Лимиты площадок из sites.json: perDay, perHour и часы работы по Алматы.
+ * Лимиты площадок из sites.json: perDay, perHour и часы работы по поясу tz (по умолчанию UTC).
  * Единица лимита — cost из begin. perDay 0 — площадка закрыта. Счётчики лежат в
  * файле (запись целиком через tmp + rename) и переживают перезапуск. Отказ несёт
  * retry_at: когда освободится окно, час или сутки (null — при таком cost никогда).
@@ -117,7 +117,7 @@ function restOfWeek(name, n, week) {
 /** Самый большой дневной лимит, какой вообще бывает: выше него cost не влезет никогда. */
 const maxDay = (c) => (c.jitter ? Math.floor(c.perDay * (1 + c.jitter) + EPS) : c.perDay);
 
-function createLimits({ sites, file, now = Date.now, tz = 'Asia/Almaty', fs = nodeFs }) {
+function createLimits({ sites, file, now = Date.now, tz = 'UTC', fs = nodeFs }) {
   const cfg = normalizeSites(sites);
   const events = Object.create(null); // площадка → [{ t, c }] по возрастанию t
   const state = Object.create(null); // площадка → { first: первый успешный begin, frozenUntil: конец паузы }
@@ -263,7 +263,7 @@ function createLimits({ sites, file, now = Date.now, tz = 'Asia/Almaty', fs = no
   }
 
   /**
-   * Капча, блок или слетевший вход: площадка замирает до начала суток по Алматы + challengePauseDays
+   * Капча, блок или слетевший вход: площадка замирает до начала суток по поясу tz + challengePauseDays
    * (по умолчанию 3). Повторная проверка срок только продлевает. Пауза пишется в файл.
    */
   function challenge(site, t = now()) {

@@ -8,7 +8,7 @@
  *   node server.js [--host 127.0.0.1] [--port 8787] [--data data]
  *                  [--sites profiles/sites.json] [--clients profiles/clients.json]
  *                  [--egress profiles/egress.json] [--cdp http://127.0.0.1:9222]
- *                  [--tz Asia/Almaty]
+ *                  [--tz UTC]
  *
  * Окружение: MEATSUIT_HOST, MEATSUIT_PORT, MEATSUIT_CDP, MEATSUIT_TZ, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
  * Нужен driver.js (open / view / act / resume / close).
@@ -124,7 +124,7 @@ function createJournal({ file, fs = nodeFs, now = Date.now, keep = 200, echo } =
 
 function createServer({
   driver, queue, limits, egress, clients, journal, notify = async () => ({ sent: false }), now = Date.now,
-  tz = 'Asia/Almaty', needsHumanIdleMs = 30 * MIN, maxBodyBytes = 1 << 20, defaultWaitSec = 60, maxWaitSec = 300,
+  tz = 'UTC', needsHumanIdleMs = 30 * MIN, maxBodyBytes = 1 << 20, defaultWaitSec = 60, maxWaitSec = 300,
   // Потолок действий в одной задаче: actionsBase + actionsPerCost × cost. Нужен как предохранитель от бота с ошибкой в цикле:
   // лимиты площадки считают только begin, а cost клиент называет сам. Числа стартовые, не измеренные.
   actionsBase = 100, actionsPerCost = 30, maxTextChars = 5000,
@@ -573,7 +573,7 @@ function parseArgs(argv, env) {
   const opts = {
     host: env.MEATSUIT_HOST || '127.0.0.1', port: env.MEATSUIT_PORT || '8787', data: 'data', cdp: env.MEATSUIT_CDP || 'http://127.0.0.1:9222',
     sites: 'profiles/sites.json', clients: 'profiles/clients.json', egress: 'profiles/egress.json',
-    tz: env.MEATSUIT_TZ || 'Asia/Almaty', // границы суток для лимитов: часовой пояс владельца, не сервера
+    tz: env.MEATSUIT_TZ || 'UTC', // границы суток для лимитов: пояс владельца из MEATSUIT_TZ или --tz, без них UTC
   };
   for (let i = 0; i < argv.length; i++) {
     const name = argv[i].replace(/^--/, '');

@@ -6,7 +6,7 @@
 const { maxSessionMs } = require('./plan.js');
 
 const DEFAULTS = {
-  tz: 'Asia/Almaty',
+  tz: 'UTC', // нейтральное умолчание: свой пояс задают в конфиге прогрева (tz)
   hours: [9, 23],
   daysPerWeek: [7, 7], // в какие дни работает: от и до дней в неделю, остальные выходные (7 — каждый день)
   sessionsPerDay: [2, 5],

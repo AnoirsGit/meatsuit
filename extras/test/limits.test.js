@@ -1,5 +1,5 @@
 /**
- * Лимиты площадок: perDay, perHour и часы по поясу (по умолчанию UTC+5), единица — cost, счётчики
+ * Лимиты площадок: perDay, perHour и часы по поясу (здесь UTC+5, в коде по умолчанию UTC), единица — cost, счётчики
  * переживают перезапуск, ответ несёт retry_at. Часы и файлы подставляются.
  *
  *   node --test
@@ -11,7 +11,9 @@ const os = require('node:os');
 const path = require('node:path');
 const { createLimits, normalizeSites } = require('../limits.js');
 
-/** Местное время пояса по умолчанию (UTC+5) → миллисекунды UTC. */
+/** Пояс тестов: UTC+5 без перевода часов (имя IANA Etc/GMT-5, знак у Etc наоборот). Умолчание в коде — UTC. */
+const TZ = 'Etc/GMT-5';
+/** Местное время пояса тестов (UTC+5) → миллисекунды UTC. */
 const at = (h, m = 0, day = 5) => Date.UTC(2026, 9, day, h - 5, m);
 
 const SITES = {
@@ -36,7 +38,7 @@ function memFs() {
 function setup(clockAt = at(12), sites = SITES) {
   const clock = { t: clockAt };
   const mem = memFs();
-  const make = () => createLimits({ sites, file: 'data/limits.json', now: () => clock.t, fs: mem });
+  const make = () => createLimits({ tz: TZ, sites, file: 'data/limits.json', now: () => clock.t, fs: mem });
   return { clock, mem, make, limits: make() };
 }
 
@@ -210,15 +212,15 @@ test('старые записи не копятся: в файле только 
 test('испорченный файл счётчиков: ошибка, а не молчаливый сброс лимитов', () => {
   const mem = memFs();
   mem.files.set('data/limits.json', '{ oops');
-  assert.throws(() => createLimits({ sites: SITES, file: 'data/limits.json', now: () => at(12), fs: mem }), /limits/);
+  assert.throws(() => createLimits({ tz: TZ, sites: SITES, file: 'data/limits.json', now: () => at(12), fs: mem }), /limits/);
   mem.files.set('data/limits.json', JSON.stringify({ 'hh.kz': 'много' }));
-  assert.throws(() => createLimits({ sites: SITES, file: 'data/limits.json', now: () => at(12), fs: mem }), /limits/);
+  assert.throws(() => createLimits({ tz: TZ, sites: SITES, file: 'data/limits.json', now: () => at(12), fs: mem }), /limits/);
 });
 
 test('в файле площадка, которой больше нет в sites.json: не мешает', () => {
   const mem = memFs();
   mem.files.set('data/limits.json', JSON.stringify({ 'old.test': [[at(11), 1]] }));
-  const limits = createLimits({ sites: SITES, file: 'data/limits.json', now: () => at(12), fs: mem });
+  const limits = createLimits({ tz: TZ, sites: SITES, file: 'data/limits.json', now: () => at(12), fs: mem });
   assert.equal(limits.take('hh.kz', 1).ok, true);
 });
 
@@ -226,9 +228,9 @@ test('на настоящем диске: запись и чтение посл�
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'meatsuit-limits-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, 'nested', 'limits.json'); // каталога ещё нет
-  const a = createLimits({ sites: SITES, file, now: () => at(12) });
+  const a = createLimits({ tz: TZ, sites: SITES, file, now: () => at(12) });
   assert.equal(a.take('hh.kz', 1).ok, true);
-  const b = createLimits({ sites: SITES, file, now: () => at(12) });
+  const b = createLimits({ tz: TZ, sites: SITES, file, now: () => at(12) });
   assert.equal(b.snapshot()['hh.kz'].usedDay, 1);
   assert.deepEqual(fs.readdirSync(path.dirname(file)), ['limits.json']);
 });
@@ -513,12 +515,12 @@ test('файл счётчиков: испорченное состояние —
   const mem = memFs();
   const bad = (state) => {
     mem.files.set('data/limits.json', JSON.stringify({ _state: state }));
-    assert.throws(() => createLimits({ sites: SITES, file: 'data/limits.json', now: () => at(12), fs: mem }), /limits/, JSON.stringify(state));
+    assert.throws(() => createLimits({ tz: TZ, sites: SITES, file: 'data/limits.json', now: () => at(12), fs: mem }), /limits/, JSON.stringify(state));
   };
   bad('пауза');
   bad({ 'hh.kz': 'пауза' });
   bad({ 'hh.kz': { frozenUntil: 'завтра' } });
   bad({ 'hh.kz': { first: null } });
   mem.files.set('data/limits.json', JSON.stringify({ 'hh.kz': [[at(11), 1]] }));
-  assert.equal(createLimits({ sites: SITES, file: 'data/limits.json', now: () => at(12), fs: mem }).status('hh.kz', at(12)).usedDay, 1, 'старый файл без _state читается');
+  assert.equal(createLimits({ tz: TZ, sites: SITES, file: 'data/limits.json', now: () => at(12), fs: mem }).status('hh.kz', at(12)).usedDay, 1, 'старый файл без _state читается');
 });
