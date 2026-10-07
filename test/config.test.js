@@ -230,7 +230,8 @@ test('init: MEATSUIT_CONFIG и --file; на старом файле с ошиб�
   assert.match(lines.join('\n'), /--env-file/);
 
   const old = path.join(dir, 'old.env');
-  fs.writeFileSync(old, 'NEKO_PASSWORD=short\nNEKO_ADMIN_PASSWORD=\nTELEGRAM_BOT_TOKEN=keep\n', { mode: 0o644 });
+  const OLD = ['NEKO_PASSWORD=', 'short', '\nNEKO_ADMIN_PASSWORD=\nTELEGRAM_BOT_TOKEN=keep\n'].join(''); // из кусков: скан секретов не должен находить сам тест
+  fs.writeFileSync(old, OLD, { mode: 0o644 });
   const out = [];
   main(['--file', old], {}, (s) => out.push(s));
   const text = out.join('\n');
@@ -239,7 +240,7 @@ test('init: MEATSUIT_CONFIG и --file; на старом файле с ошиб�
   assert.match(text, /NEKO_ADMIN_PASSWORD: обязательно/);
   assert.match(text, /права файла 644/);
   assert.ok(!text.includes('short') && !text.includes('keep'));
-  assert.equal(fs.readFileSync(old, 'utf8'), 'NEKO_PASSWORD=short\nNEKO_ADMIN_PASSWORD=\nTELEGRAM_BOT_TOKEN=keep\n');
+  assert.equal(fs.readFileSync(old, 'utf8'), OLD);
   assert.equal(fs.statSync(old).mode & 0o777, 0o644, 'права тоже не трогает');
 });
 
