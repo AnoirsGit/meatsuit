@@ -19,6 +19,7 @@ class BadCommand extends Error {}
 class StaleElement extends Error {}
 
 const MAX_TEXT = 1000;
+const MAX_LONG_TEXT = 2000; // fill в textarea (сопроводительное письмо): ≈ 4–13 минут печати при темпе персоны
 const MAX_WAIT = 15000;
 const MAX_OPTION = 200; // value или подпись варианта <select>
 const MAX_ARROWS = 25; // дальше вариант ищется первыми буквами подписи, как делает человек
@@ -69,6 +70,8 @@ const isId = (v) => Number.isInteger(v) && v > 0;
 const isGen = (v) => Number.isInteger(v) && v > 0;
 // Перевод строки в поле нажал бы Enter и отправил полсообщения, поэтому текст однострочный.
 const isText = (v) => typeof v === 'string' && v.length > 0 && v.length <= MAX_TEXT && !/[\r\n]/.test(v);
+// fill: длиннее MAX_TEXT или с переводами строк — только в textarea (проверка при выполнении, когда цель известна).
+const isLongText = (v) => typeof v === 'string' && v.length > 0 && v.length <= MAX_LONG_TEXT;
 // У press и type цель необязательна: поле, которое должно быть в фокусе. Тогда id и gen вместе.
 const hasTarget = (c) => c.id !== undefined || c.gen !== undefined;
 
@@ -79,7 +82,10 @@ function validate(c, allowedHosts = []) {
   const optTarget = () => { if (hasTarget(c) && (!isId(c.id) || !isGen(c.gen))) bad('id и gen из снимка — вместе или ни одного'); };
   switch (c.cmd) {
     case 'click': if (!isId(c.id) || !isGen(c.gen)) bad('нужны id и gen из снимка'); break;
-    case 'fill': if (!isId(c.id) || !isGen(c.gen)) bad('нужны id и gen из снимка'); if (!isText(c.text)) bad('нужен text до ' + MAX_TEXT); break;
+    case 'fill':
+      if (!isId(c.id) || !isGen(c.gen)) bad('нужны id и gen из снимка');
+      if (!isLongText(c.text)) bad(`нужен text до ${MAX_TEXT} символов в одну строку, в textarea — до ${MAX_LONG_TEXT} и с переводами строк`);
+      break;
     case 'type': if (!isText(c.text)) bad('нужен text до ' + MAX_TEXT); optTarget(); break;
     case 'press': if (!KEYS.has(c.key)) bad('клавиша не из списка'); optTarget(); break;
     case 'select': {
@@ -320,11 +326,15 @@ function hands(page, opts = {}) {
         const kind = await kindOf(c.id);
         if (kind === 'select') throw new BadCommand('fill: это список — команда select');
         if (kind === 'file') throw new BadCommand('fill: это поле файла — команда upload');
+        const text = c.text.replace(/\r\n?/g, '\n');
+        if (kind !== 'textarea' && (text.includes('\n') || text.length > MAX_TEXT)) {
+          throw new BadCommand(`fill: текст с переводами строк или длиннее ${MAX_TEXT} символов — только в textarea`);
+        }
         await human.click(page, loc, { verifyAt: (pt) => hitsTarget(c.id, pt) });
         await human.pause(150, 500);
         await page.keyboard.press('ControlOrMeta+A');
         await page.keyboard.press('Backspace');
-        return human.type(page, c.text);
+        return human.type(page, text);
       }
       case 'type':
         if (hasTarget(c)) { await target(c.id, c.gen); await focused(c.id); }

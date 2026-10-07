@@ -27,7 +27,7 @@ const rejects = (c, hosts) => assert.throws(() => validate(c, hosts), BadCommand
   rejects({ cmd: 'click', id: '7', gen: 1 });
   rejects({ cmd: 'click', id: 7 }); // без gen
   rejects({ cmd: 'fill', id: 1, gen: 1, text: '' });
-  rejects({ cmd: 'fill', id: 1, gen: 1, text: 'x'.repeat(1001) });
+  rejects({ cmd: 'fill', id: 1, gen: 1, text: 'x'.repeat(2001) }); // 1001–2000 и переводы строк — только в textarea (test/forms.test.js)
   rejects({ cmd: 'press', key: 'F12' });
   rejects({ cmd: 'wait', ms: 999999 });
   rejects({ cmd: 'goto', url: 'https://evil.example/' }, ['tinder.com']);

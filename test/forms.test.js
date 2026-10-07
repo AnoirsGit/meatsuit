@@ -1,5 +1,6 @@
 /**
- * Формы на фальшивой странице: журнал без набранного текста, выбор в <select>.
+ * Формы на фальшивой странице: журнал без набранного текста, выбор в <select>,
+ * многострочный fill в textarea.
  *
  *   node test/forms.test.js
  */
@@ -64,6 +65,33 @@ const idOf = (s, name) => s.elements.find((e) => e.name === name).id;
   assert.ok(lines.find((l) => l.cmd.cmd === 'wait').error, 'ошибка wait должна быть в журнале');
   assert.equal(lines.find((l) => l.result === 'dry-run').cmd.textLength, SECRET.length);
   assert.ok(lines.every((l) => l.ts && l.url), 'у каждой строки время и адрес');
+
+  // --- Многострочный fill: только в textarea, до 2000 символов; перевод строки — Shift+Enter, не «отправить».
+  validate({ cmd: 'fill', id: 1, gen: 1, text: 'Здравствуйте!\nСпасибо' });
+  validate({ cmd: 'fill', id: 1, gen: 1, text: 'я'.repeat(2000) });
+  rejects({ cmd: 'fill', id: 1, gen: 1, text: 'я'.repeat(2001) });
+  rejects({ cmd: 'type', text: 'a\nb' }); // type по-прежнему одна строка
+  const LETTER = 'Здравствуйте!\r\nМеня зовут Анна, я frontend-разработчик.\n\nС уважением, Анна';
+  const SENDS = `<body style="margin:0">
+    <input aria-label="Тема" onkeydown="if (event.key === 'Enter') document.title += 'input-enter;'">
+    <textarea aria-label="Сопроводительное" style="width:500px;height:160px"
+      onkeydown="if (event.key === 'Enter' && !event.shiftKey) document.title += 'sent;'"></textarea>
+  </body>`;
+  await page.setContent(SENDS);
+  const tl = hands(page, { logFile });
+  const l0 = await tl.see();
+  const refuse = async (c, re) => assert.rejects(tl.act(c), (e) => e instanceof BadCommand && re.test(e.message), JSON.stringify(c).slice(0, 80));
+  await refuse({ cmd: 'fill', id: idOf(l0, 'Тема'), gen: l0.gen, text: 'строка\nвторая' }, /textarea/);
+  await refuse({ cmd: 'fill', id: idOf(l0, 'Тема'), gen: l0.gen, text: 'я'.repeat(1001) }, /textarea/);
+  assert.equal(await page.inputValue('input'), '', 'отказ что-то напечатал');
+  const l1 = await tl.act({ cmd: 'fill', id: idOf(l0, 'Сопроводительное'), gen: l0.gen, text: LETTER });
+  assert.equal(await page.inputValue('textarea'), LETTER.replace(/\r\n/g, '\n'), 'текст в textarea не тот');
+  assert.equal(await page.title(), '', 'перевод строки нажал голый Enter');
+  assert.ok(l1.elements.find((e) => e.name === 'Сопроводительное').value.startsWith('Здравствуйте! Меня зовут'));
+  // Повторный fill заменяет весь многострочный текст.
+  await tl.act({ cmd: 'fill', id: idOf(l1, 'Сопроводительное'), gen: l1.gen, text: 'Коротко\nи ясно' });
+  assert.equal(await page.inputValue('textarea'), 'Коротко\nи ясно');
+  assert.ok(!fs.readFileSync(logFile, 'utf8').includes('Коротко'), 'текст письма попал в журнал');
 
   // --- select: закрытый набор полей; value — атрибут варианта, label — подпись (как в снимке).
   rejects({ cmd: 'select', id: 1, gen: 1 });
