@@ -1,7 +1,7 @@
 /**
  * Руки: закрытый набор команд по номерам из снимка глаз (eyes.js).
  *
- *   const h = hands(page, { dryRun, logFile, recordDir, allowedHosts });
+ *   const h = hands(page, { dryRun, logFile, recordDir, allowedHosts, uploadDirs });
  *   const snap = await h.see();
  *   const res  = await h.act({ cmd: 'click', id: 7, gen: snap.gen }); // diff снимка после действия
  *
@@ -19,7 +19,18 @@ class BadCommand extends Error {}
 class StaleElement extends Error {}
 
 const MAX_TEXT = 1000;
+const MAX_LONG_TEXT = 2000; // fill в textarea (сопроводительное письмо): ≈ 4–13 минут печати при темпе персоны
 const MAX_WAIT = 15000;
+const MAX_OPTION = 200; // value или подпись варианта <select>
+const MAX_ARROWS = 25; // дальше вариант ищется первыми буквами подписи, как делает человек
+// upload: только эти типы и не больше 10 МБ (резюме и письма для форм работодателей).
+const UPLOAD_TYPES = {
+  '.pdf': 'application/pdf',
+  '.doc': 'application/msword',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+};
+const MAX_UPLOAD = 10 * 1024 * 1024;
+const CHOOSER_MS = 5000; // сколько ждать окна выбора файла после клика по кнопке
 const KEYS = new Set(['Enter', 'Escape', 'Tab', 'Backspace', 'ArrowDown', 'ArrowUp', 'PageDown', 'PageUp']);
 
 // Копия SELECTOR из collect() в eyes.js: он локален в функции, которая выполняется в странице, и наружу не отдаётся.
@@ -31,23 +42,109 @@ const INTERACTIVE = [
   '[contenteditable=true]',
 ].join(',');
 
+// Журнал хранит, что сделано и где, но не что набрано: текст и значения — длиной, адреса — без query и hash
+// (там бывают токены входа, коды подтверждения и набранный поиск), файл — только типом. Лишние поля команды не пишутся.
+const JOURNAL_KEEP = ['cmd', 'id', 'gen', 'key', 'px', 'ms'];
+const JOURNAL_LENGTH = ['text', 'value', 'label'];
+const journalUrl = (u) => {
+  try {
+    const x = new URL(u);
+    if (x.protocol === 'http:' || x.protocol === 'https:') return x.origin + x.pathname;
+    return x.protocol === 'about:' ? x.href.replace(/[?#].*$/, '') : x.protocol; // data: и прочие несут содержимое в адресе
+  } catch { return ''; }
+};
+function journalCmd(c) {
+  const out = {};
+  for (const k of JOURNAL_KEEP) if (c[k] !== undefined) out[k] = c[k];
+  for (const k of JOURNAL_LENGTH) if (typeof c[k] === 'string') out[k + 'Length'] = c[k].length;
+  if (typeof c.url === 'string') out.url = journalUrl(c.url);
+  if (typeof c.file === 'string') out.fileType = path.extname(c.file).slice(1).toLowerCase();
+  return out;
+}
+// Ошибки Playwright цитируют селектор (а в нём искомый текст) в «Call log» со второй строки: берём первую
+// строку и вычищаем из неё текст и адрес команды во всех видах, в каких их печатает Playwright.
+function journalError(message, c) {
+  let m = String(message).split('\n')[0];
+  for (const k of JOURNAL_LENGTH) {
+    const v = c[k];
+    if (typeof v !== 'string' || !v) continue;
+    for (const form of new Set([v, JSON.stringify(v).slice(1, -1), v.replace(/'/g, "\\'"), v.replace(/\r\n?/g, '\n')])) m = m.split(form).join('…');
+  }
+  if (typeof c.url === 'string' && c.url) {
+    let href = c.url;
+    try { href = new URL(c.url).href; } catch { /* как есть */ } // goto печатает адрес в нормализованном виде
+    for (const form of new Set([c.url, href])) m = m.split(form).join(journalUrl(c.url));
+  }
+  return m;
+}
+
 const isId = (v) => Number.isInteger(v) && v > 0;
 const isGen = (v) => Number.isInteger(v) && v > 0;
 // Перевод строки в поле нажал бы Enter и отправил полсообщения, поэтому текст однострочный.
 const isText = (v) => typeof v === 'string' && v.length > 0 && v.length <= MAX_TEXT && !/[\r\n]/.test(v);
+// fill: длиннее MAX_TEXT или с переводами строк — только в textarea (проверка при выполнении, когда цель известна).
+const isLongText = (v) => typeof v === 'string' && v.length > 0 && v.length <= MAX_LONG_TEXT;
 // У press и type цель необязательна: поле, которое должно быть в фокусе. Тогда id и gen вместе.
 const hasTarget = (c) => c.id !== undefined || c.gen !== undefined;
 
-/** Проверка команды до выполнения. Бросает BadCommand. Чистая функция. */
-function validate(c, allowedHosts = []) {
+// file лежит внутри dir (оба абсолютные и нормализованные): не сам dir, не «..», не соседний каталог с тем же началом.
+const within = (dir, file) => {
+  const rel = path.relative(dir, file);
+  return rel !== '' && rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel);
+};
+
+/**
+ * Файл для upload при выполнении: настоящий путь (ссылки раскрыты) внутри настоящего каталога из uploadDirs,
+ * тип по настоящему имени, обычный непустой файл до 10 МБ. read: false — только проверить (dryRun).
+ * В сообщениях нет пути: они попадают в журнал. Отдаётся буфер, не путь: браузер может жить в другом контейнере.
+ */
+function uploadFile(file, uploadDirs, { read = true } = {}) {
+  let real;
+  try { real = fs.realpathSync(file); } catch { throw new BadCommand('upload: нет файла'); }
+  const dirs = uploadDirs.map((d) => { try { return fs.realpathSync(d); } catch { return null; } }).filter(Boolean);
+  if (!dirs.some((d) => within(d, real))) throw new BadCommand('upload: файл вне uploadDirs (ссылка ведёт наружу)');
+  if (!UPLOAD_TYPES[path.extname(real).toLowerCase()]) throw new BadCommand('upload: только pdf, doc, docx (ссылка ведёт на другой тип)');
+  const st = fs.statSync(real);
+  if (!st.isFile()) throw new BadCommand('upload: не обычный файл');
+  if (st.size === 0) throw new BadCommand('upload: пустой файл');
+  if (st.size > MAX_UPLOAD) throw new BadCommand('upload: файл больше 10 МБ');
+  if (!read) return null;
+  const buffer = fs.readFileSync(real);
+  if (buffer.length === 0 || buffer.length > MAX_UPLOAD) throw new BadCommand('upload: файл изменился во время чтения');
+  return { name: path.basename(file), mimeType: UPLOAD_TYPES[path.extname(real).toLowerCase()], buffer };
+}
+
+/**
+ * Проверка команды до выполнения. Бросает BadCommand. Чистая функция (файловую систему не трогает).
+ * uploadDirs — каталоги, откуда upload может брать файлы; без них upload выключен.
+ */
+function validate(c, allowedHosts = [], { uploadDirs = [] } = {}) {
   const bad = (m) => { throw new BadCommand(`${c && c.cmd}: ${m}`); };
   if (!c || typeof c !== 'object') throw new BadCommand('команда не объект');
   const optTarget = () => { if (hasTarget(c) && (!isId(c.id) || !isGen(c.gen))) bad('id и gen из снимка — вместе или ни одного'); };
   switch (c.cmd) {
     case 'click': if (!isId(c.id) || !isGen(c.gen)) bad('нужны id и gen из снимка'); break;
-    case 'fill': if (!isId(c.id) || !isGen(c.gen)) bad('нужны id и gen из снимка'); if (!isText(c.text)) bad('нужен text до ' + MAX_TEXT); break;
+    case 'fill':
+      if (!isId(c.id) || !isGen(c.gen)) bad('нужны id и gen из снимка');
+      if (!isLongText(c.text)) bad(`нужен text до ${MAX_TEXT} символов в одну строку, в textarea — до ${MAX_LONG_TEXT} и с переводами строк`);
+      break;
     case 'type': if (!isText(c.text)) bad('нужен text до ' + MAX_TEXT); optTarget(); break;
     case 'press': if (!KEYS.has(c.key)) bad('клавиша не из списка'); optTarget(); break;
+    case 'upload':
+      if (!isId(c.id) || !isGen(c.gen)) bad('нужны id и gen из снимка');
+      if (!Array.isArray(uploadDirs) || !uploadDirs.length) bad('загрузка файлов выключена: нет uploadDirs в опциях task');
+      if (typeof c.file !== 'string' || !path.isAbsolute(c.file) || c.file.includes('\0')) bad('file — абсолютный путь к файлу');
+      if (!UPLOAD_TYPES[path.extname(c.file).toLowerCase()]) bad('только pdf, doc, docx');
+      if (!uploadDirs.some((d) => typeof d === 'string' && within(path.resolve(d), path.resolve(c.file)))) bad('файл вне uploadDirs');
+      break;
+    case 'select': {
+      if (!isId(c.id) || !isGen(c.gen)) bad('нужны id и gen из снимка');
+      const byValue = c.value !== undefined, byLabel = c.label !== undefined;
+      if (byValue === byLabel) bad('нужен ровно один из value и label');
+      if (byValue && !(typeof c.value === 'string' && c.value.length <= MAX_OPTION)) bad(`value — строка до ${MAX_OPTION}`);
+      if (byLabel && !(typeof c.label === 'string' && c.label.trim() && c.label.length <= MAX_OPTION)) bad(`label — непустая строка до ${MAX_OPTION}`);
+      break;
+    }
     case 'scroll': if (!(c.px === undefined || (Number.isFinite(c.px) && c.px >= 0 && c.px <= 5000))) bad('px от 0 до 5000, только вниз'); break;
     case 'wait':
       if (!(Number.isFinite(c.ms) && c.ms >= 0 && c.ms <= MAX_WAIT) && !isText(c.text)) bad(`нужен ms до ${MAX_WAIT} или text`);
@@ -67,7 +164,7 @@ function validate(c, allowedHosts = []) {
 }
 
 function hands(page, opts = {}) {
-  const { dryRun = false, logFile, recordDir, allowedHosts = [], capture, dryRunNavigation = false } = opts;
+  const { dryRun = false, logFile, recordDir, allowedHosts = [], uploadDirs = [], capture, dryRunNavigation = false } = opts;
   const archive = capture && createCapture(capture); // { dir, htmlPerSignature, maxMB }
   let last = null;
   let world = null; // изолированный мир, где лежат элементы последнего снимка
@@ -203,21 +300,129 @@ function hands(page, opts = {}) {
     if (!ok) throw new StaleElement(`в фокусе уже не элемент ${id}: ввод отменён`);
   };
 
+  // Что за элемент под номером: от этого зависит, какой командой его можно трогать.
+  const kindOf = (id) => dom.run(world, (i) => {
+    const e = globalThis.__ms.els[i];
+    if (!e) return null;
+    if (e.tagName === 'SELECT') return 'select';
+    if (e.tagName === 'TEXTAREA') return 'textarea';
+    if (e.tagName === 'INPUT') return (e.getAttribute('type') || '').toLowerCase() === 'file' ? 'file' : 'input';
+    return e.isContentEditable ? 'editable' : 'other';
+  }, id);
+
+  /**
+   * Вариант в <select>. Раскрытый список браузер с экраном рисует отдельным окном, мышью до него не дотянуться.
+   * Поэтому как у человека с клавиатурой: рука подходит к списку, он получает фокус, вариант выбирается стрелками,
+   * не раскрывая список; далёкий вариант — первыми буквами подписи, потом стрелками. События настоящие.
+   * Не вышло (браузер не двигает выбор стрелками) — вариант ставится напрямую с событиями input и change.
+   */
+  const choose = async (c) => {
+    const el = await target(c.id, c.gen);
+    const byLabel = c.label !== undefined;
+    const want = await dom.run(world, ([i, label, v]) => {
+      const s = globalThis.__ms.els[i];
+      if (!s || s.tagName !== 'SELECT') return { error: 'элемент не список <select>' };
+      if (s.multiple) return { error: 'список с выбором нескольких вариантов не поддерживается' };
+      if (s.disabled) return { error: 'список недоступен' };
+      const sq = (t) => (t || '').replace(/\s+/g, ' ').trim();
+      const opts = [...s.options];
+      let k = label ? opts.findIndex((o) => sq(o.label) === sq(v)) : opts.findIndex((o) => o.value === v);
+      if (k < 0 && label) k = opts.findIndex((o) => sq(o.label).toLowerCase() === sq(v).toLowerCase());
+      if (k < 0) return { error: 'нет такого варианта' };
+      const o = opts[k];
+      if (o.disabled || (o.parentElement.tagName === 'OPTGROUP' && o.parentElement.disabled)) return { error: 'вариант недоступен' };
+      return { index: k, from: s.selectedIndex, word: (sq(o.label).match(/^[\p{L}\p{N}]+/u) || [''])[0].slice(0, 12) };
+    }, [c.id, byLabel, byLabel ? c.label : c.value]);
+    if (want.error) throw new BadCommand(`select: ${want.error}`);
+    if (want.from === want.index) return; // уже выбран
+    const now = () => dom.run(world, (i) => globalThis.__ms.els[i].selectedIndex, c.id);
+    await human.hover(page, el);
+    await dom.run(world, (i) => globalThis.__ms.els[i].focus(), c.id);
+    await focused(c.id);
+    let at = await now();
+    if (Math.abs(want.index - at) > MAX_ARROWS && want.word) {
+      await human.type(page, want.word, { typoRate: 0 }); // поиск по первым буквам у закрытого списка
+      at = await now();
+    }
+    for (let n = 0; at !== want.index && Math.abs(want.index - at) <= MAX_ARROWS && n <= 2 * MAX_ARROWS; n++) {
+      await human.pause(140, 380);
+      await focused(c.id); // фокус ушёл — стрелки пошли бы в чужой элемент
+      await human.press(page, want.index > at ? 'ArrowDown' : 'ArrowUp');
+      const next = await now();
+      if (next === at) break; // стрелка выбор не двигает
+      at = next;
+    }
+    if (at !== want.index) {
+      await dom.run(world, ([i, k]) => {
+        const s = globalThis.__ms.els[i];
+        s.selectedIndex = k;
+        s.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+        s.dispatchEvent(new Event('change', { bubbles: true }));
+      }, [c.id, want.index]);
+    }
+  };
+
+  /**
+   * Файл в форму. Цель — <input type=file> (в том числе спрятанное за меткой): файл ставится в поле буфером,
+   * как setInputFiles у Playwright, после паузы «выбрал в окне». Иначе — кнопка или метка, которая открывает
+   * выбор файла: человеческий клик, окно выбора перехватывается и получает файл. Окна выбора нет — BadCommand.
+   */
+  const upload = async (c) => {
+    const file = uploadFile(c.file, uploadDirs);
+    const el = await target(c.id, c.gen);
+    const kind = await kindOf(c.id);
+    if (kind === 'file') {
+      if (await dom.run(world, (i) => globalThis.__ms.els[i].disabled, c.id)) throw new BadCommand('upload: поле файла недоступно');
+      await human.pause(800, 2500);
+      const set = await dom.run(world, ([i, b64, name, type]) => {
+        const input = globalThis.__ms.els[i];
+        if (!input || !input.isConnected) return false; // поле исчезло, пока «выбирался файл»
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+        const dt = new DataTransfer();
+        dt.items.add(new File([bytes], name, { type, lastModified: Date.now() }));
+        input.files = dt.files;
+        input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      }, [c.id, file.buffer.toString('base64'), file.name, file.mimeType]);
+      if (!set) throw new StaleElement(`поле файла ${c.id} исчезло, пока выбирался файл`);
+      return;
+    }
+    // Окно выбора перехватывается, только пока ждём его: слушатель ставится до клика.
+    const chooser = page.waitForEvent('filechooser', { timeout: CHOOSER_MS });
+    chooser.catch(() => {}); // клик мог не состояться (verifyAt): ожидание само истечёт
+    await human.click(page, el, { verifyAt: (pt) => hitsTarget(c.id, pt) });
+    let fc;
+    try { fc = await chooser; } catch { throw new BadCommand(`upload: клик по элементу ${c.id} не открыл выбор файла`); }
+    await human.pause(800, 2500);
+    return fc.setFiles(file);
+  };
+
   const run = async (c) => {
     switch (c.cmd) {
       case 'click': {
         const el = await target(c.id, c.gen);
+        if (await kindOf(c.id) === 'file') throw new BadCommand('click: поле файла открыло бы системное окно выбора — команда upload');
         // Мышь идёт до нескольких секунд: перед нажатием сверяем, что под курсором всё ещё цель (оверлей, сдвиг).
         // В dryRun клик по tab — единственная настоящая запись, там ещё и над вкладкой не должно быть ссылки или кнопки.
         return human.click(page, el, { verifyAt: (pt) => hitsTarget(c.id, pt, { nested: dryRun }) });
       }
       case 'fill': {
         const loc = await target(c.id, c.gen);
+        const kind = await kindOf(c.id);
+        if (kind === 'select') throw new BadCommand('fill: это список — команда select');
+        if (kind === 'file') throw new BadCommand('fill: это поле файла — команда upload');
+        const text = c.text.replace(/\r\n?/g, '\n');
+        if (kind !== 'textarea' && (text.includes('\n') || text.length > MAX_TEXT)) {
+          throw new BadCommand(`fill: текст с переводами строк или длиннее ${MAX_TEXT} символов — только в textarea`);
+        }
         await human.click(page, loc, { verifyAt: (pt) => hitsTarget(c.id, pt) });
         await human.pause(150, 500);
         await page.keyboard.press('ControlOrMeta+A');
         await page.keyboard.press('Backspace');
-        return human.type(page, c.text);
+        return human.type(page, text);
       }
       case 'type':
         if (hasTarget(c)) { await target(c.id, c.gen); await focused(c.id); }
@@ -226,7 +431,9 @@ function hands(page, opts = {}) {
         if (hasTarget(c)) await target(c.id, c.gen);
         await human.pause(150, 600);
         if (hasTarget(c)) await focused(c.id); // после паузы, прямо перед клавишей
-        return page.keyboard.press(c.key);
+        return human.press(page, c.key);
+      case 'select': return choose(c);
+      case 'upload': return upload(c);
       case 'scroll': return human.scroll(page, c.px);
       case 'wait':
         if (c.text) return page.getByText(c.text).first().waitFor({ state: 'visible', timeout: MAX_WAIT });
@@ -247,13 +454,14 @@ function hands(page, opts = {}) {
 
   /** Выполнить команду и вернуть, что изменилось на странице. */
   const act = serial(async (c) => {
-    validate(c, allowedHosts);
+    validate(c, allowedHosts, { uploadDirs });
+    if (c.cmd === 'upload') uploadFile(c.file, uploadDirs, { read: false }); // и в репетиции: нет файла — видно сразу
     const url = page.url();
     // dryRunNavigation: клик по role=tab только переключает вид внутри страницы.
     const tabClick = dryRunNavigation && c.cmd === 'click' && last && c.gen === last.gen
       && last.elements.some((e) => e.id === c.id && e.role === 'tab');
     if (dryRun && c.cmd !== 'goto' && !tabClick) { // навигация только читает страницу: без неё dryRun остаётся на about:blank и видеть нечего
-      log({ cmd: c, url, result: 'dry-run' });
+      log({ cmd: journalCmd(c), url: journalUrl(url), result: 'dry-run' });
       return { dryRun: true, changed: false };
     }
     if (!last) { // act без see(): сравнивать не с чем
@@ -268,11 +476,11 @@ function hands(page, opts = {}) {
       const snap = await look();
       record(c, snap);
       await archived(snap, c);
-      log({ cmd: c, url, result: 'ok', urlAfter: snap.url });
+      log({ cmd: journalCmd(c), url: journalUrl(url), result: 'ok', urlAfter: journalUrl(snap.url) });
       return eyes.diff(before, snap);
     } catch (e) {
       const err = e instanceof dom.StaleWorld ? new StaleElement('страница сменилась посреди команды') : e;
-      log({ cmd: c, url, error: err.message });
+      log({ cmd: journalCmd(c), url: journalUrl(url), error: journalError(err.message, c) });
       throw err;
     }
   });
@@ -292,7 +500,7 @@ function replay(dir, opts = {}) {
   return {
     async see(o) { return o && o.since ? eyes.diff(o.since, snaps[i]) : snaps[i]; },
     async act(c) {
-      validate(c, opts.allowedHosts);
+      validate(c, opts.allowedHosts, { uploadDirs: opts.uploadDirs });
       if (c.id !== undefined && (c.gen !== snaps[i].gen || !snaps[i].elements.some((e) => e.id === c.id))) {
         throw new StaleElement(`элемента ${c.id} нет в снимке ${i}`);
       }
