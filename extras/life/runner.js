@@ -111,7 +111,8 @@ function createRunner({ cfg, connect, store, journal = () => {}, egress = null, 
       active = { link, page: null };
       if (stopping) return 'stopped';
       stage = 'page';
-      page = await link.openPage();
+      active.opening = link.openPage(); // stop() дождётся его: вкладка в браузере появляется раньше, чем вернётся newPage
+      page = await active.opening;
       active.page = page;
       if (stopping) return 'stopped';
       stage = 'session';
@@ -186,7 +187,10 @@ function createRunner({ cfg, connect, store, journal = () => {}, egress = null, 
     if (busy) journal({ event: 'stopped', reason: 'сессия прервана остановкой' });
     const a = active;
     if (a) {
-      if (a.page) await a.page.close().catch(() => {});
+      // Вкладка ещё открывается: дождаться и закрыть её. Отключение раньше уронило бы открытие,
+      // и вкладка осталась бы в браузере (так бывало при docker stop в начале сессии).
+      const page = a.page || (a.opening && await a.opening.catch(() => null));
+      if (page) await page.close().catch(() => {});
       await a.link.close().catch(() => {});
     }
   }

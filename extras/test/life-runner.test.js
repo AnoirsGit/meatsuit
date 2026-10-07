@@ -426,6 +426,29 @@ test('stop, пока идёт подключение: соединение за�
   assert.equal(session.calls.length, 0);
 });
 
+test('stop, пока открывается вкладка: вкладка закрывается до отключения, а не остаётся в браузере', async () => {
+  // Как у настоящего: вкладка в браузере уже есть, а newPage ещё не вернулся. Отключение роняет его,
+  // и вкладку потом закрыть некому.
+  const order = [];
+  let finishOpen, failOpen;
+  const page = { close: async () => { order.push('page'); } };
+  const link = {
+    openPage: () => new Promise((resolve, reject) => { finishOpen = () => resolve(page); failOpen = reject; }),
+    close: async () => { order.push('link'); failOpen(new Error('Target page, context or browser has been closed')); },
+  };
+  const clock = clockAt(NOON);
+  const session = fakeSession(clock);
+  const runner = createRunner({ cfg: CFG, connect: async () => link, store: memStore(), journal: () => {}, now: clock.now, sleep: clock.sleep, rnd: seeded(1), session });
+  const running = runner.runNow();
+  while (!finishOpen) await new Promise((r) => setImmediate(r));
+  const stopping = runner.stop();
+  finishOpen();
+  await stopping;
+  assert.equal((await running).result, 'stopped');
+  assert.ok(order.includes('page') && order.indexOf('page') < order.indexOf('link'), `порядок закрытия: ${order.join(', ')}`);
+  assert.equal(session.calls.length, 0);
+});
+
 test('stop без сессии: сразу готово, цикл выходит', async () => {
   const h = make({ store: memStore({ day: '2026-10-05', starts: [], done: [] }) });
   h.clock.hook = () => { h.runner.stop(); };
