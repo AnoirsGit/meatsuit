@@ -1,18 +1,32 @@
-# meatsuit: Neko с Brave (зеркало и CDP) и автопрогрев life.js.
+# meatsuit: зеркало браузера (Neko) с портом CDP для библиотеки; профиль живёт в томе.
 #
-#   npm run init                               # docker/.env: права 0600, случайные пароли (повторно ничего не трогает)
-#   docker compose up -d                       # только зеркало; файл в другом месте: --env-file <файл>
-#   docker compose --profile warmup up -d --build   # зеркало и автопрогрев
+#   npm run init                  файл деплоя (docker/.env или MEATSUIT_CONFIG): 0600, случайные пароли
+#   docker/up.sh                  поднять зеркало: docker compose --env-file <файл> … up -d
+#   docker/up.sh ps | logs -f neko | stop | down      любая команда compose с тем же файлом
 #
-# Автопрогрев вынесен в профиль warmup и сам не стартует: пока выход в сеть не идёт через дом,
-# он ушёл бы с адреса сервера. Выход через Tailscale: docker-compose.egress.yml и README.md.
+# Браузер выбирает MEATSUIT_BROWSER в файле деплоя: chrome (по умолчанию) или brave (browser-<имя>.yml).
+# Профиль у каждого свой: Chrome — том meatsuit_profile, Brave — meatsuit_brave_profile; после смены браузера
+# входить на сайты заново. Имена для вызывающих постоянные: контейнер meatsuit-browser (подключение —
+# network_mode: "container:meatsuit-browser", CDP на 127.0.0.1:9222) и том meatsuit_profile.
+#
+# Необязательно: выход через Tailscale (MEATSUIT_EGRESS=tailscale в файле: up.sh добавит docker-compose.egress.yml
+# и профиль egress). Замороженные extras/: автопрогрев (профиль warmup) и HTTP-сервис (профиль api).
 name: meatsuit
 
 services:
   neko:
-    image: ghcr.io/m1k1o/neko/brave:${NEKO_TAG:-3.1.6}
+    extends:
+      file: browser-${MEATSUIT_BROWSER:-chrome}.yml
+      service: browser
+    container_name: meatsuit-browser
+    # Имя хоста постоянное: замок профиля Chromium помнит имя хоста, и после пересоздания контейнера с другим
+    # именем браузер встречал бы окном «профиль занят другим компьютером».
+    hostname: meatsuit-browser
     restart: unless-stopped
-    # Время на корректное завершение: Brave при SIGINT сбрасывает на диск cookie и входы. Docker по умолчанию
+    depends_on:
+      profile-init:
+        condition: service_completed_successfully
+    # Время на корректное завершение: браузер при SIGINT сбрасывает на диск cookie и входы. Docker по умолчанию
     # ждёт 10 с и убивает; тогда всё, что записано за последние секунды (свежий вход), пропадает.
     stop_grace_period: 30s
     shm_size: 2gb # Chromium без достаточного /dev/shm падает на тяжёлых страницах
@@ -37,18 +51,12 @@ services:
       # WebRTC: порты фиксированы (их и публикуем), адрес для клиента задаёт NEKO_WEBRTC_IP.
       NEKO_WEBRTC_EPR: 59000-59019
       NEKO_WEBRTC_NAT1TO1: ${NEKO_WEBRTC_IP:-127.0.0.1}
-      BRAVE_EXTRA_FLAGS: ${BRAVE_EXTRA_FLAGS:-}
     ports:
       # Только на этом адресе хоста. На сервере без egress поставьте сюда tailnet-адрес хоста.
+      # Порт CDP (9222) не публикуется никогда: он слушает только 127.0.0.1 контейнера.
       - ${NEKO_BIND_IP:-127.0.0.1}:${NEKO_PORT:-8080}:8080
       - ${NEKO_BIND_IP:-127.0.0.1}:59000-59019:59000-59019/udp
       - ${NEKO_BIND_IP:-127.0.0.1}:${MEATSUIT_API_PORT:-8787}:8787 # HTTP-сервис (профиль api); пока он не запущен, порт пуст
-    volumes:
-      # профиль: куки, входы, история. MEATSUIT_PROFILE_DIR — папка на хосте вместо тома (uid 1000)
-      - ${MEATSUIT_PROFILE_DIR:-brave_profile}:/home/neko/.config/brave
-      - ./neko/brave.conf:/etc/neko/supervisord/brave.conf:ro
-      - ./neko/brave-start.sh:/etc/neko/brave-start.sh:ro
-      - ./neko/policies.json:/etc/brave/policies/managed/policies.json:ro
     healthcheck:
       # Отвечает и веб-часть Neko, и порт CDP браузера.
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null && curl -fsS http://127.0.0.1:9222/json/version >/dev/null"]
@@ -57,7 +65,16 @@ services:
       retries: 6
       start_period: 30s
 
-  # Автопрогрев: node extras/life.js run (заморожен, см. extras/). Сеть общая с Neko (и в egress-варианте с Tailscale):
+  # Одноразовый: отдаёт корень папки профиля пользователю neko (uid 1000) и выходит. Сети нет.
+  profile-init:
+    extends:
+      file: browser-${MEATSUIT_BROWSER:-chrome}.yml
+      service: profile-owner
+    entrypoint: ["chown", "1000:1000", "/profile"]
+    network_mode: none
+    restart: "no"
+
+  # Заморожено (extras/): автопрогрев, node extras/life.js run. Сеть общая с Neko (и в egress-варианте с Tailscale):
   # тогда CDP браузера доступен как http://127.0.0.1:9222, а своего выхода наружу у life нет.
   life:
     profiles: ["warmup"]
@@ -82,7 +99,7 @@ services:
       - life_data:/data # состояние, журнал data/life.jsonl, повадки persona.json
     command: ["node", "extras/life.js", "run", "--config", "${LIFE_CONFIG:-/app/profiles/life.json}", "--data", "/data"]
 
-  # HTTP-сервис: GET /view и POST /act для ваших скриптов (docs/http-api.md). Профиль api. Сеть общая с Neko
+  # Заморожено (extras/): HTTP-сервис GET /view и POST /act (docs/http-api.md). Профиль api. Сеть общая с Neko
   # (в egress-варианте с Tailscale), поэтому CDP браузера это http://127.0.0.1:9222, а порт 8787 публикуется
   # у neko на NEKO_BIND_IP. Внутри общей сети сервис слушает все адреса, наружу его пускает только эта публикация.
   # Нужны в ../profiles: clients.json (токены, в git не лежит), sites.json, egress.json; без любого из них сервис не стартует.
@@ -113,7 +130,8 @@ services:
       - life_data:/data
     command: ["node", "extras/server.js", "--host", "0.0.0.0", "--port", "8787", "--data", "/data"]
 
-  # Выход через Tailscale. Только с профилем egress и вместе с docker-compose.egress.yml.
+  # Выход через Tailscale: необязательный профиль egress, только вместе с docker-compose.egress.yml
+  # (docker/up.sh добавляет оба при MEATSUIT_EGRESS=tailscale).
   tailscale:
     profiles: ["egress"]
     image: tailscale/tailscale:${TS_TAG:-stable}
@@ -152,6 +170,10 @@ services:
       start_period: 40s
 
 volumes:
+  # Профили браузеров с постоянными именами (не зависят от имени проекта): к ним подключаются вызывающие.
+  profile:
+    name: meatsuit_profile # Google Chrome
   brave_profile:
+    name: meatsuit_brave_profile # Brave (имя совпадает с томом прежнего зеркала на Brave)
   life_data:
   tailscale_state:

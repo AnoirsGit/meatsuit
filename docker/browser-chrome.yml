@@ -1,0 +1,20 @@
+# Google Chrome в зеркале (по умолчанию, MEATSUIT_BROWSER=chrome). Отдельно не запускается: docker-compose.yml
+# берёт отсюда сервисы через extends по значению MEATSUIT_BROWSER. Пути — относительно этого файла (docker/).
+#
+# Профиль — том meatsuit_profile (или папка MEATSUIT_PROFILE_DIR), внутри /home/neko/.config/chrome-meatsuit:
+# не стандартная папка Chrome, иначе Chrome (136+) не откроет порт CDP. chrome.conf и chrome-policies.json
+# перенесены с feature-линии как есть: на них держится вход на сервере.
+services:
+  browser:
+    image: ghcr.io/m1k1o/neko/google-chrome:${NEKO_TAG:-3.1.6}
+    volumes:
+      - ${MEATSUIT_PROFILE_DIR:-profile}:/home/neko/.config/chrome-meatsuit
+      - ./chrome.conf:/etc/neko/supervisord/google-chrome.conf:ro
+      - ./chrome-policies.json:/etc/opt/chrome/policies/managed/policies.json:ro
+
+  # Хозяин папки профиля. Новый том создаётся от root (такой папки в образе нет), и Chrome от пользователя
+  # neko (uid 1000) не смог бы в него писать. Только корень папки, без -R.
+  profile-owner:
+    image: ghcr.io/m1k1o/neko/google-chrome:${NEKO_TAG:-3.1.6}
+    volumes:
+      - ${MEATSUIT_PROFILE_DIR:-profile}:/profile

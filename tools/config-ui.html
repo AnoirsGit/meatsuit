@@ -177,7 +177,7 @@ code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; background: va
     try {
       const r = await api('PUT', '/api/config', { version: state.version, values });
       await load('');
-      status(['Сохранено. Применить: ', el('code', { textContent: r.apply }), '\n(docker compose читает файл только при up)'], 'ok');
+      status(['Сохранено. Применить: ', el('code', { textContent: r.apply }), '\n(docker compose читает файл только при up: скрипт делает docker compose --env-file <файл> up -d)'], 'ok');
     } catch (e) {
       if (e.status === 400 && e.errors) showErrors(e.errors, 'Не сохранено, исправьте:');
       else if (e.status === 409) status((e.message || 'Файл изменился') + '\nНажмите «Перечитать файл»: ваши правки на странице пропадут.', 'bad');

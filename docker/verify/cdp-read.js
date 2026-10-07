@@ -1,4 +1,4 @@
-// Что на самом деле делает Brave (по CDP): адрес и положение прокрутки каждой вкладки; cookie проверяемого сайта.
+// Что на самом деле делает браузер (по CDP): адрес и положение прокрутки каждой вкладки; cookie проверяемого сайта.
 const { chromium } = require('patchright');
 (async () => {
   const browser = await chromium.connectOverCDP(process.env.MEATSUIT_CDP || 'http://127.0.0.1:9222');

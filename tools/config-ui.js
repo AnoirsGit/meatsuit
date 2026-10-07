@@ -111,9 +111,10 @@ function view(file) {
   };
 }
 
+/** Как применить: docker/up.sh (docker compose --env-file <файл> up -d, при MEATSUIT_EGRESS=tailscale — с Tailscale). */
 function applyCommand(file) {
-  const flag = file === cfg.defaultFile({}) ? '' : ` --env-file ${file}`;
-  return `cd ${path.join(__dirname, '..', 'docker')} && docker compose${flag} up -d`;
+  const upSh = path.join(__dirname, '..', 'docker', 'up.sh');
+  return file === cfg.defaultFile({}) ? upSh : `MEATSUIT_CONFIG=${file} ${upSh}`;
 }
 
 /**
@@ -234,7 +235,7 @@ async function main(argv = process.argv.slice(2), env = process.env) {
   const { url } = await s.ready;
   console.log(`config: файл ${opts.file}`);
   console.log(`config: откройте ${url}`);
-  console.log(`config: ссылка работает, пока процесс жив; простой ${opts.idleMs / 60000} мин или Ctrl+C — выход. После сохранения: docker compose up -d.`);
+  console.log(`config: ссылка работает, пока процесс жив; простой ${opts.idleMs / 60000} мин или Ctrl+C — выход. После сохранения: docker/up.sh.`);
   const stop = () => s.close('signal');
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);

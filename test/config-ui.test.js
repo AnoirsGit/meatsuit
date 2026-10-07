@@ -117,7 +117,7 @@ test('GET: поля с подписями и подсказками, значе�
   assert.equal(body.fields.length, cfg.FIELDS.length);
   for (const f of body.fields) assert.ok(/[а-я]/i.test(f.label) && /[а-я]/i.test(f.hint), `${f.key}: подпись не по-русски`);
   assert.deepEqual(body.problems, []);
-  assert.match(body.apply, /docker compose --env-file .*meatsuit\.env up -d/);
+  assert.match(body.apply, /^MEATSUIT_CONFIG=\S*meatsuit\.env \S*docker\/up\.sh$/);
 });
 
 test('PUT: без поля пароль сохраняется, null тоже; маска — 400; новый пароль записывается; чужие строки и комментарии целы', async (t) => {
@@ -348,7 +348,7 @@ test('страница в настоящем Chromium: подписи по-ру�
   await page.fill('#f-NEKO_PORT', '8085');
   await page.click('#save');
   await page.waitForFunction(() => /Сохранено/.test(document.getElementById('status').textContent));
-  assert.match(await page.textContent('#status'), /docker compose --env-file .* up -d/);
+  assert.match(await page.textContent('#status'), /MEATSUIT_CONFIG=\S+ \S*docker\/up\.sh/);
   let now = cfg.read(c.file);
   assert.equal(now.values.NEKO_PORT, '8085');
   for (const k of cfg.SECRET_KEYS) assert.equal(now.values[k], before.values[k], `${k} изменился без правки`);
