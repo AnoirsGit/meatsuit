@@ -15,9 +15,9 @@ class BudgetExceeded extends Error {}
 // В уведомление уходит адрес без query и hash: там бывают токены входа и коды подтверждения.
 const publicUrl = (url) => { try { const u = new URL(url); return u.origin + u.pathname; } catch { return 'неизвестный адрес'; } };
 
-const onSite = (url, site) => {
+const onSite = (url, hosts) => {
   if (url === 'about:blank') return true;
-  try { const host = new URL(url).hostname; return host === site || host.endsWith('.' + site); } catch { return false; }
+  try { const host = new URL(url).hostname; return hosts.some((h) => host === h || host.endsWith('.' + h)); } catch { return false; }
 };
 
 /** Команда записи: меняет что-то на площадке. Клик не по заведомой вкладке считается записью. */
@@ -28,14 +28,15 @@ const isWrite = (c, els) => {
   return false;
 };
 
-function supervise(h, { name, site, notify, maxCommands, maxMinutes, onWrite }) {
+function supervise(h, { name, site, extraHosts = [], notify, maxCommands, maxMinutes, onWrite }) {
+  const hosts = [site, ...extraHosts]; // площадка и хосты, где страница может оказаться (extraHosts из task)
   let els = null; // последний виденный список элементов: по нему отличаем клик по вкладке
   const state = { stopped: null, finished: false, commands: 0, finish() { state.finished = true; } };
   const deadline = Date.now() + maxMinutes * 60e3;
 
   const stopIfNeeded = async (snap) => {
     let reason = guardCheck(snap);
-    if (!reason && !onSite(snap.url, site)) reason = `страница вне площадки ${site}`;
+    if (!reason && !onSite(snap.url, hosts)) reason = `страница вне площадки ${site}`;
     if (!reason) return;
     state.stopped = new NeedsHuman(reason, snap.url);
     try { await notify(`meatsuit: «${name}» на ${site} остановлен: ${reason}. ${publicUrl(snap.url)}`); }

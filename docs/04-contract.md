@@ -39,7 +39,8 @@ const { validate } = require('meatsuit/hands.js');   // проверка ком�
 ```js
 const ms = await connect({ cdpUrl, sitesFile /* или sites */, dir?, notify?, notifyOn? });
 const result = await ms.task(name, async ({ see, act }) => { ...; return value; },
-  { site, maxCommands = 60, maxMinutes = 10, dryRun = false, dryRunNavigation = false, readOnly = false, capture? });
+  { site, extraHosts = [], uploadDirs = [], maxCommands = 60, maxMinutes = 10, dryRun = false,
+    dryRunNavigation = false, readOnly = false, capture? });
 await ms.close();
 ```
 
@@ -51,6 +52,7 @@ await ms.close();
 | `notify(text, event)` | асинхронная функция уведомлений вызывающего. Сбой отправки задачу не роняет, пишется в stderr |
 | `notifyOn` | какие события слать: `'start'`, `'done'`, `'limit'`, `'error'`, `'needsHuman'`; по умолчанию `['needsHuman', 'limit', 'error']` |
 | `site` | хост площадки, ключ в `sites.json`; им же ограничивается `goto` |
+| `extraHosts` | массив хостов (`['company.com']`, без схемы, пути и `*`), где страница может оказаться без стопа: страница «спасибо» на сайте компании после формы ATS. Поддомены тоже. `goto` туда нельзя, лимиты и счётчики — по `site`; guard (капча, вход, блокировка) работает и там. Неверный вид — ошибка до очереди и браузера |
 | `maxCommands`, `maxMinutes` | бюджет задачи; потолок задаёт площадка (`sites.json`), проект может выбрать меньше |
 | `dryRun`, `dryRunNavigation` | репетиция, см. «Руки» |
 | `readOnly` | задача только читает: тратит `perHour`, а `perDay` не тратит и им не останавливается. Первая команда записи (`fill`, `type`, `select`, `upload`, `press Enter`, `click` не по `tab`) засчитывает полный слот дня до своего выполнения; если день исчерпан — `LimitReached`, команда не выполняется |
@@ -82,7 +84,7 @@ await ms.close();
 | Ошибка | Когда | Что делать проекту |
 |---|---|---|
 | `LimitReached` | площадки нет в `sites.json` (и нет `"*"`), `perDay: 0`, вне часов, лимит дня или часа | задачу не начинать, повторить позже |
-| `NeedsHuman` (`.reason`, `.url`) | капча, страница входа, блокировка, уход с хоста площадки | остановиться; окно открыто для человека. Состояние не снимается до конца задачи |
+| `NeedsHuman` (`.reason`, `.url`) | капча, страница входа, блокировка, уход с хоста площадки (и не на `extraHosts`) | остановиться; окно открыто для человека. Состояние не снимается до конца задачи |
 | `BudgetExceeded` | больше `maxCommands` команд или `maxMinutes` минут | считать задачу неудачной |
 | `StaleElement` | `gen` устарел, элемента нет, под курсором перед нажатием не цель, фокус ушёл | взять свежий снимок |
 | `BadCommand` | команда не из набора или с плохими полями | ошибка вызывающего кода или модели |
@@ -221,7 +223,6 @@ changed: false }` и только пишет в журнал; исключени
 
 - `upload { id, gen, file }`: файлы только из `uploadDirs` (опция `task`), pdf/doc/docx до 10 МБ; имя
   прикреплённого файла видно в снимке.
-- `task({ site, extraHosts })`: страница «спасибо» на другом хосте не даёт `NeedsHuman`.
 
 Известное ограничение: элементы внутри чужих iframe (форма ATS на сайте компании) в снимок не попадают — идти
 на хост формы напрямую.

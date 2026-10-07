@@ -41,6 +41,8 @@ function sitesSource({ sitesFile, sites }) {
   return () => JSON.parse(fs.readFileSync(sitesFile, 'utf8'));
 }
 
+const isHost = (h) => typeof h === 'string' && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i.test(h);
+
 async function connect({
   cdpUrl,
   dir = path.join(os.homedir(), '.meatsuit'),
@@ -90,8 +92,11 @@ async function connect({
     } finally { await session.detach().catch(() => {}); }
   }
 
-  async function task(name, fn, { site, maxCommands = 60, maxMinutes = 10, dryRun = false, dryRunNavigation = false, readOnly = false, capture } = {}) {
+  async function task(name, fn, { site, extraHosts = [], maxCommands = 60, maxMinutes = 10, dryRun = false, dryRunNavigation = false, readOnly = false, capture } = {}) {
     if (!site) throw new Error('task: нужен site');
+    // Хосты, где страница может оказаться без стопа (страница «спасибо» на сайте компании после формы ATS).
+    // goto туда нельзя, лимиты и счётчики — по site.
+    if (!Array.isArray(extraHosts) || !extraHosts.every(isHost)) throw new Error('task: extraHosts — массив хостов вида company.com (без схемы, пути и «*»)');
     const rule = ruleFor(loadSites(), site); // своя запись или "*"
     // Потолок бюджета задаёт площадка, а не вызывающий проект.
     if (rule && rule.maxCommands) maxCommands = Math.min(maxCommands, rule.maxCommands);
@@ -118,7 +123,7 @@ async function connect({
       onPopup = (p) => { botPages.add(p); p.close().catch(() => {}); }; // новые вкладки бот не ведёт
       page.on('popup', onPopup);
       const h = hands(page, { dryRun, dryRunNavigation, logFile: path.join(dir, 'journal.jsonl'), allowedHosts: [site], capture });
-      run = supervise(h, { name, site, notify: (t) => emit('needsHuman', t), maxCommands, maxMinutes,
+      run = supervise(h, { name, site, extraHosts, notify: (t) => emit('needsHuman', t), maxCommands, maxMinutes,
         onWrite: readOnly && !dryRun ? () => charge(site, rule, limitsFile, slot) : null }); // read-only задача записала: полный слот задним числом
       await emit('start', `meatsuit: «${name}» на ${site} запущена${dryRun ? ' (dryRun)' : ''}`);
       const result = await fn(run.api);
