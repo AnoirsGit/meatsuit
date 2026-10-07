@@ -1,6 +1,6 @@
 # Автопрогрев extras/life.js (и HTTP-сервис extras/server.js). Код в образ не копируется: репозиторий монтируется в /app (docker-compose.yml).
 # В образе только Node и зависимость patchright; браузер сюда не нужен, life.js подключается к
-# запущенному Brave по CDP.
+# запущенному браузеру зеркала по CDP.
 FROM node:24-slim
 
 ENV NODE_ENV=production \

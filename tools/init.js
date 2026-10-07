@@ -21,11 +21,12 @@ function main(argv = process.argv.slice(2), env = process.env, out = console.log
   const { file } = parseArgs(argv, env);
   const r = path.relative(process.cwd(), file);
   const rel = r && !r.startsWith('..') ? r : file;
-  const envFlag = file === defaultFile({}) ? '' : ` --env-file ${file}`;
+  const upSh = path.join(__dirname, '..', 'docker', 'up.sh');
+  const apply = file === defaultFile({}) ? upSh : `MEATSUIT_CONFIG=${file} ${upSh}`;
   if (createNew(file, fromTemplate())) {
     out(`init: создан ${rel} (права 0600), пароли зеркала случайные.`);
     out(`init: посмотреть пароль для входа в зеркало: grep NEKO_ ${rel}; поменять настройки: npm run config`);
-    out(`init: применить: cd docker && docker compose${envFlag} up -d`);
+    out(`init: применить: ${apply}   (docker compose --env-file <файл> up -d, с Tailscale при MEATSUIT_EGRESS=tailscale)`);
     return 0;
   }
   const cur = read(file);

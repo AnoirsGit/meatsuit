@@ -1,0 +1,22 @@
+# Brave в зеркале (MEATSUIT_BROWSER=brave). Отдельно не запускается: docker-compose.yml берёт отсюда сервисы
+# через extends по значению MEATSUIT_BROWSER. Пути — относительно этого файла (docker/).
+#
+# Профиль свой, не общий с Chrome: том meatsuit_brave_profile (имя прежнее, так что уже поднятый Brave
+# находит свой профиль) или папка MEATSUIT_PROFILE_DIR. Флаги и правки профиля — в neko/brave-start.sh.
+services:
+  browser:
+    image: ghcr.io/m1k1o/neko/brave:${NEKO_TAG:-3.1.6}
+    environment:
+      BRAVE_EXTRA_FLAGS: ${BRAVE_EXTRA_FLAGS:-}
+    volumes:
+      - ${MEATSUIT_PROFILE_DIR:-brave_profile}:/home/neko/.config/brave
+      - ./neko/brave.conf:/etc/neko/supervisord/brave.conf:ro
+      - ./neko/brave-start.sh:/etc/neko/brave-start.sh:ro
+      - ./neko/policies.json:/etc/brave/policies/managed/policies.json:ro
+
+  # Хозяин папки профиля: у Brave папка есть в образе, и новый том и так принадлежит neko; нужен для
+  # MEATSUIT_PROFILE_DIR, которую Docker создаёт от root. Только корень папки, без -R.
+  profile-owner:
+    image: ghcr.io/m1k1o/neko/brave:${NEKO_TAG:-3.1.6}
+    volumes:
+      - ${MEATSUIT_PROFILE_DIR:-brave_profile}:/profile

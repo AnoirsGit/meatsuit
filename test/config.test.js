@@ -227,7 +227,7 @@ test('init: MEATSUIT_CONFIG и --file; на старом файле с ошиб�
   const file = path.join(dir, 'cfg', 'meatsuit.env');
   main([], { MEATSUIT_CONFIG: file }, (s) => lines.push(s));
   assert.equal(fs.statSync(file).mode & 0o777, 0o600);
-  assert.match(lines.join('\n'), /--env-file/);
+  assert.match(lines.join('\n'), new RegExp(`применить: MEATSUIT_CONFIG=${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\S*docker/up\\.sh`));
 
   const old = path.join(dir, 'old.env');
   const OLD = ['NEKO_PASSWORD=', 'short', '\nNEKO_ADMIN_PASSWORD=\nTELEGRAM_BOT_TOKEN=keep\n'].join(''); // из кусков: скан секретов не должен находить сам тест
@@ -269,14 +269,23 @@ test('docker compose --env-file принимает файл из init и пос�
   assert.equal(neko.environment.NEKO_MEMBER_MULTIUSER_USER_PASSWORD, values.NEKO_PASSWORD);
   assert.equal(neko.environment.NEKO_MEMBER_MULTIUSER_ADMIN_PASSWORD, values.NEKO_ADMIN_PASSWORD);
   assert.equal(neko.environment.TZ, 'UTC');
-  assert.equal(neko.volumes.find((v) => v.target === '/home/neko/.config/brave').type, 'volume');
+  const CHROME = '/home/neko/.config/chrome-meatsuit';
+  assert.equal(neko.volumes.find((v) => v.target === CHROME).type, 'volume', 'по умолчанию Chrome в томе');
 
   cfg.update(file, { MEATSUIT_PROFILE_DIR: '/srv/meatsuit/profile', NEKO_PORT: '18080', MEATSUIT_TZ: 'Europe/Berlin' }, { version: cfg.read(file).version });
   r = compose();
   assert.equal(r.status, 0, r.stderr);
   neko = JSON.parse(r.stdout).services.neko;
-  const prof = neko.volumes.find((v) => v.target === '/home/neko/.config/brave');
+  const prof = neko.volumes.find((v) => v.target === CHROME);
   assert.deepEqual([prof.type, prof.source], ['bind', '/srv/meatsuit/profile']);
+
+  cfg.update(file, { MEATSUIT_BROWSER: 'brave' }, { version: cfg.read(file).version });
+  r = compose();
+  assert.equal(r.status, 0, r.stderr);
+  neko = JSON.parse(r.stdout).services.neko;
+  assert.match(neko.image, /\/neko\/brave:/);
+  const brave = neko.volumes.find((v) => v.target === '/home/neko/.config/brave');
+  assert.deepEqual([brave.type, brave.source], ['bind', '/srv/meatsuit/profile']);
   assert.equal(neko.environment.TZ, 'Europe/Berlin');
   assert.ok(neko.ports.some((p) => p.published === '18080' && p.host_ip === '127.0.0.1'), JSON.stringify(neko.ports));
 
