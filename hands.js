@@ -31,6 +31,38 @@ const INTERACTIVE = [
   '[contenteditable=true]',
 ].join(',');
 
+// Журнал хранит, что сделано и где, но не что набрано: текст и значения — длиной, адреса — без query и hash
+// (там бывают токены входа, коды подтверждения и набранный поиск), файл — только типом. Лишние поля команды не пишутся.
+const JOURNAL_KEEP = ['cmd', 'id', 'gen', 'key', 'px', 'ms'];
+const JOURNAL_LENGTH = ['text', 'value', 'label'];
+const journalUrl = (u) => {
+  try {
+    const x = new URL(u);
+    if (x.protocol === 'http:' || x.protocol === 'https:') return x.origin + x.pathname;
+    return x.protocol === 'about:' ? x.href.replace(/[?#].*$/, '') : x.protocol; // data: и прочие несут содержимое в адресе
+  } catch { return ''; }
+};
+function journalCmd(c) {
+  const out = {};
+  for (const k of JOURNAL_KEEP) if (c[k] !== undefined) out[k] = c[k];
+  for (const k of JOURNAL_LENGTH) if (typeof c[k] === 'string') out[k + 'Length'] = c[k].length;
+  if (typeof c.url === 'string') out.url = journalUrl(c.url);
+  if (typeof c.file === 'string') out.fileType = path.extname(c.file).slice(1).toLowerCase();
+  return out;
+}
+// Ошибки Playwright цитируют селектор (а в нём искомый текст) в «Call log» со второй строки: берём первую
+// строку и вычищаем из неё текст и адрес команды во всех видах, в каких их печатает Playwright.
+function journalError(message, c) {
+  let m = String(message).split('\n')[0];
+  for (const k of JOURNAL_LENGTH) {
+    const v = c[k];
+    if (typeof v !== 'string' || !v) continue;
+    for (const form of new Set([v, JSON.stringify(v).slice(1, -1), v.replace(/'/g, "\\'"), v.replace(/\r\n?/g, '\n')])) m = m.split(form).join('…');
+  }
+  if (typeof c.url === 'string' && c.url) m = m.split(c.url).join(journalUrl(c.url));
+  return m;
+}
+
 const isId = (v) => Number.isInteger(v) && v > 0;
 const isGen = (v) => Number.isInteger(v) && v > 0;
 // Перевод строки в поле нажал бы Enter и отправил полсообщения, поэтому текст однострочный.
@@ -253,7 +285,7 @@ function hands(page, opts = {}) {
     const tabClick = dryRunNavigation && c.cmd === 'click' && last && c.gen === last.gen
       && last.elements.some((e) => e.id === c.id && e.role === 'tab');
     if (dryRun && c.cmd !== 'goto' && !tabClick) { // навигация только читает страницу: без неё dryRun остаётся на about:blank и видеть нечего
-      log({ cmd: c, url, result: 'dry-run' });
+      log({ cmd: journalCmd(c), url: journalUrl(url), result: 'dry-run' });
       return { dryRun: true, changed: false };
     }
     if (!last) { // act без see(): сравнивать не с чем
@@ -268,11 +300,11 @@ function hands(page, opts = {}) {
       const snap = await look();
       record(c, snap);
       await archived(snap, c);
-      log({ cmd: c, url, result: 'ok', urlAfter: snap.url });
+      log({ cmd: journalCmd(c), url: journalUrl(url), result: 'ok', urlAfter: journalUrl(snap.url) });
       return eyes.diff(before, snap);
     } catch (e) {
       const err = e instanceof dom.StaleWorld ? new StaleElement('страница сменилась посреди команды') : e;
-      log({ cmd: c, url, error: err.message });
+      log({ cmd: journalCmd(c), url: journalUrl(url), error: journalError(err.message, c) });
       throw err;
     }
   });
