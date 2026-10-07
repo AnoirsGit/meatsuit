@@ -46,8 +46,9 @@ This is a hypothesis, not a guarantee. Nobody publishes what sites actually look
 | | |
 |---|---|
 | **Built and verified** (unit tests plus real Chromium; the Docker mirror on the author's machine) | the hands, page reading and actions, the HTTP service with queue, limits and tokens, captcha/block detection, the warm-up scheduler and sessions, the Docker mirror (opens, shows a live Brave, keeps the profile across restarts, scrolls from the mirror) |
-| **Built, not verified** | the Tailscale exit-node setup and the fail-closed rule (the configuration validates, it has not been run); WebRTC over a private network address; sound; typing Enter from the web client with a real keyboard |
-| **Not verified at all** | running on a real server; Brave on real sites; bot-detection test sites; a multi-week warm-up; how any particular site reacts |
+| **Built, partly verified** (one run on a rented server) | the mirror on a real server: it started and its video was live over the tailnet, checked from a headless Chromium on a laptop. Only the mirror ran there: no exit node, HTTP service or warm-up ([details](docker/README.md#what-was-verified-and-what-was-not)) |
+| **Built, not verified** | the Tailscale exit-node setup and the fail-closed rule (the configuration validates, it has not been run; a test container on that server accepted the TUN device and the `iptables` features it needs); the HTTP service as a Docker container (the compose file accepts it, it has not been started); sound; video in a real browser or on a phone over the tailnet; typing Enter from the web client with a real keyboard |
+| **Not verified at all** | Brave on real sites; bot-detection test sites; a multi-week warm-up; how any particular site reacts |
 | **Author's guesses** | every number in the limits and warm-up defaults (ramp-up length, rest days, jitter, pause after a challenge) is a starting value, not a measured one |
 
 About 400 tests (`npm test`); the ones that need a browser skip themselves when none is available.
@@ -104,7 +105,7 @@ Full reference: [docs/http-api.md](docs/http-api.md). Never expose the service o
 | `server.js`, `queue.js`, `limits.js`, `egress.js`, `notify.js` | the HTTP service: tokens, one-at-a-time queue, limits, egress check, Telegram alerts |
 | `guard.js` | recognises captcha, block and login pages |
 | `life.js`, `life/` | the warm-up scheduler and sessions |
-| `docker/` | the mirror: Neko and Brave, the optional warm-up service, the optional exit-node setup |
+| `docker/` | the mirror: Neko and Brave, the optional warm-up and HTTP services, the optional exit-node setup |
 | `profiles/` | example configuration |
 | `test/`, `testkit/` | tests and a fake page for unit tests |
 | `scripts/capped` | runs a command with a hard memory and CPU cap (handy for browser tests) |
