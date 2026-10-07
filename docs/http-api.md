@@ -72,7 +72,7 @@ Checks run in this order, and the first failure answers: token (401), request sh
 - After `409 needs_human` the timeout is 30 minutes, to give a person time to reach the mirror.
 - `{"do":"end"}` closes the window and frees the slot.
 - `{"do":"resume"}` re-checks the page after a human handled a captcha, block or login. It returns `200 {"ok":true,"guard":null}`, or `409` again if the problem is still there.
-- Actions of one task run strictly one at a time, in arrival order. A closed task answers `404 no_task` with `reason` `end`, `idle` or `egress`.
+- Actions of one task run strictly one at a time, in arrival order. A closed task answers `404 no_task` with `reason` `end`, `idle`, `egress` or `actions` (closed by the [actions ceiling](#limits)).
 
 ## GET /view
 
@@ -106,7 +106,7 @@ The page is a **copy** of what is visible, built in Patchright's isolated JavaSc
 
 `text` of `fill` and `type` is at most 5000 characters (`400` above that). Typing is as slow as a person, so a long text takes hours: split it.
 
-**Typing** uses real key events with uneven timing, alternating hands, longer pauses after punctuation, and capital letters via Shift on the opposite hand. It supports the US and Russian (ЙЦУКЕН) layouts. About 2.5 percent of letters get a typo on a neighboring key, which is noticed after 0 to 3 characters, erased with Backspace and retyped. The final field value always equals the requested text. Characters on neither layout (such as emoji) are inserted as text. Speed is a per-browser persona (about 30 to 95 words per minute), saved in `data/persona.json` and shared with warm-up, so give both the same `--data` directory and the browser keeps one "person" across restarts. Typing 1500 characters takes minutes, so use a generous client timeout. Long texts cannot be pasted yet.
+**Typing** uses real key events with uneven timing, alternating hands, longer pauses after punctuation, and capital letters via Shift on the opposite hand. It supports the US and Russian (ЙЦУКЕН) layouts. About 2.5 percent of letters get a typo (most often a neighboring key, sometimes a doubled, skipped or swapped letter), which is noticed after 0 to 3 characters, erased with Backspace and retyped. The final field value always equals the requested text. Characters on neither layout (such as emoji) are inserted as text. Speed is a per-browser persona (about 30 to 95 words per minute), saved in `data/persona.json` and shared with warm-up, so give both the same `--data` directory and the browser keeps one "person" across restarts. Typing 1500 characters takes minutes, so use a generous client timeout. Long texts cannot be pasted yet.
 
 **Targets** for `click` and `fill`:
 
@@ -127,7 +127,7 @@ No match is `404 not_found`. More than one match is `422 ambiguous` with up to 2
 | 400 | `bad_request` | Unreadable request, bad parameters, missing `X-Task`, wrong method. |
 | 401 | `unauthorized` | No token or an unknown one. |
 | 403 | `forbidden` | `reason`: `site_not_allowed`, `site_unknown` (not in `sites.json`), `allow_not_allowed`, or for `goto` `scheme` and `outside_task`. |
-| 404 | `no_task` | Task ended, expired, or is another client's (`reason`: `end`, `idle`, `egress`). |
+| 404 | `no_task` | Task ended, expired, or is another client's (`reason`: `end`, `idle`, `egress`, `actions`). |
 | 404 | `not_found` | Target not found among visible elements, the window is gone, or unknown path. |
 | 409 | `needs_human` | `guard`: `captcha`, `blocked` or `login`. The window stays open. All actions are refused until `resume` succeeds. |
 | 410 | `stale_ref` | The number is outdated. Read `GET /view` again. |
@@ -177,7 +177,7 @@ A refusal is `429` with `reason`: `closed`, `too_big`, `hour`, `day`, `hours`, `
 
 The service asks an echo service (`ipinfo.io`, with `ipwho.is` as a fallback) from the same network as the browser, so run it where the browser's traffic runs. The check runs at startup, on every `begin`, and every 5 minutes. A good or wrong result is cached for a minute, and an undetermined one is not cached.
 
-It fails closed. A wrong country or provider gives `503 egress_wrong`. A failed lookup gives `503 egress_unknown`. If the exit is lost during a task, the window is closed, the task ends, and a request in flight gets `503 egress_wrong`. Changes of state send one Telegram message. A brief outage closes the running task too, because there is no retry window yet. See [egress](egress.md) for how to set up the exit node itself.
+It fails closed. A wrong country or provider gives `503 egress_wrong`. A failed lookup gives `503 egress_unknown`. If the exit is lost during a task, the window is closed, the task ends, and a request still in flight gets `503` with the code of the failed check (`egress_wrong` or `egress_unknown`); later requests get `404 no_task` with `reason: "egress"`. Changes of state send one Telegram message. A brief outage closes the running task too, because there is no retry window yet. See [egress](egress.md) for how to set up the exit node itself.
 
 ## Status page and journal
 

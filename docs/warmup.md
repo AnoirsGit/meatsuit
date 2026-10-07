@@ -229,7 +229,7 @@ It stops growing there on purpose: the aim is to look like someone who reads a c
 
 **Verified:** unit tests with fake clocks and a fake page (`npm test`); end-to-end tests on real Chromium against local test sites (`npm run test:e2e`): sessions with link following, going back up to find links, a video page, a stop on a block page with the pause written to `data/life.json`; SIGTERM closes the tab; trap links and the hidden reCAPTCHA frame are ignored; closing a cookie banner and a modal by a real click (an ad overlay is not clicked); closing a tab opened by `window.open`; a search on a local Wikipedia stand-in with a Cyrillic query (typed by keys, then Enter). Patchright connecting to the Brave in the Docker stack over CDP, and reading its tabs and cookies, works (that is what `docker/verify.sh` does).
 
-**Not verified:** a full warm-up session in Brave (opening a tab, scrolling, clicking); detector sites; real sites (none of the sites in the shipped file); a server; an exit node; the WebRTC mirror; `run` live over several days (its logic is tested only with fake clocks).
+**Not verified:** a full warm-up session in Brave (opening a tab, scrolling, clicking); detector sites; real sites (none of the sites in the shipped file); warm-up on a server; an exit node; a session watched through the mirror (risk 4); `run` live over several days (its logic is tested only with fake clocks).
 
 ## Risks
 
