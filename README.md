@@ -72,6 +72,7 @@ docker compose up -d
 
 # 3. See what the warm-up would do (no browser needed)
 cd ..
+cp profiles/life.example.json profiles/life.json   # your own copy, git-ignored
 node life.js plan
 node life.js now --dry
 ```
@@ -82,7 +83,7 @@ The HTTP service needs a browser that exposes the Chrome DevTools Protocol (CDP)
 chromium --remote-debugging-port=9222 &
 
 cp profiles/clients.example.json profiles/clients.json   # put your own long random token in it
-# profiles/sites.json:  { "example.com": { "perDay": 50 } }   and list "example.com" for your client
+cp profiles/sites.example.json profiles/sites.json       # limits per site; your copy is git-ignored
 # profiles/egress.json: the country and network you expect, from `curl -s https://ipinfo.io/json`
 #                       e.g. { "country": "US", "asn": [64496] }
 node server.js --cdp http://127.0.0.1:9222

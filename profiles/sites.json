@@ -1,6 +1,0 @@
-{
-  "hh.kz":         { "perDay": 15, "perHour": 3, "hours": "10-21", "ramp": { "days": 14, "startShare": 0.3 }, "restDaysPerWeek": 1, "jitter": 0.2, "challengePauseDays": 3 },
-  "greenhouse.io": { "perDay": 25, "perHour": 4, "hours": "9-22", "ramp": { "days": 14, "startShare": 0.3 }, "restDaysPerWeek": 1, "jitter": 0.2, "challengePauseDays": 3 },
-  "linkedin.com":  { "perDay": 0 },
-  "tinder.com":    { "perDay": 0 }
-}
