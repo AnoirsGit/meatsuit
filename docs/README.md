@@ -1,17 +1,24 @@
 # Documentation
 
-Start with the [project README](../README.md), then read in this order:
+Start with the [project README](../README.md). meatsuit is a library (`connect` / `task` / `see` / `act`) and a browser mirror; these documents describe them:
 
 | Document | Read it to learn |
 |---|---|
-| [architecture.md](architecture.md) | the idea, the parts, how they fit and why they are built that way |
-| [http-api.md](http-api.md) | the HTTP interface your scripts use: `GET /view`, `POST /act`, tasks, limits, errors |
-| [warmup.md](warmup.md) | what the warm-up does and does not do, how to configure and read it |
-| [egress.md](egress.md) | why the browser should leave from your own IP and how to route it there |
-| [../docker/README.md](../docker/README.md) | running the browser mirror, what was verified, deploying to a server |
+| [04-contract.md](04-contract.md) (Russian) | the library's API, the contract callers rely on: `connect`, `task`, `see`, `act`, `sites.json`, errors, journal |
+| [architecture.md](architecture.md) | how the library, the mirror and the deploy file fit together, and why |
+| [../docker/README.md](../docker/README.md) | running the mirror: the deploy file, choosing Chrome or Brave, attaching another stack, the optional Tailscale exit |
+| [acceptance.md](acceptance.md) (Russian) | the live check on a real mirror: sign in once, restart, the session survives, a `dryRun` task from another machine |
+| [egress.md](egress.md) | why and how to send the browser's traffic out through your own home connection (the mirror's optional `egress` profile) |
 
 [../CONTRIBUTING.md](../CONTRIBUTING.md) explains how to run the tests and what changes are in scope.
 
-## Notes in Russian
+## Frozen: `extras/`
 
-The author's working notes in Russian are in [ru/](ru/): goal and analysis, design, API, warm-up, and [how everything runs on a desktop](ru/07-desktop.md). The English documents above are the maintained ones; where they differ, trust the code and the English documents.
+The HTTP service, warm-up, egress check, queue and notifications from an earlier line of work live in [`../extras/`](../extras/). They work and are tested (`npm --prefix extras ci`, then `npm run test:extras`) but are not developed, and the core does not depend on them. Their documents are kept as they were, with paths updated:
+
+| Document | About |
+|---|---|
+| [http-api.md](http-api.md) | the HTTP service: `GET /view`, `POST /act`, tasks, limits, errors |
+| [warmup.md](warmup.md) | the warm-up scheduler: what it does and does not do, configuration |
+| [egress.md](egress.md#the-egress-check) | the egress check part of that page |
+| [ru/](ru/) | the author's Russian working notes of that line: goal and analysis, design, API, warm-up, running on a desktop |

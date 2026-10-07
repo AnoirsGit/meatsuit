@@ -1,5 +1,7 @@
 # Egress: making the browser come from a home IP
 
+> Two parts. Routing the browser through a home exit node is the mirror's optional `egress` profile (`MEATSUIT_EGRESS=tailscale`, [docker/README.md](../docker/README.md#exit-through-home-tailscale-optional)). [The egress check](#the-egress-check) (`egress.js`, used by warm-up and the HTTP service) is **frozen** in `extras/`: it works and is tested, but is not developed, and the library does not use it.
+
 The browser in this project runs on a server, but its traffic should leave from your home internet connection, the same one your phone and laptop use. This page explains why, compares the ways to do it, describes the setup the repository ships, and says what is checked and what is not. Context: [project README](../README.md), [architecture](architecture.md), [http-api.md](http-api.md), [warmup.md](warmup.md). The Docker side is in [docker/README.md](../docker/README.md).
 
 Terms: **egress** is the address websites see when your traffic leaves your network. A **tailnet** is your private Tailscale network. An **exit node** is a device in the tailnet that other devices can use as their way out to the internet. **ASN** is the number of the network operator that owns an address (for example the number of your ISP); lookup services report it.
@@ -8,7 +10,7 @@ Terms: **egress** is the address websites see when your traffic leaves your netw
 
 - A website sees the address of the real connection. An IP cannot be faked, only routed through.
 - A server in a datacenter has an address from a hosting range, which is the most visible sign that traffic does not come from a person at home. This is plausible but **not verified**: the source the project originally relied on ("IP, protocol and behaviour are the main bot signals") is not in the repository.
-- Your own residential address is the one most consistent with the rest of your life, since it is the address your other devices already use. That is reasoning, not a measurement. Keep the rest consistent too: the containers' time zone (`TZ`) comes from `MEATSUIT_TZ` in `docker/.env` (default `UTC`), and `docker/neko/brave-start.sh` sets the browser languages to `en-US,ru`. Change both to match where your exit is and how you browse.
+- Your own residential address is the one most consistent with the rest of your life, since it is the address your other devices already use. That is reasoning, not a measurement. Keep the rest consistent too: the containers' time zone (`TZ`) comes from `MEATSUIT_TZ` in the deploy file (default `UTC`); with Brave, `docker/neko/brave-start.sh` also sets the browser languages to `en-US,ru`. Change them to match where your exit is and how you browse.
 
 ## The options
 
@@ -27,7 +29,7 @@ An always-on home device is the exit node. On the server, a Tailscale container 
 ```
  you ── tailnet ──► server (Docker)
                     ┌─ tailscale container (exit node client) ──► tunnel ──► home device ──► internet
-                    ├─ neko: Brave, mirror, CDP   (shares its network)
+                    ├─ neko: browser, mirror, CDP (shares its network)
                     ├─ life: warm-up              (shares it too)
                     └─ server: HTTP service       (shares it too)
 ```
@@ -45,15 +47,15 @@ sudo tailscale set --advertise-exit-node
 
 Then approve it in the admin console (login.tailscale.com/admin/machines, the node, "Edit route settings", "Use as exit node"). These commands match Tailscale's exit-node documentation. Also consider disabling key expiry for that node in the console (the exact menu name was not checked), or it drops off the tailnet when its key expires.
 
-**2. The server.** In `docker/.env` set `TS_AUTHKEY` (a one-time key) and `TS_EXTRA_ARGS=--exit-node=<home-node-name> --exit-node-allow-lan-access=false`, then start with the egress override:
+**2. The server.** In the deploy file set `MEATSUIT_EGRESS=tailscale`, `TS_AUTHKEY` (a one-time key) and `TS_EXTRA_ARGS=--exit-node=<home-node-name> --exit-node-allow-lan-access=false`, then start through `docker/up.sh`, which adds the egress override and profile:
 
 ```sh
-docker compose -f docker-compose.yml -f docker-compose.egress.yml --profile egress up -d
+docker/up.sh     # = docker compose --env-file <deploy file> -f docker-compose.yml -f docker-compose.egress.yml --profile egress up -d
 ```
 
 The full deploy sequence, including binding the mirror to a private address, is in [docker/README.md](../docker/README.md#deploying-on-a-server). The override needs a Compose version that understands the `!reset` tag (2.24 or newer).
 
-**3. `profiles/egress.json`**, so every check knows what "right" is (see below).
+**3. Only for the frozen warm-up and HTTP service: `profiles/egress.json`**, so their check knows what "right" is (see below).
 
 ## Fail closed
 
@@ -92,7 +94,7 @@ Callers should treat `503` as "postpone and retry later"; meatsuit does not retr
 1. In the mirror open `https://ipinfo.io`. It should show your home country and ISP. Only then start warm-up or bots.
 2. Look at the Tailscale container: its healthcheck passes only when it is logged in and the chosen exit node is online.
 3. Stop the exit node (or disable it in the console) and confirm that the browser has no network and does not fall back to the server. This is the test nobody has run yet.
-4. Measure the path. In the Tailscale container run `tailscale ping -c 10 --until-direct <home-node>`: you want a direct path, not "via DERP" (Tailscale's relay). Then measure speed from inside the browser's network, where traffic really goes through the tunnel, for example `docker compose exec neko curl -s -o /dev/null -w 'down %{speed_download} B/s\n' 'https://speed.cloudflare.com/__down?bytes=50000000'` (add the same `-f` flags as for `up`; the image has curl). Pages and video travel home to server, so your home upload speed is the cap. About 5 to 8 Mbit/s for watching video in the browser is the author's estimate, not a measurement. None of this was run in the egress setup.
+4. Measure the path. In the Tailscale container run `tailscale ping -c 10 --until-direct <home-node>`: you want a direct path, not "via DERP" (Tailscale's relay). Then measure speed from inside the browser's network, where traffic really goes through the tunnel, for example `docker/up.sh exec neko curl -s -o /dev/null -w 'down %{speed_download} B/s\n' 'https://speed.cloudflare.com/__down?bytes=50000000'` (the image has curl). Pages and video travel home to server, so your home upload speed is the cap. About 5 to 8 Mbit/s for watching video in the browser is the author's estimate, not a measurement. None of this was run in the egress setup.
 
 ## SSH safety warning
 
@@ -117,6 +119,6 @@ The rollback was not tested on a real server. Check that `tailscale` is in root'
 
 ## What is verified and what is not
 
-- **Verified:** `egress.js` and its use in `life.js` and `server.js`, by unit tests on a fake network (country and ASN match, fallback service, timeouts, caching, fail closed). The exit-node commands against Tailscale's documentation. The egress override as a configuration only (`docker compose config` accepts it). The kill switch relies on the browser not running as root: the Neko image sets `USER=neko` (read from the image metadata) and our supervisord config starts Brave with `user=%(ENV_USER)s`, so the owner rule should apply to it; a process listing in a running container has not been checked. On the rented server where the mirror was tried, a throwaway container accepted `/dev/net/tun`, `iptables -m owner`, `-m conntrack` and `ip6tables`, so the kill switch rules can be installed there; Tailscale itself was not started ([docker/README.md](../docker/README.md#what-was-verified-and-what-was-not)).
+- **Verified:** `egress.js` and its use in `life.js` and `server.js`, by unit tests on a fake network (country and ASN match, fallback service, timeouts, caching, fail closed). The exit-node commands against Tailscale's documentation. The egress override as a configuration only (`docker compose config` accepts it). The kill switch relies on the browser not running as root: the Neko image sets `USER=neko` (read from the image metadata) and our supervisord configs start Chrome and Brave with `user=%(ENV_USER)s`, so the owner rule should apply to it; a process listing in a running container has not been checked. On the rented server where the mirror was tried, a throwaway container accepted `/dev/net/tun`, `iptables -m owner`, `-m conntrack` and `ip6tables`, so the kill switch rules can be installed there; Tailscale itself was not started ([docker/README.md](../docker/README.md#what-was-verified-and-what-was-not)).
 - **Not verified:** the egress profile has not been run at all: Tailscale inside the container, Neko, warm-up, the HTTP service and Tailscale in one network namespace, the kill switch, WebRTC and DNS through the tunnel. Also not run: `begin` returning `503` with a real exit node, and the SSH rollback script on a server.
 

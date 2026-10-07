@@ -1,131 +1,113 @@
 # meatsuit
 
-**One warmed-up browser on a server. You live in it; your scripts work in it with human-like hands.**
+**Launch a browser, remember the session, give your code eyes and hands.**
 
 [Русская версия](README.ru.md) · [Documentation](docs/README.md) · [Contributing](CONTRIBUTING.md)
 
-meatsuit runs a single, persistent, real Brave browser in Docker. You open it through a web mirror (video and sound over WebRTC) and use it like any browser: sign in, browse, watch videos. Your own automation connects to the *same* browser through a small HTTP service and acts with human-like mouse, keyboard and scrolling: slowly, one task at a time, within limits you set, and it stops when a site asks for a captcha instead of trying to beat it.
+meatsuit is two things:
+
+1. **A Node library** (`connect` / `task` / `see` / `act`). Your project connects to a running browser over CDP, takes it for one short task at a time, reads the page as a numbered list of elements and acts on it with human-paced mouse and keyboard. A captcha, a login page or a block stops the task with `NeedsHuman` and leaves the window to a person.
+2. **A browser mirror** in Docker ([Neko](https://github.com/m1k1o/neko)): one persistent browser, Google Chrome by default or Brave, that a person opens from an ordinary web page. The profile lives in a volume, so you sign in once by hand and every caller uses that session.
+
+Credentials always come from the caller. The library reads no environment variables and sends nothing anywhere by itself: site limits (`sitesFile`), the state directory (`dir`) and notifications (`notify`) are arguments of `connect()`. meatsuit never stores site passwords, model keys or bot tokens.
 
 ```
-  you (phone, laptop)            your scripts (any language)
-          │ web mirror                    │ GET /view, POST /act
-          ▼                               ▼
- ┌─────────────────────── server (Docker) ────────────────────────┐
- │  Neko + Brave, persistent profile ◄── CDP ── HTTP service       │
- │                                         queue · limits · guard  │
- │                                         human-like hands        │
- └──────────────────────────────┬──────────────────────────────────┘
-                                │ all browser traffic leaves through your exit node
-                                ▼
-                  your own home connection (residential IP)
+  your project (Node)                          you (laptop, phone)
+  connect({ cdpUrl, sitesFile, notify })               │ web mirror (WebRTC)
+  task(site, ({ see, act }) => …)                      ▼
+          │ CDP                      ┌──── Docker: container meatsuit-browser ────┐
+          └────────────────────────► │ Neko + Google Chrome (or Brave), CDP 9222   │
+                                     │ profile in the volume meatsuit_profile      │
+                                     └─────────────────────────────────────────────┘
 ```
 
-## Why
+## Quick start
 
-Disposable automated browsers, datacenter IP addresses and mechanical input look different from a person using their own browser. meatsuit's bet is not to hide automation behind spoofing but to make it look like what it is: one person's real browser, on their own network, doing a little at a time.
+Requirements: Node 20+; for the mirror, Docker with Compose 2.24 or newer.
 
-This is a hypothesis, not a guarantee. Nobody publishes what sites actually look at, and this project does not claim its automation is undetectable. See [Status](#status) for what has and has not been checked.
+**The mirror.**
 
-## What you get
+```sh
+npm ci
+npm run init        # the deploy file docker/.env: mode 0600, random mirror passwords; a second run changes nothing
+npm run config      # optional: a temporary page on 127.0.0.1 to review and edit that file (prints a one-time link)
+docker/up.sh        # docker compose --env-file <deploy file> up -d
+docker/verify.sh    # drives the mirror and checks over CDP that the browser really did it
+```
 
-- **A mirror of the browser** ([Neko](https://github.com/m1k1o/neko) with Brave in Docker). The profile persists, so you sign in once and stay signed in.
-- **An HTTP interface** for your scripts: `GET /view` returns a plain-HTML copy of what is visible, with numbers on the interactive elements; `POST /act` performs one action (click, fill, type, scroll, go to a page) on an element chosen by number, by visible text, or by CSS.
-- **Human-like hands.** Mouse paths are slightly curved with Fitts's-law timing, hand tremor, the occasional twitch and overshoot. Typing is key by key with realistic rhythm, adjacent-key typos that get corrected, and real Latin and Cyrillic layouts. Scrolling is wheel notches with reading pauses.
-- **Rails.** One task at a time. Per-site limits that behave like a person (gradual ramp-up, rest days, daily jitter, a multi-day pause after a challenge). Captcha, block and login pages are detected and the task stops; the human solves it in the mirror. An egress check refuses to run unless traffic leaves from the expected country and network.
-- **Optional warm-up.** A scheduler that, a few days a week, reads ordinary sites like a person would (scrolls, follows a link, closes a cookie banner, searches Wikipedia). It only reads; it never signs in or posts.
+Open `http://127.0.0.1:8080`, enter any name and the member password from the deploy file (`grep NEKO_PASSWORD docker/.env`). Sign in to your sites there, once.
 
-## What this is not
+**The library**, from your own project. The CDP port is reachable only inside the mirror's network, so run your code in a container with `network_mode: "container:meatsuit-browser"` (to just try it, start a local Chromium with `--remote-debugging-port=9222`):
 
-- Not an account farm, and not for anyone else's accounts. It is for automating **your own** accounts at low volume.
-- Not a captcha solver. On a captcha it stops and asks you.
-- Not fingerprint spoofing. The browser is real and does not pretend to be something else.
-- Not a promise of safety. Websites have their own rules: Tinder's terms and LinkedIn's help pages (checked) prohibit automation, and neither publishes numeric limits. **You are responsible for what you automate and for the terms you agree to.**
+```js
+const { connect } = require('meatsuit');
+
+const ms = await connect({
+  cdpUrl: 'http://127.0.0.1:9222',
+  sitesFile: './sites.json',      // your own limits per site; start from sites.example.json
+  dir: '/meatsuit/state',         // queue lock and counters: one dir for every caller (state/ in the meatsuit_profile volume)
+  notify: async (text) => { /* your Telegram, mail…: the token stays with you */ },
+});
+const title = await ms.task('read-title', async ({ see, act }) => {
+  await act({ cmd: 'goto', url: 'https://example.com/' });
+  return (await see()).title;
+}, { site: 'example.com', dryRun: true });   // the first run on a real site: dryRun
+await ms.close();
+```
+
+`peek(site, { sitesFile, dir })` tells how much of a site's limits is left without spending a slot. The full API — `see()` snapshots, the closed command set, `sites.json`, errors, the journal and recordings — is in [docs/04-contract.md](docs/04-contract.md) (Russian).
+
+## The deploy file
+
+One git-ignored file holds what belongs to the mirror server and nothing else: mirror passwords, the address and ports to bind, the browser and its image tag, the profile folder, the time zone, CPU and memory ceilings. It is `docker/.env`, or the file `MEATSUIT_CONFIG` points to (it may live outside the repository).
+
+- `npm run init` creates it from [`docker/.env.example`](docker/.env.example) with mode 0600 and random hex passwords. If the file exists, it changes nothing.
+- `npm run config` is a temporary process on the host, not in a container and not in the browser's network: a page on `127.0.0.1` with a one-time token in the link, no cookies, an `Origin` check, passwords never sent to the page, atomic writes with mode 0600, `409` if the file changed meanwhile, exit after 15 idle minutes.
+- `docker/up.sh` hands the file to `docker compose --env-file`. Compose reads it only on `up`, so run `docker/up.sh` again after a change.
+
+Callers' settings are not in this file: limits, upload folders and the state directory are arguments of `connect()` and `task()`.
+
+## Choosing the browser
+
+`MEATSUIT_BROWSER=chrome` (the default) or `brave` in the deploy file. Each browser keeps its own profile volume, `meatsuit_profile` for Chrome and `meatsuit_brave_profile` for Brave, so switching means signing in again. The container is always named `meatsuit-browser`: other stacks attach to it with `network_mode: "container:meatsuit-browser"` and reach CDP at `http://127.0.0.1:9222`. CDP is never published on the host. Callers mount the volume `meatsuit_profile` (external) and keep their shared `dir` in its `state/` folder. Details: [docker/README.md](docker/README.md).
+
+Optional: send the browser's traffic out through a Tailscale exit node (`MEATSUIT_EGRESS=tailscale`, see [docs/egress.md](docs/egress.md)).
+
+## How the repository is laid out
+
+| Path | What it is |
+|---|---|
+| `index.js` | `connect()` and `task()`: queue, limits, budget, a window per task, supervision |
+| `eyes.js`, `dom.js` | `see()`: the page as text and numbered elements, diffs between snapshots |
+| `hands.js`, `human.js` | `act()`: the closed command set, human-paced mouse and keyboard |
+| `guard.js`, `supervise.js` | captcha, login and block pages turn into `NeedsHuman` |
+| `limits.js`, `window.js`, `capture.js` | per-site limits from the caller's `sites.json`, task windows, an optional screen archive |
+| `telegram.js` | a helper a caller may use for `notify`: the token and chat are passed in, never read from the environment |
+| `sites.example.json` | an example limits file; the real one belongs to each caller |
+| `config.js`, `tools/` | the deploy file (`npm run init`, `npm run config`), the secret scan, small tools for people |
+| `docker/` | the mirror: Neko with Chrome or Brave, `up.sh`, `verify.sh`, the optional Tailscale exit |
+| `extras/` | **frozen**: the HTTP service, warm-up, egress check and their own copies of hands and limits. They work and are tested (`npm run test:extras`) but are not developed, and the core loads nothing from them |
+| `test/` | tests of the core, the deploy file, the secret scan and the Docker files |
 
 ## Status
 
 | | |
 |---|---|
-| **Built and verified** (unit tests plus real Chromium; the Docker mirror on the author's machine) | the hands, page reading and actions, the HTTP service with queue, limits and tokens, captcha/block detection, the warm-up scheduler and sessions, the Docker mirror (opens, shows a live Brave, keeps the profile across restarts, scrolls from the mirror) |
-| **Built, partly verified** (one run on a rented server) | the mirror on a real server: it started and its video was live over the tailnet, checked from a headless Chromium on a laptop. Only the mirror ran there: no exit node, HTTP service or warm-up ([details](docker/README.md#what-was-verified-and-what-was-not)) |
-| **Built, not verified** | the Tailscale exit-node setup and the fail-closed rule (the configuration validates, it has not been run; a test container on that server accepted the TUN device and the `iptables` features it needs); the HTTP service as a Docker container (the compose file accepts it, it has not been started); sound; video in a real browser or on a phone over the tailnet; typing Enter from the web client with a real keyboard |
-| **Not verified at all** | Brave on real sites; bot-detection test sites; a multi-week warm-up; how any particular site reacts |
-| **Author's guesses** | every number in the limits and warm-up defaults (ramp-up length, rest days, jitter, pause after a challenge) is a starting value, not a measured one |
+| **Tested** | the library in real Chromium on local pages (`npm test`); the deploy file, `npm run init`, `npm run config` and the secret scan; `docker compose config` for both browsers, with and without Tailscale |
+| **Run for real, earlier versions** | the library against a Neko mirror with Chrome for one caller project; the mirror with Brave on one desktop and, mirror only, once on a rented server |
+| **Not run yet** | this compose file (Chrome or Brave) on a server; the Tailscale exit; the live check in [docs/acceptance.md](docs/acceptance.md) |
 
-About 400 tests (`npm test`); the ones that need a browser skip themselves when none is available.
+meatsuit is for automating **your own** accounts at low volume. It does not solve captchas, does not spoof fingerprints and promises nothing about how sites react. Platforms' terms apply, and you are responsible for following them.
 
-## Quick start
-
-Requirements: Node 20+, Docker for the mirror.
+## Tests
 
 ```sh
-npm install
-
-# 1. Run the tests (browser tests skip unless Patchright and Chromium are available)
-npm test
-
-# 2. The browser mirror
-npm run init                # docker/.env: random mirror passwords, mode 0600; a second run changes nothing
-npm run config              # optional: a page on 127.0.0.1 to review and edit it (prints a one-time link)
-cd docker
-docker compose up -d
-./verify.sh                 # opens a page through the mirror, scrolls it, checks the browser really did
-# then open http://127.0.0.1:8080 (any name, NEKO_PASSWORD from docker/.env)
-
-# 3. See what the warm-up would do (no browser needed)
-cd ..
-cp profiles/life.example.json profiles/life.json   # your own copy, git-ignored
-node life.js plan
-node life.js now --dry
+npm test                                          # core: the secret scan first, then every suite
+npm --prefix extras ci && npm run test:extras     # the frozen extras/
 ```
 
-The HTTP service needs a browser that exposes the Chrome DevTools Protocol (CDP). With the Docker mirror, run the service as a container too (`docker compose --profile api up -d`, see [docker/README.md](docker/README.md#http-service); not verified in a container yet). For a quick local try with any Chromium:
-
-```sh
-chromium --remote-debugging-port=9222 &
-
-cp profiles/clients.example.json profiles/clients.json   # put your own long random token in it
-cp profiles/sites.example.json profiles/sites.json       # limits per site; your copy is git-ignored
-# profiles/egress.json: the country and network you expect, from `curl -s https://ipinfo.io/json`
-#                       e.g. { "country": "US", "asn": [64496] }
-node server.js --cdp http://127.0.0.1:9222
-
-TOKEN=...   # the token you chose
-curl -s -H "Authorization: Bearer $TOKEN" -d '{"do":"begin","task":"demo","site":"example.com"}' http://127.0.0.1:8787/act
-# -> {"task":"t1"}   then use  -H "X-Task: t1"  on the next calls:
-curl -s -H "Authorization: Bearer $TOKEN" -H "X-Task: t1" -d '{"do":"goto","url":"https://example.com/"}' http://127.0.0.1:8787/act
-curl -s -H "Authorization: Bearer $TOKEN" -H "X-Task: t1" http://127.0.0.1:8787/view
-```
-
-Full reference: [docs/http-api.md](docs/http-api.md). Never expose the service or the mirror to the public internet: bind them to localhost or a private network such as a Tailscale address.
-
-## How the code is laid out
-
-| Path | What it is |
-|---|---|
-| `human.js`, `human/` | mouse, keyboard and scroll with human timing |
-| `view.js`, `driver.js` | the visible-HTML copy and the browser driver (Patchright over CDP) |
-| `server.js`, `queue.js`, `limits.js`, `egress.js`, `notify.js` | the HTTP service: tokens, one-at-a-time queue, limits, egress check, Telegram alerts |
-| `guard.js` | recognises captcha, block and login pages |
-| `life.js`, `life/` | the warm-up scheduler and sessions |
-| `docker/` | the mirror: Neko and Brave, the optional warm-up and HTTP services, the optional exit-node setup |
-| `profiles/` | example configuration |
-| `test/`, `testkit/` | tests and a fake page for unit tests |
-| `scripts/capped` | runs a command with a hard memory and CPU cap (handy for browser tests) |
-
-## Documentation
-
-- [How it works](docs/architecture.md): the idea, the parts and the design decisions
-- [HTTP API](docs/http-api.md): `GET /view`, `POST /act`, tasks, limits, errors
-- [Warm-up](docs/warmup.md): what it does, what it deliberately does not do, configuration
-- [Egress](docs/egress.md): why your own IP matters and how to route the browser through it
-- [Docker mirror](docker/README.md): running it, what was verified, deploying to a server
-
-Russian working notes are kept in [docs/ru/](docs/ru/).
-
-## Contributing
-
-Bug reports, ideas and careful reviews are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). Please never commit secrets, real IP addresses or personal details: this repository is public.
+The core tests need a Chromium for `playwright-core`; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-A license has not been chosen yet, so for now all rights are reserved. The maintainer will add a `LICENSE` file.
+A license has not been chosen yet, so for now all rights are reserved.
