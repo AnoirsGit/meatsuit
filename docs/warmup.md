@@ -109,7 +109,7 @@ Your `profiles/life.json` is git-ignored: start from `cp profiles/life.example.j
 
 | Field | Meaning | Default | Example file |
 |---|---|---|---|
-| `tz` | Time zone for days and weeks (IANA name) | the author's zone, built into `life/config.js`: set yours | `UTC` |
+| `tz` | Time zone for days and weeks (IANA name) | `UTC`: set yours | `UTC` |
 | `hours` | `[from, to]`, the window in which sessions may start | `[9, 23]` | same |
 | `daysPerWeek` | `[min, max]` working days per week, the rest are days off | `[7, 7]` | `[3, 4]` |
 | `sessionsPerDay` | `[min, max]` sessions on a working day | `[2, 5]` | `[1, 2]` |
