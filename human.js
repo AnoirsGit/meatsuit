@@ -1,153 +1,250 @@
 /**
- * Человеческий темп: мышь по кривой, прокрутка рывками, ввод с опечатками.
+ * Человеческий темп: мышь по кривой со своей скоростью, прокрутка колесом,
+ * печать клавишами с ритмом и опечатками.
  *
- * path() — чистая функция, её проверяет test/human.test.js. Остальное
- * работает поверх страницы playwright и держит последнюю позицию курсора сам:
- * playwright её не отдаёт.
+ * Планы считают human/mouse.js и human/keys.js (чистые функции, их проверяет
+ * test/human.test.js). Здесь они проигрываются на странице playwright по часам:
+ * время берётся от начала плана, а не копится из пауз, поэтому задержки запросов
+ * к браузеру ритм не сбивают. Последнюю позицию курсора держим сами: playwright
+ * её не отдаёт.
+ *
+ * Руки ветки main плюс две вещи ядра:
+ * - курсор уже над элементом — рука к нему не едет (только задерживается);
+ * - click(page, el, { verifyAt }): перед нажатием вызывающий проверяет точку под
+ *   курсором (оверлей, сдвиг вёрстки); бросил — нажатия нет.
+ *
+ * Что зовёт ядро (hands.js), и это не меняется без него:
+ *   click(page, el, { verifyAt? })  hover(page, el)  type(page, text)  press(page, key)
+ *   scroll(page, px)  pause(a, b)  sleep(ms)
+ * el — всё, у чего есть boundingBox() и scrollIntoViewIfNeeded() (локатор playwright, dom.handle).
+ *
+ * Последний аргумент функций — {sleep, now, rnd}: часы и генератор можно
+ * подменить, в тестах минута печати проигрывается мгновенно.
  */
+const { between, chance, clamp, lognormal, normal } = require('./human/random');
+const { planMove, clampPlan, pickPoint, planScroll, planTwitch } = require('./human/mouse');
+const { planTyping } = require('./human/keys');
+
 const rand = (a, b) => a + Math.random() * (b - a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const pause = (a = 300, b = 1200) => sleep(rand(a, b));
 
-/** Точки кубической кривой Безье от from к to, с замедлением к концу. */
-function path(from, to, rnd = Math.random, minSteps = 8) {
-  const dx = to.x - from.x, dy = to.y - from.y;
-  const dist = Math.hypot(dx, dy);
-  const bend = () => (rnd() - 0.5) * dist * 0.5;
-  const c1 = { x: from.x + dx * 0.3 + bend(), y: from.y + dy * 0.3 + bend() };
-  const c2 = { x: from.x + dx * 0.7 + bend(), y: from.y + dy * 0.7 + bend() };
-  const steps = Math.max(minSteps, Math.round(dist / 12));
-  const pts = [];
-  for (let i = 1; i <= steps; i++) {
-    const t = 1 - (1 - i / steps) ** 2; // ease-out
-    const u = 1 - t;
-    pts.push({
-      x: u ** 3 * from.x + 3 * u ** 2 * t * c1.x + 3 * u * t ** 2 * c2.x + t ** 3 * to.x,
-      y: u ** 3 * from.y + 3 * u ** 2 * t * c1.y + 3 * u * t ** 2 * c2.y + t ** 3 * to.y,
-    });
+const envOf = (o = {}) => ({ sleep: o.sleep || sleep, now: o.now || Date.now, rnd: o.rnd || Math.random });
+
+/** Проиграть план: каждое событие в своё время от начала. */
+async function play(events, env, fire) {
+  const t0 = env.now();
+  for (const ev of events) {
+    const wait = ev.t - (env.now() - t0);
+    if (wait > 0) await env.sleep(wait);
+    await fire(ev);
   }
-  return pts;
 }
+
+/** Повадки человека: быстрая или медленная рука, дрожь, как часто дёргается, как печатает и как часто ошибается. */
+function newPersona(rnd = Math.random) {
+  return {
+    speed: clamp(lognormal(rnd, 1, 0.15), 0.7, 1.4),
+    tremor: between(rnd, 0.4, 1),
+    twitch: between(rnd, 0.1, 0.5),
+    wpm: clamp(52 + 10 * normal(rnd), 30, 95),
+    typoRate: clamp(lognormal(rnd, 0.022, 0.35), 0.008, 0.05),
+  };
+}
+
+// Допустимые границы повадок: за ними рука превращается в телепорт (speed NaN), а печать в вечность (wpm 0).
+const PERSONA_RANGE = { speed: [0.5, 2], tremor: [0, 2], twitch: [0, 1], wpm: [20, 150], typoRate: [0, 0.1] };
+const inRange = (v, [lo, hi]) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
 
 /**
- * Три темпа руки. fast — «аим»: быстрый бросок примерно за секунду, который часто
- * пролетает мимо цели и возвращается. normal — обычное движение. slow — неторопливое.
- * ms — длительность движения на длинной дистанции (на короткой пропорционально меньше).
+ * Сохранённые повадки (из persona.json или откуда угодно): годные поля остаются, негодные
+ * и недостающие берутся у новой персоны. Лишние поля отбрасываются.
  */
-const SPEEDS = {
-  fast:   { ms: [600, 1300],  overshoot: 0.65, dwell: [30, 140] },
-  normal: { ms: [1000, 1900], overshoot: 0.15, dwell: [80, 350] },
-  slow:   { ms: [1800, 3200], overshoot: 0.05, dwell: [150, 600] },
-};
-
-function pickSpeed(rnd = Math.random) {
-  const r = rnd();
-  return r < 0.35 ? 'fast' : r < 0.8 ? 'normal' : 'slow';
+function restorePersona(saved, rnd = Math.random) {
+  const fresh = newPersona(rnd), from = saved && typeof saved === 'object' ? saved : {};
+  return Object.fromEntries(Object.entries(PERSONA_RANGE).map(([k, range]) => [k, inRange(from[k], range) ? from[k] : fresh[k]]));
 }
 
-/** Курсор уже над элементом: двигать мышь не нужно. */
+// Человек в браузере один, поэтому повадки общие на все страницы и держатся, пока жив процесс.
+// usePersona подставляет сохранённые (connect берёт их из <dir>/persona.json); null — сбросить.
+let shared = null;
+const usePersona = (p) => { shared = p == null ? null : restorePersona(p); };
+const personaOf = (rnd) => shared || (shared = newPersona(rnd));
+
+const cursor = new WeakMap();
+const sizes = new WeakMap();
+
+/** Курсор уже над элементом (с отступом margin от края): двигать мышь не нужно. */
 function inside(pos, box, margin = 2) {
-  return !!pos && pos.x >= box.x + margin && pos.x <= box.x + box.width - margin
+  return !!pos && !!box && pos.x >= box.x + margin && pos.x <= box.x + box.width - margin
     && pos.y >= box.y + margin && pos.y <= box.y + box.height - margin;
 }
 
-/**
- * План движения мыши from → to: список точек { x, y, dt } (dt — пауза перед точкой, мс).
- * Чистая функция, её проверяет test/human.test.js.
- * При перелёте мышь доходит до точки за целью, замирает на мгновение и возвращается
- * короткими дёргаными шажками; последняя точка плана всегда ровно to.
- */
-function plan(from, to, { speed = pickSpeed(), rnd = Math.random } = {}) {
-  const cfg = SPEEDS[speed];
-  const dx = to.x - from.x, dy = to.y - from.y;
-  const dist = Math.hypot(dx, dy);
-  const total = (cfg.ms[0] + rnd() * (cfg.ms[1] - cfg.ms[0])) * Math.min(1, 0.35 + dist / 900);
-
-  const over = dist > 60 && rnd() < cfg.overshoot;
-  const ux = dist ? dx / dist : 0, uy = dist ? dy / dist : 0;
-  const reach = (speed === 'fast' ? 12 + rnd() * 34 : 8 + rnd() * 20);
-  const side = (rnd() - 0.5) * 16;
-  const aim = over ? { x: to.x + ux * reach - uy * side, y: to.y + uy * reach + ux * side } : to;
-
-  const mainMs = over ? total * 0.8 : total;
-  const pts = path(from, aim, rnd, Math.round(mainMs / 16));
-  const out = pts.map((p) => ({ ...p, dt: (mainMs / pts.length) * (0.6 + rnd() * 0.8) }));
-
-  if (over) {
-    out[out.length - 1].dt += 40 + rnd() * 110; // замер: «увидел, что промахнулся»
-    const n = 3 + Math.floor(rnd() * 4);
-    for (let i = 1; i <= n; i++) {
-      const t = i / n;
-      const noise = (1 - t) * 3; // дрожь затухает к цели
-      out.push({
-        x: aim.x + (to.x - aim.x) * t + (rnd() - 0.5) * 2 * noise,
-        y: aim.y + (to.y - aim.y) * t + (rnd() - 0.5) * 2 * noise,
-        dt: 18 + rnd() * 45,
-      });
-    }
-    Object.assign(out[out.length - 1], { x: to.x, y: to.y });
-  }
-  return out;
+/** Размер окна страницы. Мышь не должна выходить за него; fresh — спросить заново, иначе берётся прежний ответ. */
+async function sizeOf(page, fresh = false) {
+  if (fresh || !sizes.has(page)) sizes.set(page, await page.evaluate(() => ({ w: innerWidth, h: innerHeight })));
+  return sizes.get(page);
 }
 
-const cursor = new WeakMap();
+/** Курсор уже где-то есть: при первом обращении появляется в правдоподобной точке окна. */
+async function cursorOf(page, rnd) {
+  if (!cursor.has(page)) {
+    const win = await sizeOf(page);
+    const at = { x: clamp(Math.round(between(rnd, 100, 600)), 0, win.w - 1), y: clamp(Math.round(between(rnd, 100, 400)), 0, win.h - 1) };
+    await page.mouse.move(at.x, at.y);
+    cursor.set(page, at);
+  }
+  return cursor.get(page);
+}
 
+/** Провести мышь в точку по кривой; width — размер цели, от него зависит время. */
 async function moveTo(page, x, y, opts = {}) {
-  const from = cursor.get(page) || { x: rand(100, 600), y: rand(100, 400) };
-  for (const p of plan(from, { x, y }, opts)) {
-    await sleep(p.dt);
-    await page.mouse.move(p.x, p.y);
-  }
-  cursor.set(page, { x, y });
+  const env = envOf(opts), me = personaOf(env.rnd);
+  const from = await cursorOf(page, env.rnd);
+  const win = await sizeOf(page, true);
+  const to = { x: clamp(x, 0, win.w - 1), y: clamp(y, 0, win.h - 1) }; // цель за окном: ближайшая точка в окне
+  const raw = planMove(from, to, { width: opts.width, speed: (opts.speed || 1) * me.speed, tremor: me.tremor, twitch: opts.twitch ?? me.twitch }, env.rnd);
+  const plan = clampPlan(raw, win.w, win.h, from); // путь (перелёт, дрожь) тоже не выходит за окно
+  await play(plan, env, (p) => page.mouse.move(p.x, p.y));
+  const end = plan[plan.length - 1];
+  cursor.set(page, { x: end.x, y: end.y });
 }
 
 /**
- * Навести и кликнуть в случайную точку внутри элемента, а не в центр.
- * Курсор уже над элементом — не двигаем (изредка всё же чуть смещаемся).
- * opts.speed: 'fast' | 'normal' | 'slow'; по умолчанию случайно.
+ * Постоять на месте: рука не замирает, а чуть сдвигается, а иногда резко дёргается
+ * и возвращается. box не даёт съехать с цели; перед концом рука успокаивается.
+ */
+async function linger(page, ms, opts = {}) {
+  const env = envOf(opts), me = personaOf(env.rnd);
+  const b = opts.box || {};
+  const win = await sizeOf(page);
+  const keep = (v, lo, size, limit) => clamp(opts.box ? clamp(v, Math.ceil(lo) + 1, Math.floor(lo + size) - 1) : v, 0, limit - 1); // без цели держаться не за что, но окно есть всегда
+  const twitchChance = opts.twitch ?? (me.twitch ?? 0.25) * 0.4;
+  let left = ms;
+  while (left > 150) {
+    const chunk = Math.min(left, clamp(lognormal(env.rnd, 220, 0.5), 80, 600));
+    await env.sleep(chunk);
+    left -= chunk;
+    if (left >= 450 && chance(env.rnd, twitchChance)) {
+      const at = await cursorOf(page, env.rnd);
+      const plan = planTwitch(env.rnd).map((m) => ({ t: m.t, x: keep(at.x + m.dx, b.x, b.width, win.w), y: keep(at.y + m.dy, b.y, b.height, win.h) }));
+      await play(plan, env, (p) => page.mouse.move(p.x, p.y));
+      const end = plan[plan.length - 1];
+      cursor.set(page, { x: end.x, y: end.y });
+      left -= end.t;
+    } else if (left >= 60 && chance(env.rnd, 0.6)) {
+      const at = await cursorOf(page, env.rnd);
+      const next = { x: keep(at.x + Math.round(between(env.rnd, -2, 2)), b.x, b.width, win.w), y: keep(at.y + Math.round(between(env.rnd, -2, 2)), b.y, b.height, win.h) };
+      if (next.x !== at.x || next.y !== at.y) { await page.mouse.move(next.x, next.y); cursor.set(page, next); }
+    }
+  }
+  if (left > 0) await env.sleep(left);
+}
+
+/** Колесо мыши: рывки по 100 с паузами на чтение; знак px — направление. */
+async function scroll(page, px = rand(600, 2200), opts = {}) {
+  const env = envOf(opts);
+  await cursorOf(page, env.rnd);
+  await play(planScroll(px, {}, env.rnd), env, (e) => page.mouse.wheel(0, e.dy));
+}
+
+/**
+ * Довести элемент до удобной зоны экрана колесом, а не мгновенной прокруткой скриптом:
+ * человек крутит, смотрит, крутит дальше. Если колесо не двигает страницу
+ * (элемент во вложенной прокрутке), остаётся мгновенная прокрутка.
+ */
+async function scrollToView(page, locator, env) {
+  const { h } = await sizeOf(page, true);
+  let stuck = 0, lastY = null;
+  for (let i = 0; i < 25; i++) {
+    const box = await locator.boundingBox({ timeout: 5000 }); // нет элемента — не ждать 30 секунд
+    if (!box) throw new Error('элемент не виден');
+    const mid = box.y + box.height / 2;
+    if (mid >= h * 0.12 && mid <= h * 0.88) return;
+    stuck = lastY !== null && Math.abs(box.y - lastY) < 1 ? stuck + 1 : 0;
+    if (stuck >= 2) return locator.scrollIntoViewIfNeeded();
+    lastY = box.y;
+    const need = mid - h * 0.4;
+    await scroll(page, Math.sign(need) * Math.min(Math.abs(need), 500), env);
+    await env.sleep(clamp(lognormal(env.rnd, 250, 0.3), 120, 700)); // дать докатиться
+  }
+  return locator.scrollIntoViewIfNeeded();
+}
+
+/**
+ * Подвести мышь к элементу: прокрутка колесом, путь к точке около центра, недолгая задержка над ним.
+ * Курсор уже над элементом — рука не едет, только задерживается (дрожь не выводит её за элемент).
+ */
+async function hover(page, locator, opts = {}) {
+  const env = envOf(opts);
+  await scrollToView(page, locator, env);
+  const box = await locator.boundingBox({ timeout: 5000 }); // нет элемента — не ждать 30 секунд
+  if (!box) throw new Error('элемент не виден');
+  if (!inside(cursor.get(page), box)) {
+    const target = pickPoint(box, await cursorOf(page, env.rnd), env.rnd);
+    await moveTo(page, target.x, target.y, { ...opts, width: Math.min(box.width, box.height) });
+  }
+  await linger(page, clamp(lognormal(env.rnd, 130, 0.4), 50, 500), { ...opts, box });
+}
+
+/**
+ * Навести и кликнуть: точка около центра, задержка перед нажатием, кнопка держится не мгновенно.
+ * opts.verifyAt(point): пока рука шла, страница могла сдвинуться или накрыться оверлеем; вызывающий
+ * проверяет точку под курсором прямо перед нажатием и бросает, если там не цель — тогда клика нет.
  */
 async function click(page, locator, opts = {}) {
-  await locator.scrollIntoViewIfNeeded();
-  const box = await locator.boundingBox();
-  if (!box) throw new Error('элемент не виден');
-  const speed = opts.speed || pickSpeed();
-  const here = cursor.get(page);
-  if (!(inside(here, box) && Math.random() < 0.85)) {
-    await moveTo(page, box.x + box.width * rand(0.25, 0.75), box.y + box.height * rand(0.3, 0.7), { ...opts, speed });
-  }
-  const [a, b] = SPEEDS[speed].dwell;
-  await pause(a, b);
-  // Пока мышь шла, страница могла сдвинуться: вызывающий проверяет точку клика (бросает — клика нет).
-  if (opts.verifyAt) await opts.verifyAt(cursor.get(page) || {});
+  const env = envOf(opts);
+  await hover(page, locator, opts);
+  if (opts.verifyAt) await opts.verifyAt({ ...(cursor.get(page) || {}) });
   await page.mouse.down();
-  await sleep(rand(40, 130));
+  await env.sleep(clamp(lognormal(env.rnd, 85, 0.3), 45, 200));
   await page.mouse.up();
 }
 
-/** Прокрутка колесом несколькими рывками. */
-async function scroll(page, total = rand(600, 2200)) {
-  let done = 0;
-  while (done < total) {
-    const step = rand(80, 260);
-    await page.mouse.wheel(0, step);
-    done += step;
-    await sleep(rand(60, 400));
-    if (Math.random() < 0.1) await pause(800, 2500); // задержался прочитать
-  }
+// Сырые события клавиатуры для раскладки, которой нет у playwright (кириллица): через CDP, как это делает сам браузер.
+const sessions = new WeakMap();
+const cdpOf = (page) => {
+  if (!sessions.has(page)) sessions.set(page, Promise.resolve().then(() => page.context().newCDPSession(page)).catch(() => null));
+  return sessions.get(page);
+};
+
+async function pressEvent(page, ev, state) {
+  if (ev.op === 'insert') return page.keyboard.insertText(ev.text);
+  const e = ev.entry, down = ev.op === 'down';
+  if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') state.shift = down;
+  if (!e.raw) return page.keyboard[down ? 'down' : 'up'](e.name);
+
+  const session = await cdpOf(page);
+  if (!session) return down ? page.keyboard.insertText(e.text) : undefined; // без CDP хотя бы текст не потерять
+  return session.send('Input.dispatchKeyEvent', {
+    type: down ? 'keyDown' : 'keyUp',
+    modifiers: state.shift ? 8 : 0,
+    key: e.key,
+    code: e.code,
+    windowsVirtualKeyCode: e.vk,
+    nativeVirtualKeyCode: e.vk,
+    text: down ? e.text : undefined,
+    unmodifiedText: down ? e.text : undefined,
+  });
 }
 
-/** Ввод посимвольно; изредка опечатка, которая тут же стирается. */
-async function type(page, text) {
-  const near = 'qwertyuiopasdfghjklzxcvbnm';
-  for (const ch of text) {
-    if (/[a-z]/i.test(ch) && Math.random() < 0.03) {
-      await page.keyboard.type(near[Math.floor(Math.random() * near.length)]);
-      await sleep(rand(120, 300));
-      await page.keyboard.press('Backspace');
-    }
-    await page.keyboard.type(ch);
-    await sleep(ch === ' ' ? rand(60, 220) : rand(35, 160));
-  }
+/**
+ * Печать в сфокусированное поле. Темп и доля опечаток — из повадок (persona.json);
+ * opts.wpm и opts.typoRate их переопределяют. Перевод строки — Shift+Enter.
+ */
+async function type(page, text, opts = {}) {
+  const env = envOf(opts), me = personaOf(env.rnd);
+  const plan = planTyping(text, { wpm: opts.wpm || me.wpm, typoRate: opts.typoRate ?? me.typoRate, rnd: env.rnd });
+  const state = { shift: false };
+  await play(plan, env, (ev) => pressEvent(page, ev, state));
 }
 
-module.exports = { path, plan, inside, SPEEDS, moveTo, click, scroll, type, pause, rand, sleep };
+/** Одна клавиша целиком (Escape, Enter, Tab…): нажал, подержал, отпустил. */
+async function press(page, key, opts = {}) {
+  const env = envOf(opts);
+  await page.keyboard.down(key);
+  await env.sleep(clamp(lognormal(env.rnd, 85, 0.3), 45, 200));
+  await page.keyboard.up(key);
+}
+
+module.exports = { moveTo, hover, click, scroll, type, press, linger, pause, rand, sleep, inside, newPersona, restorePersona, usePersona, planMove, planTyping, planScroll };

@@ -226,7 +226,7 @@ function hands(page, opts = {}) {
         if (hasTarget(c)) await target(c.id, c.gen);
         await human.pause(150, 600);
         if (hasTarget(c)) await focused(c.id); // после паузы, прямо перед клавишей
-        return page.keyboard.press(c.key);
+        return human.press(page, c.key);
       case 'scroll': return human.scroll(page, c.px);
       case 'wait':
         if (c.text) return page.getByText(c.text).first().waitFor({ state: 'visible', timeout: MAX_WAIT });
