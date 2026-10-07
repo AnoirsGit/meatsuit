@@ -145,12 +145,14 @@ function hands(page, opts = {}) {
 
   // Под точкой (x, y) целевой элемент или его потомок, и между ними нет другого интерактивного элемента?
   // Нет — оверлей/тост/сдвиг вёрстки или вложенная кнопка («× закрыть чат»): клика не будет.
-  const hitsTarget = async (id, { x, y }) => {
-    let ok;
+  // nested: ещё и над целью не должно быть ссылки, кнопки, поля или <label>. Клик всплывёт к ним и выполнит
+  // переход, отправку формы или переключение поля, хотя под курсором сама цель (так в dryRun у вкладки).
+  const hitsTarget = async (id, { x, y }, { nested = false } = {}) => {
+    let res;
     try {
-      ok = await dom.run(world, ([i, px, py, sel]) => {
+      res = await dom.run(world, ([i, px, py, sel, up]) => {
         const el = globalThis.__ms.els[i];
-        if (!el) return false;
+        if (!el) return 'covered';
         let hit = document.elementFromPoint(px, py);
         // elementFromPoint отдаёт хост: спускаемся внутрь открытых shadow-корней (как covered в eyes.js).
         for (let s = hit && hit.shadowRoot; s; s = hit.shadowRoot) {
@@ -161,15 +163,23 @@ function hands(page, opts = {}) {
         // Вверх по составному дереву (слот, родитель, хост) до el.
         let n = hit;
         for (; n && n !== el; n = n.assignedSlot || n.parentNode || n.host) {
-          if (n.nodeType === 1 && n.matches(sel)) return false;
+          if (n.nodeType === 1 && n.matches(sel)) return 'covered';
         }
-        return n === el;
-      }, [id, x, y, INTERACTIVE]);
+        if (n !== el) return 'covered';
+        // От el дальше вверх по тому же составному дереву: интерактивный предок получит клик всплытием.
+        if (up) {
+          for (let a = el.assignedSlot || el.parentNode || el.host; a; a = a.assignedSlot || a.parentNode || a.host) {
+            if (a.nodeType === 1 && a.matches(up)) return 'nested';
+          }
+        }
+        return 'ok';
+      }, [id, x, y, INTERACTIVE, nested ? INTERACTIVE + ',label' : null]);
     } catch (err) {
       if (err instanceof dom.StaleWorld) throw new StaleElement('страница сменилась перед кликом');
       throw err;
     }
-    if (!ok) throw new StaleElement(`под курсором уже не элемент ${id}: клик отменён`);
+    if (res === 'nested') throw new StaleElement(`элемент ${id} лежит внутри ссылки, кнопки, поля или метки: клик отменён`);
+    if (res !== 'ok') throw new StaleElement(`под курсором уже не элемент ${id}: клик отменён`);
   };
 
   const run = async (c) => {
@@ -177,7 +187,7 @@ function hands(page, opts = {}) {
       case 'click': {
         const el = await target(c.id, c.gen);
         // dryRun: клик по tab — единственная настоящая запись; сверяем, что под курсором всё ещё он.
-        const verifyAt = dryRun ? (pt) => hitsTarget(c.id, pt) : undefined;
+        const verifyAt = dryRun ? (pt) => hitsTarget(c.id, pt, { nested: true }) : undefined;
         return human.click(page, el, { verifyAt });
       }
       case 'fill': {
