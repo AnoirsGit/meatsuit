@@ -8,7 +8,7 @@ Terms: **egress** is the address websites see when your traffic leaves your netw
 
 - A website sees the address of the real connection. An IP cannot be faked, only routed through.
 - A server in a datacenter has an address from a hosting range, which is the most visible sign that traffic does not come from a person at home. This is plausible but **not verified**: the source the project originally relied on ("IP, protocol and behaviour are the main bot signals") is not in the repository.
-- Your own residential address is the one most consistent with the rest of your life, since it is the address your other devices already use. That is reasoning, not a measurement. Keep the rest consistent too: `docker/docker-compose.yml` sets the containers' time zone (`TZ`) to the author's, and `docker/neko/brave-start.sh` sets the browser languages to `en-US,ru`. Change both to match where your exit is and how you browse.
+- Your own residential address is the one most consistent with the rest of your life, since it is the address your other devices already use. That is reasoning, not a measurement. Keep the rest consistent too: the containers' time zone (`TZ`) comes from `MEATSUIT_TZ` in `docker/.env` (default `Asia/Almaty`, the author's), and `docker/neko/brave-start.sh` sets the browser languages to `en-US,ru`. Change both to match where your exit is and how you browse.
 
 ## The options
 
@@ -28,7 +28,8 @@ An always-on home device is the exit node. On the server, a Tailscale container 
  you ── tailnet ──► server (Docker)
                     ┌─ tailscale container (exit node client) ──► tunnel ──► home device ──► internet
                     ├─ neko: Brave, mirror, CDP   (shares its network)
-                    └─ life: warm-up              (shares it too)
+                    ├─ life: warm-up              (shares it too)
+                    └─ server: HTTP service       (shares it too)
 ```
 
 Everything the browser sends, including UDP and WebRTC, goes through the tunnel. Mirror traffic to you travels over the tailnet directly rather than through your home (per the design; not verified).
@@ -58,7 +59,7 @@ The full deploy sequence, including binding the mirror to a private address, is 
 
 The rule: **no tunnel means no network.** If the tunnel or the exit node is down, the browser must not quietly leave from the server's own address.
 
-`docker/egress/killswitch.sh` enforces it. It runs in the Tailscale container before Tailscale starts and installs `iptables` rules on outgoing traffic, for IPv4 and IPv6 (the Tailscale container also switches IPv6 off with `sysctl`, and the script refuses to start if `ip6tables` is missing and IPv6 is not switched off; the rule order and this refusal are tested on stand-in commands, the real rules are not): loopback and the tunnel interface are allowed, replies on established connections are allowed, anything run by root (that is `tailscaled`, which must reach the internet to build the tunnel) is allowed, and everything else is rejected. Neko and warm-up run as non-root users in the same namespace, so they have no route out except the tunnel. The catch: any process running as root in that namespace would bypass it.
+`docker/egress/killswitch.sh` enforces it. It runs in the Tailscale container before Tailscale starts and installs `iptables` rules on outgoing traffic, for IPv4 and IPv6 (the Tailscale container also switches IPv6 off with `sysctl`, and the script refuses to start if `ip6tables` is missing and IPv6 is not switched off; the rule order and this refusal are tested on stand-in commands, the real rules are not): loopback and the tunnel interface are allowed, replies on established connections are allowed, anything run by root (that is `tailscaled`, which must reach the internet to build the tunnel) is allowed, and everything else is rejected. Neko, warm-up and the HTTP service run as non-root users in the same namespace, so they have no route out except the tunnel. The catch: any process running as root in that namespace would bypass it.
 
 Not verified, because the egress profile has never been run: that this rule does not break WebRTC, that the browser really stays silent when the tunnel is down, and that DNS goes through the tunnel (the aim: otherwise CDNs pick servers by the datacenter's resolver).
 
@@ -75,7 +76,7 @@ How it works (`egress.js`):
 - It asks an echo service which address it sees (`ipinfo.io`, with `ipwho.is` as a fallback, 5 s timeout) **from the same network as the browser**, and compares the country and the ASN. It compares the ASN number, not the provider's name, because names differ between databases while the number matches. `asn` may be left out to check the country only.
 - Three outcomes: ok, `egress_wrong` (a different country or ASN) and `egress_unknown` (no service answered, or an ASN is required and the service did not give one). Unknown counts as a failure, never as "probably fine".
 - It does not notice an address change inside the same ASN (not needed), and it does not test for DNS leaks.
-- Where it runs matters. The compose file ships Neko, warm-up and Tailscale, not the HTTP service. A check run on a different network measures a different address, so run the checking process inside the browser's network.
+- Where it runs matters. A check run on a different network measures a different address, so run the checking process inside the browser's network. The compose file does that for both checkers: warm-up (`life`) and the HTTP service (`server`, profile `api`) share Neko's network, and with the egress override Neko, warm-up and the HTTP service all share the Tailscale container's.
 
 What happens on a failure:
 
@@ -116,7 +117,7 @@ The rollback was not tested on a real server. Check that `tailscale` is in root'
 
 ## What is verified and what is not
 
-- **Verified:** `egress.js` and its use in `life.js` and `server.js`, by unit tests on a fake network (country and ASN match, fallback service, timeouts, caching, fail closed). The exit-node commands against Tailscale's documentation. The egress override as a configuration only (`docker compose config` accepts it). The kill switch relies on the browser not running as root: the Neko image sets `USER=neko` (read from the image metadata) and our supervisord config starts Brave with `user=%(ENV_USER)s`, so the owner rule should apply to it; a process listing in a running container has not been checked.
+- **Verified:** `egress.js` and its use in `life.js` and `server.js`, by unit tests on a fake network (country and ASN match, fallback service, timeouts, caching, fail closed). The exit-node commands against Tailscale's documentation. The egress override as a configuration only (`docker compose config` accepts it). The kill switch relies on the browser not running as root: the Neko image sets `USER=neko` (read from the image metadata) and our supervisord config starts Brave with `user=%(ENV_USER)s`, so the owner rule should apply to it; a process listing in a running container has not been checked. On the rented server where the mirror was tried, a throwaway container accepted `/dev/net/tun`, `iptables -m owner`, `-m conntrack` and `ip6tables`, so the kill switch rules can be installed there; Tailscale itself was not started ([docker/README.md](../docker/README.md#what-was-verified-and-what-was-not)).
 - **Not verified:** the egress profile has not been run at all: Tailscale inside the container, Neko, warm-up, the HTTP service and Tailscale in one network namespace, the kill switch, WebRTC and DNS through the tunnel. Also not run: `begin` returning `503` with a real exit node, and the SSH rollback script on a server.
 
 Russian original: [05-egress.md](05-egress.md).
