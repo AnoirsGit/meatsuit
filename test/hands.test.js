@@ -38,6 +38,12 @@ const rejects = (c, hosts) => assert.throws(() => validate(c, hosts), BadCommand
   rejects(null);
   validate({ cmd: 'goto', url: 'https://tinder.com/app/recs' }, ['tinder.com']);
   validate({ cmd: 'press', key: 'Enter' });
+  // press и type могут назвать поле, которое должно быть в фокусе: id и gen только вместе.
+  rejects({ cmd: 'press', key: 'Enter', id: 1 });
+  rejects({ cmd: 'type', text: 'x', gen: 1 });
+  rejects({ cmd: 'type', text: 'x', id: '1', gen: 1 });
+  validate({ cmd: 'press', key: 'Enter', id: 1, gen: 1 });
+  validate({ cmd: 'type', text: 'x', id: 1, gen: 1 });
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'meatsuit-'));
   const logFile = path.join(dir, 'log.jsonl');
@@ -172,6 +178,53 @@ const rejects = (c, hosts) => assert.throws(() => validate(c, hosts), BadCommand
   await hs.see({ settle: { minElements: 3, timeoutMs: 600000 } });
   const waited = Date.now() - t2;
   assert.ok(waited >= 14000 && waited < 20000, `settle без потолка: ${waited} мс`);
+
+  // Живой режим: оверлей появился, пока мышь шла к цели. click и fill его не нажимают: StaleElement, клика нет.
+  const FORM = `<body style="margin:0">
+    <input id="a" aria-label="A" onkeydown="document.title+='a:'+event.key+';'">
+    <input id="b" aria-label="B" onkeydown="document.title+='b:'+event.key+';'">
+    <button onclick="document.title+='btn;'">Go</button>
+  </body>`;
+  const idOf = (s, n) => s.elements.find((e) => e.name === n).id;
+  await page.setContent(FORM);
+  const hl = hands(page);
+  const l0 = await hl.see();
+  await page.evaluate(() => {
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed;inset:0;background:#0001';
+    d.onclick = () => { document.title += 'overlay;'; };
+    document.body.append(d);
+  });
+  await assert.rejects(hl.act({ cmd: 'click', id: idOf(l0, 'Go'), gen: l0.gen }), StaleElement, 'живой click не проверил точку');
+  await assert.rejects(hl.act({ cmd: 'fill', id: idOf(l0, 'A'), gen: l0.gen, text: 'x' }), StaleElement, 'живой fill не проверил точку');
+  assert.equal(await page.title(), '', 'клик ушёл в оверлей');
+  assert.equal(await page.inputValue('#a'), '');
+
+  // press и type с id: фокус сверяется прямо перед клавишами. Ушёл (автофокус, тост) — StaleElement, нажатия нет.
+  await page.setContent(FORM);
+  const f0 = await hl.see();
+  const f1 = await hl.act({ cmd: 'fill', id: idOf(f0, 'A'), gen: f0.gen, text: 'привет' });
+  assert.equal(f1.elements.find((e) => e.name === 'A').focused, true);
+  await page.evaluate(() => { document.title = ''; document.getElementById('b').focus(); });
+  await assert.rejects(hl.act({ cmd: 'press', key: 'Enter', id: idOf(f1, 'A'), gen: f1.gen }), StaleElement, 'press ушёл в чужое поле');
+  await assert.rejects(hl.act({ cmd: 'type', text: 'ещё', id: idOf(f1, 'A'), gen: f1.gen }), StaleElement, 'type ушёл в чужое поле');
+  assert.equal(await page.title(), '', 'клавиши ушли в другое поле');
+  assert.equal(await page.inputValue('#b'), '');
+  // Фокус на месте — нажатие проходит; без id — как раньше, по текущему фокусу.
+  await page.evaluate(() => document.getElementById('a').focus());
+  const p1 = await hl.act({ cmd: 'press', key: 'Enter', id: idOf(f1, 'A'), gen: f1.gen });
+  await hl.act({ cmd: 'type', text: '!', id: idOf(p1, 'A'), gen: p1.gen });
+  await hl.act({ cmd: 'press', key: 'Escape' });
+  assert.equal(await page.title(), 'a:Enter;a:!;a:Escape;');
+  assert.equal(await page.inputValue('#a'), 'привет!');
+  // Поле в open shadow: фокус ищется внутри корня (document.activeElement — это хост).
+  await page.setContent('<body><div id="h"></div></body>');
+  await page.evaluate(() => { document.getElementById('h').attachShadow({ mode: 'open' }).innerHTML = '<input aria-label="S" onkeydown="document.title+=\'s:\'+event.key+\';\'">'; });
+  const sh0 = await hl.see();
+  const sh1 = await hl.act({ cmd: 'fill', id: idOf(sh0, 'S'), gen: sh0.gen, text: 'да' });
+  await page.evaluate(() => { document.title = ''; });
+  await hl.act({ cmd: 'press', key: 'Enter', id: idOf(sh1, 'S'), gen: sh1.gen });
+  assert.equal(await page.title(), 's:Enter;', 'поле в shadow не признано сфокусированным');
 
   // Живые руки.
   await page.setContent(HTML);

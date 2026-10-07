@@ -35,16 +35,19 @@ const isId = (v) => Number.isInteger(v) && v > 0;
 const isGen = (v) => Number.isInteger(v) && v > 0;
 // Перевод строки в поле нажал бы Enter и отправил полсообщения, поэтому текст однострочный.
 const isText = (v) => typeof v === 'string' && v.length > 0 && v.length <= MAX_TEXT && !/[\r\n]/.test(v);
+// У press и type цель необязательна: поле, которое должно быть в фокусе. Тогда id и gen вместе.
+const hasTarget = (c) => c.id !== undefined || c.gen !== undefined;
 
 /** Проверка команды до выполнения. Бросает BadCommand. Чистая функция. */
 function validate(c, allowedHosts = []) {
   const bad = (m) => { throw new BadCommand(`${c && c.cmd}: ${m}`); };
   if (!c || typeof c !== 'object') throw new BadCommand('команда не объект');
+  const optTarget = () => { if (hasTarget(c) && (!isId(c.id) || !isGen(c.gen))) bad('id и gen из снимка — вместе или ни одного'); };
   switch (c.cmd) {
     case 'click': if (!isId(c.id) || !isGen(c.gen)) bad('нужны id и gen из снимка'); break;
     case 'fill': if (!isId(c.id) || !isGen(c.gen)) bad('нужны id и gen из снимка'); if (!isText(c.text)) bad('нужен text до ' + MAX_TEXT); break;
-    case 'type': if (!isText(c.text)) bad('нужен text до ' + MAX_TEXT); break;
-    case 'press': if (!KEYS.has(c.key)) bad('клавиша не из списка'); break;
+    case 'type': if (!isText(c.text)) bad('нужен text до ' + MAX_TEXT); optTarget(); break;
+    case 'press': if (!KEYS.has(c.key)) bad('клавиша не из списка'); optTarget(); break;
     case 'scroll': if (!(c.px === undefined || (Number.isFinite(c.px) && c.px >= 0 && c.px <= 5000))) bad('px от 0 до 5000, только вниз'); break;
     case 'wait':
       if (!(Number.isFinite(c.ms) && c.ms >= 0 && c.ms <= MAX_WAIT) && !isText(c.text)) bad(`нужен ms до ${MAX_WAIT} или text`);
@@ -182,24 +185,48 @@ function hands(page, opts = {}) {
     if (res !== 'ok') throw new StaleElement(`под курсором уже не элемент ${id}: клик отменён`);
   };
 
+  // press и type бьют по тому, что в фокусе в момент нажатия, а не когда модель решала: фокус мог уйти
+  // (автофокус, тост, перерисовка). С id проверяем прямо перед клавишами, что в фокусе этот элемент.
+  const focused = async (id) => {
+    let ok;
+    try {
+      ok = await dom.run(world, (i) => {
+        const el = globalThis.__ms.els[i];
+        let a = document.activeElement;
+        while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement; // фокус внутри open shadow
+        return !!el && a === el;
+      }, id);
+    } catch (err) {
+      if (err instanceof dom.StaleWorld) throw new StaleElement('страница сменилась перед вводом');
+      throw err;
+    }
+    if (!ok) throw new StaleElement(`в фокусе уже не элемент ${id}: ввод отменён`);
+  };
+
   const run = async (c) => {
     switch (c.cmd) {
       case 'click': {
         const el = await target(c.id, c.gen);
-        // dryRun: клик по tab — единственная настоящая запись; сверяем, что под курсором всё ещё он.
-        const verifyAt = dryRun ? (pt) => hitsTarget(c.id, pt, { nested: true }) : undefined;
-        return human.click(page, el, { verifyAt });
+        // Мышь идёт до нескольких секунд: перед нажатием сверяем, что под курсором всё ещё цель (оверлей, сдвиг).
+        // В dryRun клик по tab — единственная настоящая запись, там ещё и над вкладкой не должно быть ссылки или кнопки.
+        return human.click(page, el, { verifyAt: (pt) => hitsTarget(c.id, pt, { nested: dryRun }) });
       }
       case 'fill': {
         const loc = await target(c.id, c.gen);
-        await human.click(page, loc);
+        await human.click(page, loc, { verifyAt: (pt) => hitsTarget(c.id, pt) });
         await human.pause(150, 500);
         await page.keyboard.press('ControlOrMeta+A');
         await page.keyboard.press('Backspace');
         return human.type(page, c.text);
       }
-      case 'type': return human.type(page, c.text);
-      case 'press': await human.pause(150, 600); return page.keyboard.press(c.key);
+      case 'type':
+        if (hasTarget(c)) { await target(c.id, c.gen); await focused(c.id); }
+        return human.type(page, c.text);
+      case 'press':
+        if (hasTarget(c)) await target(c.id, c.gen);
+        await human.pause(150, 600);
+        if (hasTarget(c)) await focused(c.id); // после паузы, прямо перед клавишей
+        return page.keyboard.press(c.key);
       case 'scroll': return human.scroll(page, c.px);
       case 'wait':
         if (c.text) return page.getByText(c.text).first().waitFor({ state: 'visible', timeout: MAX_WAIT });
