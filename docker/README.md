@@ -84,6 +84,8 @@ Other deliberate differences from the stock Neko Brave image (all in `neko/brave
 
 Settings in `.env` (all optional except the passwords). The file can live elsewhere (the owner keeps it outside the repository): set `MEATSUIT_CONFIG=<file>` for `npm run init` and `npm run config`, and pass `--env-file <file>` to `docker compose`. Compose reads it only on `up`, so run `docker compose up -d` after a change.
 
+`npm run config` opens a temporary page to edit the file, with a hint under every field and the same checks as `config.js`. It is a process on the host, not in a container and not in the browser's network, so the mirrored browser cannot reach it. It listens on `127.0.0.1` (`--tailnet` binds to this machine's tailnet address instead, to open it from a phone), prints a link with a random token once, and exits after 15 idle minutes or the "Закончить" button. The token travels in a header, never in a cookie; a request from another origin gets 403. Passwords are never sent to the page: it shows whether one is set and lets you type or generate a new one. Writes are atomic with mode 0600, and an edit made elsewhere since the page loaded gets 409 instead of being overwritten.
+
 | Variable | Default | Meaning |
 |---|---|---|
 | `NEKO_PASSWORD`, `NEKO_ADMIN_PASSWORD` | required | Member and admin passwords of the mirror |
