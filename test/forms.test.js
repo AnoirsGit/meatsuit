@@ -50,6 +50,11 @@ const idOf = (s, name) => s.elements.find((e) => e.name === name).id;
   await h.act({ cmd: 'type', text: ' ещё', id: idOf(s1, 'Имя'), gen: s1.gen });
   // Ошибка Playwright цитирует искомый текст: в журнал он не попадает.
   await assert.rejects(h.act({ cmd: 'wait', text: SECRET + ' нет на странице' }));
+  // Сбой перехода: Playwright печатает адрес (нормализованный, с query) в первой строке ошибки.
+  const failPage = await browser.newPage();
+  await failPage.route('https://example.test/**', (r) => r.abort());
+  await assert.rejects(hands(failPage, { logFile, allowedHosts: ['example.test'] }).act({ cmd: 'goto', url: 'https://EXAMPLE.test/fail?token=Q-TOKEN-1' }));
+  await failPage.close();
   const dry = hands(page, { dryRun: true, logFile });
   const d0 = await dry.see();
   await dry.act({ cmd: 'fill', id: idOf(d0, 'Письмо'), gen: d0.gen, text: SECRET });
@@ -61,6 +66,7 @@ const idOf = (s, name) => s.elements.find((e) => e.name === name).id;
   assert.deepEqual(fill.cmd, { cmd: 'fill', id: idOf(s0, 'Имя'), gen: s0.gen, textLength: SECRET.length });
   assert.equal(lines.find((l) => l.cmd.cmd === 'type').cmd.textLength, ' ещё'.length);
   assert.deepEqual(lines.find((l) => l.cmd.cmd === 'goto').cmd, { cmd: 'goto', url: 'https://example.test/form' });
+  assert.match(lines.find((l) => l.cmd.cmd === 'goto' && l.error).error, /example\.test\/fail/, 'адрес без query в ошибке остаётся');
   assert.equal(lines.find((l) => l.cmd.cmd === 'goto').urlAfter, 'https://example.test/form');
   assert.ok(lines.find((l) => l.cmd.cmd === 'wait').error, 'ошибка wait должна быть в журнале');
   assert.equal(lines.find((l) => l.result === 'dry-run').cmd.textLength, SECRET.length);
@@ -166,5 +172,6 @@ const idOf = (s, name) => s.elements.find((e) => e.name === name).id;
   assert.ok(!fs.readFileSync(logFile, 'utf8').includes('Казахстан'), 'подпись варианта попала в журнал');
 
   await browser.close();
+  fs.rmSync(tmp, { recursive: true, force: true });
   console.log('forms.test: ok');
 })().catch((e) => { console.error(e); process.exit(1); });

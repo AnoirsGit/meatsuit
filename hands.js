@@ -70,7 +70,11 @@ function journalError(message, c) {
     if (typeof v !== 'string' || !v) continue;
     for (const form of new Set([v, JSON.stringify(v).slice(1, -1), v.replace(/'/g, "\\'"), v.replace(/\r\n?/g, '\n')])) m = m.split(form).join('…');
   }
-  if (typeof c.url === 'string' && c.url) m = m.split(c.url).join(journalUrl(c.url));
+  if (typeof c.url === 'string' && c.url) {
+    let href = c.url;
+    try { href = new URL(c.url).href; } catch { /* как есть */ } // goto печатает адрес в нормализованном виде
+    for (const form of new Set([c.url, href])) m = m.split(form).join(journalUrl(c.url));
+  }
   return m;
 }
 
@@ -370,8 +374,9 @@ function hands(page, opts = {}) {
     if (kind === 'file') {
       if (await dom.run(world, (i) => globalThis.__ms.els[i].disabled, c.id)) throw new BadCommand('upload: поле файла недоступно');
       await human.pause(800, 2500);
-      return dom.run(world, ([i, b64, name, type]) => {
+      const set = await dom.run(world, ([i, b64, name, type]) => {
         const input = globalThis.__ms.els[i];
+        if (!input || !input.isConnected) return false; // поле исчезло, пока «выбирался файл»
         const bin = atob(b64);
         const bytes = new Uint8Array(bin.length);
         for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
@@ -380,7 +385,10 @@ function hands(page, opts = {}) {
         input.files = dt.files;
         input.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
         input.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
       }, [c.id, file.buffer.toString('base64'), file.name, file.mimeType]);
+      if (!set) throw new StaleElement(`поле файла ${c.id} исчезло, пока выбирался файл`);
+      return;
     }
     // Окно выбора перехватывается, только пока ждём его: слушатель ставится до клика.
     const chooser = page.waitForEvent('filechooser', { timeout: CHOOSER_MS });
