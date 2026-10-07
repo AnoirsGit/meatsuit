@@ -20,6 +20,8 @@ class StaleElement extends Error {}
 
 const MAX_TEXT = 1000;
 const MAX_WAIT = 15000;
+const MAX_OPTION = 200; // value или подпись варианта <select>
+const MAX_ARROWS = 25; // дальше вариант ищется первыми буквами подписи, как делает человек
 const KEYS = new Set(['Enter', 'Escape', 'Tab', 'Backspace', 'ArrowDown', 'ArrowUp', 'PageDown', 'PageUp']);
 
 // Копия SELECTOR из collect() в eyes.js: он локален в функции, которая выполняется в странице, и наружу не отдаётся.
@@ -80,6 +82,14 @@ function validate(c, allowedHosts = []) {
     case 'fill': if (!isId(c.id) || !isGen(c.gen)) bad('нужны id и gen из снимка'); if (!isText(c.text)) bad('нужен text до ' + MAX_TEXT); break;
     case 'type': if (!isText(c.text)) bad('нужен text до ' + MAX_TEXT); optTarget(); break;
     case 'press': if (!KEYS.has(c.key)) bad('клавиша не из списка'); optTarget(); break;
+    case 'select': {
+      if (!isId(c.id) || !isGen(c.gen)) bad('нужны id и gen из снимка');
+      const byValue = c.value !== undefined, byLabel = c.label !== undefined;
+      if (byValue === byLabel) bad('нужен ровно один из value и label');
+      if (byValue && !(typeof c.value === 'string' && c.value.length <= MAX_OPTION)) bad(`value — строка до ${MAX_OPTION}`);
+      if (byLabel && !(typeof c.label === 'string' && c.label.trim() && c.label.length <= MAX_OPTION)) bad(`label — непустая строка до ${MAX_OPTION}`);
+      break;
+    }
     case 'scroll': if (!(c.px === undefined || (Number.isFinite(c.px) && c.px >= 0 && c.px <= 5000))) bad('px от 0 до 5000, только вниз'); break;
     case 'wait':
       if (!(Number.isFinite(c.ms) && c.ms >= 0 && c.ms <= MAX_WAIT) && !isText(c.text)) bad(`нужен ms до ${MAX_WAIT} или text`);
@@ -235,6 +245,68 @@ function hands(page, opts = {}) {
     if (!ok) throw new StaleElement(`в фокусе уже не элемент ${id}: ввод отменён`);
   };
 
+  // Что за элемент под номером: от этого зависит, какой командой его можно трогать.
+  const kindOf = (id) => dom.run(world, (i) => {
+    const e = globalThis.__ms.els[i];
+    if (!e) return null;
+    if (e.tagName === 'SELECT') return 'select';
+    if (e.tagName === 'TEXTAREA') return 'textarea';
+    if (e.tagName === 'INPUT') return (e.getAttribute('type') || '').toLowerCase() === 'file' ? 'file' : 'input';
+    return e.isContentEditable ? 'editable' : 'other';
+  }, id);
+
+  /**
+   * Вариант в <select>. Раскрытый список браузер с экраном рисует отдельным окном, мышью до него не дотянуться.
+   * Поэтому как у человека с клавиатурой: рука подходит к списку, он получает фокус, вариант выбирается стрелками,
+   * не раскрывая список; далёкий вариант — первыми буквами подписи, потом стрелками. События настоящие.
+   * Не вышло (браузер не двигает выбор стрелками) — вариант ставится напрямую с событиями input и change.
+   */
+  const choose = async (c) => {
+    const el = await target(c.id, c.gen);
+    const byLabel = c.label !== undefined;
+    const want = await dom.run(world, ([i, label, v]) => {
+      const s = globalThis.__ms.els[i];
+      if (!s || s.tagName !== 'SELECT') return { error: 'элемент не список <select>' };
+      if (s.multiple) return { error: 'список с выбором нескольких вариантов не поддерживается' };
+      if (s.disabled) return { error: 'список недоступен' };
+      const sq = (t) => (t || '').replace(/\s+/g, ' ').trim();
+      const opts = [...s.options];
+      let k = label ? opts.findIndex((o) => sq(o.label) === sq(v)) : opts.findIndex((o) => o.value === v);
+      if (k < 0 && label) k = opts.findIndex((o) => sq(o.label).toLowerCase() === sq(v).toLowerCase());
+      if (k < 0) return { error: 'нет такого варианта' };
+      const o = opts[k];
+      if (o.disabled || (o.parentElement.tagName === 'OPTGROUP' && o.parentElement.disabled)) return { error: 'вариант недоступен' };
+      return { index: k, from: s.selectedIndex, word: (sq(o.label).match(/^[\p{L}\p{N}]+/u) || [''])[0].slice(0, 12) };
+    }, [c.id, byLabel, byLabel ? c.label : c.value]);
+    if (want.error) throw new BadCommand(`select: ${want.error}`);
+    if (want.from === want.index) return; // уже выбран
+    const now = () => dom.run(world, (i) => globalThis.__ms.els[i].selectedIndex, c.id);
+    await human.hover(page, el);
+    await dom.run(world, (i) => globalThis.__ms.els[i].focus(), c.id);
+    await focused(c.id);
+    let at = await now();
+    if (Math.abs(want.index - at) > MAX_ARROWS && want.word) {
+      await human.type(page, want.word, { typoRate: 0 }); // поиск по первым буквам у закрытого списка
+      at = await now();
+    }
+    for (let n = 0; at !== want.index && Math.abs(want.index - at) <= MAX_ARROWS && n <= 2 * MAX_ARROWS; n++) {
+      await human.pause(140, 380);
+      await focused(c.id); // фокус ушёл — стрелки пошли бы в чужой элемент
+      await human.press(page, want.index > at ? 'ArrowDown' : 'ArrowUp');
+      const next = await now();
+      if (next === at) break; // стрелка выбор не двигает
+      at = next;
+    }
+    if (at !== want.index) {
+      await dom.run(world, ([i, k]) => {
+        const s = globalThis.__ms.els[i];
+        s.selectedIndex = k;
+        s.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+        s.dispatchEvent(new Event('change', { bubbles: true }));
+      }, [c.id, want.index]);
+    }
+  };
+
   const run = async (c) => {
     switch (c.cmd) {
       case 'click': {
@@ -245,6 +317,9 @@ function hands(page, opts = {}) {
       }
       case 'fill': {
         const loc = await target(c.id, c.gen);
+        const kind = await kindOf(c.id);
+        if (kind === 'select') throw new BadCommand('fill: это список — команда select');
+        if (kind === 'file') throw new BadCommand('fill: это поле файла — команда upload');
         await human.click(page, loc, { verifyAt: (pt) => hitsTarget(c.id, pt) });
         await human.pause(150, 500);
         await page.keyboard.press('ControlOrMeta+A');
@@ -259,6 +334,7 @@ function hands(page, opts = {}) {
         await human.pause(150, 600);
         if (hasTarget(c)) await focused(c.id); // после паузы, прямо перед клавишей
         return human.press(page, c.key);
+      case 'select': return choose(c);
       case 'scroll': return human.scroll(page, c.px);
       case 'wait':
         if (c.text) return page.getByText(c.text).first().waitFor({ state: 'visible', timeout: MAX_WAIT });
