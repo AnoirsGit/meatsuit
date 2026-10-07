@@ -105,9 +105,11 @@ Gaps: a captcha that is not in an iframe or has a name not listed above is caugh
 
 ## Configuration: `profiles/life.json`
 
-| Field | Meaning | Default | Shipped file |
+Your `profiles/life.json` is git-ignored: start from `cp profiles/life.example.json profiles/life.json`. The "Example file" column below is that example.
+
+| Field | Meaning | Default | Example file |
 |---|---|---|---|
-| `tz` | Time zone for days and weeks (IANA name). The default is the author's zone; set yours | `Asia/Almaty` | same |
+| `tz` | Time zone for days and weeks (IANA name) | the author's zone, built into `life/config.js`: set yours | `UTC` |
 | `hours` | `[from, to]`, the window in which sessions may start | `[9, 23]` | same |
 | `daysPerWeek` | `[min, max]` working days per week, the rest are days off | `[7, 7]` | `[3, 4]` |
 | `sessionsPerDay` | `[min, max]` sessions on a working day | `[2, 5]` | `[1, 2]` |
@@ -117,7 +119,7 @@ Gaps: a captcha that is not in an iframe or has a name not listed above is caugh
 | `cooldownHours` | Pause after a captcha or block | 24 | 72 |
 | `session.minutes` | `[min, max]` total session time | `[5, 14]` | `[5, 12]` |
 | `session.sites` | `[min, max]` sites per session | `[2, 4]` | same |
-| `sites` | List of `{url, kind, weight, queries}`. `kind` is `read` (default), `video` or `search`; `weight` is above zero (default 1); `queries` is a non-empty list of strings up to 60 characters, required for `search` | at least one | six sites |
+| `sites` | List of `{url, kind, weight, queries}`. `kind` is `read` (default), `video` or `search`; `weight` is above zero (default 1); `queries` is a non-empty list of strings up to 60 characters, required for `search` | at least one | three sites |
 
 The config is loaded once at startup, so restart `run` after editing it. It is validated at startup and the program refuses to start when:
 

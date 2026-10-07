@@ -61,13 +61,15 @@ meatsuit запускает один постоянный настоящий Bra
 npm install
 npm test                     # браузерные тесты пропускаются без Patchright и Chromium
 
+npm run init                 # docker/.env: случайные пароли зеркала, права 0600; повторно ничего не трогает
+npm run config               # по желанию: страница на 127.0.0.1, чтобы посмотреть и поправить (печатает одноразовую ссылку)
 cd docker
-cp .env.example .env         # задать NEKO_PASSWORD и NEKO_ADMIN_PASSWORD
 docker compose up -d
 ./verify.sh                  # открывает страницу из зеркала, прокручивает, проверяет по CDP
 # затем http://127.0.0.1:8080 (имя любое, пароль из .env)
 
 cd ..
+cp profiles/life.example.json profiles/life.json   # своя копия, в git не попадает
 node life.js plan            # что сделал бы прогрев (браузер не нужен)
 node life.js now --dry
 ```

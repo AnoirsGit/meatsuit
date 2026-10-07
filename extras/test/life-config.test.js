@@ -59,9 +59,9 @@ test('политика cookies: по умолчанию отказ, «accept» �
 });
 
 test('сайт с видом search: нужен непустой список запросов из строк до 60 знаков', () => {
-  const ok = normalizeConfig({ sites: [{ url: 'https://ru.wikipedia.org/', kind: 'search', queries: ['Алматы', 'Docker'] }] });
-  assert.deepEqual(ok.sites[0].queries, ['Алматы', 'Docker']);
-  for (const queries of [undefined, [], [''], ['   '], [5], 'Алматы', ['а'.repeat(61)]]) {
+  const ok = normalizeConfig({ sites: [{ url: 'https://ru.wikipedia.org/', kind: 'search', queries: ['Шахматы', 'Docker'] }] });
+  assert.deepEqual(ok.sites[0].queries, ['Шахматы', 'Docker']);
+  for (const queries of [undefined, [], [''], ['   '], [5], 'Шахматы', ['а'.repeat(61)]]) {
     assert.throws(() => normalizeConfig({ sites: [{ url: 'https://ru.wikipedia.org/', kind: 'search', queries }] }), /queries/, JSON.stringify(queries));
   }
   assert.doesNotThrow(() => normalizeConfig({ sites: [{ url: 'https://a.test/', kind: 'read' }] }), 'у чтения запросов не требуют');

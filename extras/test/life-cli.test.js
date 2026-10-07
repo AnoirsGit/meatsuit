@@ -17,7 +17,7 @@ const { serve } = require('../testkit/browser-site.js');
 
 const LIFE = path.join(__dirname, '..', 'life.js');
 const DEAD_CDP = 'http://127.0.0.1:1';
-const TZ = 'Asia/Almaty';
+const TZ = 'Etc/GMT-5'; // UTC+5 без перевода часов
 const H = 3600e3, MIN = 60e3;
 
 /** Рабочий каталог на тест: конфиг, data/, и сюда же cwd процесса (profiles/egress.json от него не лежит). */

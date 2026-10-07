@@ -1,7 +1,7 @@
 // Управление зеркалом по протоколу Neko (так же шлёт события веб-клиент): войти, взять управление,
 // набрать адрес клавишами, нажать Enter, прокрутить колесом. Запускается внутри контейнера life,
 // у которого сеть общая с Neko, поэтому адреса 127.0.0.1.
-//   NEKO_PASSWORD=… URL=en.wikipedia.org/wiki/almaty SCROLL=8 node mirror.mjs
+//   NEKO_PASSWORD=… URL=en.wikipedia.org/wiki/web_browser SCROLL=8 node mirror.mjs
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const base = process.env.NEKO || 'http://127.0.0.1:8080';
 const url = process.env.URL || 'example.com';

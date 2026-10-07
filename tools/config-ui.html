@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Конфиг зеркала meatsuit</title>
+<style>
+:root { --bg: #fafaf8; --fg: #1d1d1b; --dim: #6b6b66; --line: #d9d9d4; --card: #ffffff; --accent: #2457c5; --bad: #b3261e; --ok: #1e7a3a; --warn: #8a5a00; }
+@media (prefers-color-scheme: dark) { :root { --bg: #151514; --fg: #ebebe6; --dim: #9d9d97; --line: #34342f; --card: #1d1d1b; --accent: #7aa2ff; --bad: #ff8a80; --ok: #6fcf8f; --warn: #e0b45a; } }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 760px; margin: 0 auto; padding: 24px 16px 64px; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+.sub { color: var(--dim); margin: 0 0 20px; word-break: break-all; }
+fieldset { border: 1px solid var(--line); border-radius: 10px; background: var(--card); margin: 0 0 16px; padding: 12px 16px 4px; }
+legend { font-weight: 600; padding: 0 6px; }
+.field { margin: 0 0 14px; }
+.field label { display: block; font-weight: 600; margin-bottom: 4px; }
+.field .key { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--dim); font-weight: 400; margin-left: 6px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+input, select { flex: 1 1 260px; min-width: 0; font: 14px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.hint { color: var(--dim); font-size: 13px; margin-top: 4px; }
+.err { color: var(--bad); font-size: 13px; margin-top: 4px; }
+.note { color: var(--warn); font-size: 13px; margin-top: 4px; }
+button { font: inherit; padding: 7px 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--fg); cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button:disabled { opacity: .55; cursor: default; }
+.bar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+#status { margin: 16px 0; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); white-space: pre-wrap; }
+#status:empty { display: none; }
+#status.bad { border-color: var(--bad); color: var(--bad); }
+#status.ok { border-color: var(--ok); }
+code { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 1px 4px; word-break: break-all; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Конфиг зеркала meatsuit</h1>
+  <p class="sub" id="file">Загрузка…</p>
+  <div id="status" role="status" aria-live="polite"></div>
+  <form id="form" hidden novalidate>
+    <div id="groups"></div>
+    <p class="hint" id="other"></p>
+    <div class="bar">
+      <button type="submit" class="primary" id="save">Сохранить</button>
+      <button type="button" id="reload">Перечитать файл</button>
+      <button type="button" id="quit">Закончить</button>
+    </div>
+  </form>
+</main>
+<script>
+'use strict';
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, props = {}, ...kids) => { const e = document.createElement(tag); Object.assign(e, props); for (const k of kids) if (k != null) e.append(k); return e; };
+
+  // Токен приходит в части ссылки после # и больше в адресной строке не виден. Cookies нет; на случай
+  // обновления вкладки токен лежит в sessionStorage этой вкладки (его не шлёт браузер сам).
+  let token = '';
+  try {
+    const m = /[#&]t=([0-9a-f]+)/.exec(location.hash);
+    if (m) { token = m[1]; sessionStorage.setItem('meatsuit-config-token', token); history.replaceState(null, '', location.pathname); }
+    else token = sessionStorage.getItem('meatsuit-config-token') || '';
+  } catch (e) {
+    const m = /[#&]t=([0-9a-f]+)/.exec(location.hash);
+    token = m ? m[1] : '';
+  }
+
+  let state = null; // ответ GET /api/config
+  const inputs = new Map();
+
+  function status(text, kind) {
+    const s = $('status');
+    s.className = kind || '';
+    s.replaceChildren();
+    if (Array.isArray(text)) s.append(...text); else s.textContent = text;
+  }
+
+  async function api(method, path, body) {
+    let res;
+    try {
+      res = await fetch(path, {
+        method, cache: 'no-store', credentials: 'omit',
+        headers: Object.assign({ Authorization: 'Bearer ' + token }, body ? { 'Content-Type': 'application/json' } : {}),
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch (e) {
+      throw { status: 0, message: 'Процесс страницы не отвечает: он завершился (простой или Ctrl+C). Запустите npm run config заново.' };
+    }
+    let data = {};
+    try { data = await res.json(); } catch (e) { /* пустой ответ */ }
+    if (!res.ok) throw Object.assign({ status: res.status }, data);
+    return data;
+  }
+
+  function fieldInput(f, value) {
+    let input;
+    if (f.type === 'enum') {
+      input = el('select', { id: 'f-' + f.key });
+      for (const o of f.options) input.append(el('option', { value: o, textContent: o }));
+      input.value = value || f.default || f.options[0];
+    } else if (f.type === 'secret') {
+      input = el('input', { id: 'f-' + f.key, type: 'password', autocomplete: 'new-password', spellcheck: false,
+        placeholder: value && value.set ? 'задан — оставьте пустым, чтобы не менять' : 'не задан — введите или создайте' });
+    } else {
+      input = el('input', { id: 'f-' + f.key, type: 'text', spellcheck: false, autocomplete: 'off', value: value || '', placeholder: f.default ? 'по умолчанию ' + f.default : '' });
+    }
+    return input;
+  }
+
+  function render() {
+    $('file').replaceChildren('Файл ', el('code', { textContent: state.file }), ' · права ' + state.mode + (state.mode !== '600' ? ' (после сохранения станут 600)' : ''));
+    const groups = new Map();
+    inputs.clear();
+    for (const f of state.fields) {
+      if (!groups.has(f.group)) groups.set(f.group, el('fieldset', {}, el('legend', { textContent: f.group })));
+      const value = state.values[f.key];
+      const input = fieldInput(f, value);
+      const missing = state.missing.includes(f.key);
+      if (missing && f.type !== 'secret' && f.type !== 'enum') input.value = f.default || '';
+      inputs.set(f.key, input);
+      const row = el('div', { className: 'row' }, input);
+      if (f.type === 'secret') {
+        const show = el('button', { type: 'button', textContent: 'Показать' });
+        show.addEventListener('click', () => { input.type = input.type === 'password' ? 'text' : 'password'; show.textContent = input.type === 'password' ? 'Показать' : 'Скрыть'; });
+        const gen = el('button', { type: 'button', textContent: 'Новый случайный' });
+        gen.addEventListener('click', () => {
+          const b = new Uint8Array(16); crypto.getRandomValues(b);
+          input.value = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+          input.type = 'text'; show.textContent = 'Скрыть';
+        });
+        row.append(show, gen);
+      }
+      const label = el('label', { htmlFor: input.id }, f.label, el('span', { className: 'key', textContent: f.key }));
+      const box = el('div', { className: 'field' }, label, row, el('div', { className: 'hint', textContent: f.hint }));
+      if (missing) box.append(el('div', { className: 'note', textContent: f.type === 'secret' ? 'Нет в файле: задайте.' : 'Нет в файле: допишется со значением выше.' }));
+      box.append(el('div', { className: 'err', id: 'e-' + f.key }));
+      groups.get(f.group).append(box);
+    }
+    $('groups').replaceChildren(...groups.values());
+    $('other').textContent = state.other.length
+      ? 'Другие переменные в файле (страница их не показывает и не меняет): ' + state.other.join(', ') + '.'
+      : '';
+    showErrors(state.problems, 'В файле сейчас есть ошибки: исправьте поля, отмеченные красным.');
+    $('form').hidden = false;
+  }
+
+  function showErrors(errors, title) {
+    for (const f of state.fields) $('e-' + f.key).textContent = '';
+    if (!errors || !errors.length) return;
+    for (const e of errors) { const slot = $('e-' + e.key); if (slot) slot.textContent = e.message; }
+    status(title + '\n' + errors.map((e) => e.key + ': ' + e.message).join('\n'), 'bad');
+  }
+
+  async function load(note) {
+    if (!token) { status('В ссылке нет токена. Запустите npm run config и откройте ссылку, которую он напечатает.', 'bad'); return; }
+    try {
+      state = await api('GET', '/api/config');
+      status(note || '');
+      render();
+    } catch (e) {
+      status(e.status === 401 ? 'Ссылка не подходит: запустите npm run config заново и откройте новую ссылку.' : (e.message || 'Ошибка'), 'bad');
+    }
+  }
+
+  $('form').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const values = {};
+    for (const f of state.fields) {
+      const v = inputs.get(f.key).value.trim();
+      if (f.type === 'secret') { if (v) values[f.key] = v; } // пусто — пароль не меняется
+      else values[f.key] = v;
+    }
+    $('save').disabled = true;
+    try {
+      const r = await api('PUT', '/api/config', { version: state.version, values });
+      await load('');
+      status(['Сохранено. Применить: ', el('code', { textContent: r.apply }), '\n(docker compose читает файл только при up)'], 'ok');
+    } catch (e) {
+      if (e.status === 400 && e.errors) showErrors(e.errors, 'Не сохранено, исправьте:');
+      else if (e.status === 409) status((e.message || 'Файл изменился') + '\nНажмите «Перечитать файл»: ваши правки на странице пропадут.', 'bad');
+      else if (e.status === 401) status('Ссылка не подходит: запустите npm run config заново и откройте новую ссылку.', 'bad');
+      else status(e.message || 'Ошибка', 'bad');
+    } finally { $('save').disabled = false; }
+  });
+
+  $('reload').addEventListener('click', () => load('Перечитано.'));
+  $('quit').addEventListener('click', async () => {
+    try { await api('POST', '/api/quit'); } catch (e) { /* уже завершён */ }
+    try { sessionStorage.removeItem('meatsuit-config-token'); } catch (e) { /* нет хранилища */ }
+    $('form').hidden = true;
+    status('Готово: процесс страницы завершён, вкладку можно закрыть.', 'ok');
+  });
+
+  load();
+})();
+</script>
+</body>
+</html>
