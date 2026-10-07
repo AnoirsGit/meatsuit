@@ -11,9 +11,10 @@ const { openWorld, run } = require('./dom.js');
 
 const TEXT_LIMIT = 6000;
 const NAME_LIMIT = 80;
+const OPTIONS_LIMIT = 100; // вариантов <select> в снимке; больше — первые 100 и optionsTotal
 
 /** Выполняется внутри страницы, поэтому самодостаточна. */
-function collect({ textLimit, nameLimit, gen }) {
+function collect({ textLimit, nameLimit, optionsLimit, gen }) {
   // Хранилище живёт в изолированном мире: страница его не видит.
   const norm = (el) => (el.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 60);
   const store = (globalThis.__ms = {
@@ -62,18 +63,40 @@ function collect({ textLimit, nameLimit, gen }) {
     return out;
   };
 
-  // Элемент перекрыт, если в его центре лежит чужой элемент (модалка, оверлей).
-  const covered = (el, r) => {
+  // Верхний элемент в центре прямоугольника. elementFromPoint отдаёт хост: спускаемся внутрь открытых корней.
+  const topAt = (r) => {
     const x = Math.min(Math.max(r.left + r.width / 2, 0), innerWidth - 1);
     const y = Math.min(Math.max(r.top + r.height / 2, 0), innerHeight - 1);
     let top = document.elementFromPoint(x, y);
-    // elementFromPoint отдаёт хост: спускаемся внутрь открытых корней.
     for (let s = top && top.shadowRoot; s; s = top.shadowRoot) {
       const inner = s.elementFromPoint(x, y);
       if (!inner || inner === top) break;
       top = inner;
     }
+    return top;
+  };
+  // Элемент перекрыт, если в его центре лежит чужой элемент (модалка, оверлей).
+  const covered = (el, r) => {
+    const top = topAt(r);
     return !top || !(el === top || inside(el, top) || inside(top, el));
+  };
+
+  // Поле файла почти всегда спрятано (display:none, hidden, opacity:0), а человек видит его метку или кнопку
+  // рядом. Такое поле в снимке есть: видимость и перекрытие — по метке (label for или обёртка) или кнопке
+  // в том же родителе, номер ведёт на само поле (upload ставит файл в него). Прозрачное поле поверх метки
+  // перекрытием не считается.
+  const isFile = (el) => el.tagName === 'INPUT' && (el.getAttribute('type') || '').toLowerCase() === 'file';
+  const fileProxy = (el) => {
+    const cands = [...(el.labels || [])];
+    const parent = el.parentElement;
+    if (parent && parent !== document.body) cands.push(...parent.querySelectorAll('button,[role=button]'));
+    for (const p of cands) {
+      const r = visible(p);
+      if (!r) continue;
+      if (inViewport(r) && covered(p, r) && topAt(r) !== el) continue;
+      return { el: p, rect: r };
+    }
+    return null;
   };
 
   const roleOf = (el) => {
@@ -86,7 +109,7 @@ function collect({ textLimit, nameLimit, gen }) {
     if (tag === 'textarea') return 'textbox';
     if (tag === 'input') {
       const t = (el.getAttribute('type') || 'text').toLowerCase();
-      return { checkbox: 'checkbox', radio: 'radio', button: 'button', submit: 'button' }[t] || 'textbox';
+      return { checkbox: 'checkbox', radio: 'radio', button: 'button', submit: 'button', file: 'button' }[t] || 'textbox';
     }
     return 'textbox';
   };
@@ -142,19 +165,35 @@ function collect({ textLimit, nameLimit, gen }) {
   const elements = [];
   let n = 0;
   for (const el of deepAll(document, (e) => e.matches(SELECTOR))) {
-    const r = visible(el);
+    let r = visible(el);
+    let proxy = null;
+    if (isFile(el) && (!r || (inViewport(r) && covered(el, r)))) { // спрятано или накрыто своей же меткой
+      proxy = fileProxy(el);
+      if (!proxy) continue;
+      r = proxy.rect;
+    }
     if (!r) continue;
     const seen = inViewport(r);
-    if (seen && covered(el, r)) continue;
+    if (!proxy && seen && covered(el, r)) continue;
     n += 1;
     store.els[n] = el;
     store.text[n] = norm(el);
     const role = roleOf(el);
-    const item = { id: n, role, name: nameOf(el), inView: seen };
+    const item = { id: n, role, name: nameOf(el) || (proxy ? nameOf(proxy.el) : ''), inView: seen };
     const inputType = el.tagName === 'INPUT' ? (el.getAttribute('type') || 'text').toLowerCase() : undefined;
     if (el.tagName === 'A' && el.getAttribute('href')) item.href = clip(el.getAttribute('href'), 200); // нужен проектам, чтобы узнавать страницы и записи по адресу
     if (inputType === 'password') item.inputType = 'password'; // значение пароля модели не отдаём никогда
-    else if (role === 'textbox' || role === 'select') item.value = clip(el.value ?? el.textContent, nameLimit);
+    else if (inputType === 'file') {
+      // Что прикреплено: имена файлов (Chrome в value отдаёт C:\fakepath\…), по ним видно, что резюме встало.
+      item.inputType = 'file';
+      item.value = clip([...(el.files || [])].map((f) => f.name).join(', '), nameLimit);
+    } else if (el.tagName === 'SELECT') {
+      // Человек видит подписи, а не value: подпись выбранного и подписи вариантов (по ним команда select).
+      const opts = [...el.options];
+      item.value = clip(opts.filter((o) => o.selected).map((o) => o.label).join(', '), nameLimit);
+      item.options = opts.slice(0, optionsLimit).map((o) => clip(o.label, nameLimit));
+      if (opts.length > optionsLimit) item.optionsTotal = opts.length;
+    } else if (role === 'textbox' || role === 'select') item.value = clip(el.value ?? el.textContent, nameLimit);
     if (role === 'checkbox' || role === 'radio' || role === 'switch') {
       item.checked = el.checked ?? el.getAttribute('aria-checked') === 'true';
     }
@@ -209,7 +248,7 @@ async function frameHidden(frame) {
 async function observe(page, opts = {}) {
   const gen = opts.gen || ++standaloneGen;
   const world = await openWorld(page);
-  const snap = await run(world, collect, { textLimit: TEXT_LIMIT, nameLimit: NAME_LIMIT, gen });
+  const snap = await run(world, collect, { textLimit: TEXT_LIMIT, nameLimit: NAME_LIMIT, optionsLimit: OPTIONS_LIMIT, gen });
   // Чужие iframe (капча, Arkose) в DOM страницы не видны, поэтому отдаём их адреса.
   // page.frames() отдаёт все кадры, в том числе скрытые. Какие из них человек сейчас не видит,
   // отдаём отдельно: по этому guard отличает спрятанное задание reCAPTCHA от показанного.

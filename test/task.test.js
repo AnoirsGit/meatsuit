@@ -113,6 +113,17 @@ const CAPTCHA = '<p>Verify you are human</p>';
   // Журнал есть.
   assert.ok(fs.readFileSync(path.join(tmp, 'state', 'journal.jsonl'), 'utf8').includes('"cmd":"click"'));
 
+  // Повадки человека живут в каталоге состояния: connect создал persona.json, а сохранённые не трогает.
+  const persona = JSON.parse(fs.readFileSync(path.join(tmp, 'state', 'persona.json'), 'utf8'));
+  assert.ok(persona.wpm > 0 && persona.speed > 0 && persona.typoRate >= 0, JSON.stringify(persona));
+  const savedDir = path.join(tmp, 'state-persona');
+  const saved = { speed: 1.2, tremor: 0.5, twitch: 0.2, wpm: 41, typoRate: 0.015 };
+  fs.mkdirSync(savedDir);
+  fs.writeFileSync(path.join(savedDir, 'persona.json'), JSON.stringify(saved));
+  const msP = await connect({ cdpUrl: `http://127.0.0.1:${PORT}`, dir: savedDir, sitesFile });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(savedDir, 'persona.json'), 'utf8')), saved, 'connect переписал сохранённые повадки');
+  await msP.close();
+
   // Все события, когда попросили: start и done с числом команд.
   const all = [];
   const ms2 = await connect({ cdpUrl: `http://127.0.0.1:${PORT}`, dir: path.join(tmp, 'state'), sitesFile, notifyOn: ['start', 'done'], notify: async (text, event) => all.push({ text, event }) });

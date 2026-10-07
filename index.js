@@ -23,6 +23,7 @@ const { openWindow } = require('./window.js');
 const { supervise, BudgetExceeded } = require('./supervise.js');
 const { signature, normalizeName, urlPattern } = require('./capture.js');
 const { ruleFor, reserve, charge, peek: peekLimit, status: limitStatus, lock, LimitReached } = require('./limits.js');
+const { loadPersona } = require('./human/persona-file.js');
 
 /**
  * Лимиты площадок принадлежат вызывающему проекту: путь к его sites.json (читается на каждую задачу,
@@ -53,6 +54,8 @@ function peek(site, { sitesFile, sites, dir = DEFAULT_DIR, now = new Date(), rea
   return { site, rule: rule || null, ...limitStatus(site, rule, path.join(dir, 'limits.json'), now, { readOnly }) };
 }
 
+const isHost = (h) => typeof h === 'string' && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i.test(h);
+
 async function connect({
   cdpUrl,
   dir = DEFAULT_DIR,
@@ -67,6 +70,7 @@ async function connect({
   const loadSites = sitesSource({ sitesFile, sites }); // до подключения: без лимитов браузер не трогаем
   const browser = await chromium.connectOverCDP(cdpUrl);
   fs.mkdirSync(dir, { recursive: true });
+  loadPersona(dir); // повадки человека (темп руки и печати, опечатки) — в <dir>/persona.json: тот же человек после перезапуска
 
   // Пока есть подключение, Playwright сам отклоняет все диалоги во ВСЕХ вкладках, если на
   // контексте нет слушателя. Слушатель есть, и он трогает только окна бота: мои оставляет мне.
@@ -101,8 +105,13 @@ async function connect({
     } finally { await session.detach().catch(() => {}); }
   }
 
-  async function task(name, fn, { site, maxCommands = 60, maxMinutes = 10, dryRun = false, dryRunNavigation = false, readOnly = false, capture } = {}) {
+  async function task(name, fn, { site, extraHosts = [], uploadDirs = [], maxCommands = 60, maxMinutes = 10, dryRun = false, dryRunNavigation = false, readOnly = false, capture } = {}) {
     if (!site) throw new Error('task: нужен site');
+    // Хосты, где страница может оказаться без стопа (страница «спасибо» на сайте компании после формы ATS).
+    // goto туда нельзя, лимиты и счётчики — по site.
+    if (!Array.isArray(extraHosts) || !extraHosts.every(isHost)) throw new Error('task: extraHosts — массив хостов вида company.com (без схемы, пути и «*»)');
+    // Каталоги вызывающего, откуда upload может брать файлы (резюме); без них upload выключен.
+    if (!Array.isArray(uploadDirs) || !uploadDirs.every((d) => typeof d === 'string' && path.isAbsolute(d))) throw new Error('task: uploadDirs — массив абсолютных путей к каталогам');
     const rule = ruleFor(loadSites(), site); // своя запись или "*"
     // Потолок бюджета задаёт площадка, а не вызывающий проект.
     if (rule && rule.maxCommands) maxCommands = Math.min(maxCommands, rule.maxCommands);
@@ -128,8 +137,8 @@ async function connect({
       botPages.add(page);
       onPopup = (p) => { botPages.add(p); p.close().catch(() => {}); }; // новые вкладки бот не ведёт
       page.on('popup', onPopup);
-      const h = hands(page, { dryRun, dryRunNavigation, logFile: path.join(dir, 'journal.jsonl'), allowedHosts: [site], capture });
-      run = supervise(h, { name, site, notify: (t) => emit('needsHuman', t), maxCommands, maxMinutes,
+      const h = hands(page, { dryRun, dryRunNavigation, logFile: path.join(dir, 'journal.jsonl'), allowedHosts: [site], uploadDirs, capture });
+      run = supervise(h, { name, site, extraHosts, notify: (t) => emit('needsHuman', t), maxCommands, maxMinutes,
         onWrite: readOnly && !dryRun ? () => charge(site, rule, limitsFile, slot) : null }); // read-only задача записала: полный слот задним числом
       await emit('start', `meatsuit: «${name}» на ${site} запущена${dryRun ? ' (dryRun)' : ''}`);
       const result = await fn(run.api);

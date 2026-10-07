@@ -27,7 +27,7 @@ const rejects = (c, hosts) => assert.throws(() => validate(c, hosts), BadCommand
   rejects({ cmd: 'click', id: '7', gen: 1 });
   rejects({ cmd: 'click', id: 7 }); // без gen
   rejects({ cmd: 'fill', id: 1, gen: 1, text: '' });
-  rejects({ cmd: 'fill', id: 1, gen: 1, text: 'x'.repeat(1001) });
+  rejects({ cmd: 'fill', id: 1, gen: 1, text: 'x'.repeat(2001) }); // 1001–2000 и переводы строк — только в textarea (test/forms.test.js)
   rejects({ cmd: 'press', key: 'F12' });
   rejects({ cmd: 'wait', ms: 999999 });
   rejects({ cmd: 'goto', url: 'https://evil.example/' }, ['tinder.com']);
@@ -215,7 +215,7 @@ const rejects = (c, hosts) => assert.throws(() => validate(c, hosts), BadCommand
   const p1 = await hl.act({ cmd: 'press', key: 'Enter', id: idOf(f1, 'A'), gen: f1.gen });
   await hl.act({ cmd: 'type', text: '!', id: idOf(p1, 'A'), gen: p1.gen });
   await hl.act({ cmd: 'press', key: 'Escape' });
-  assert.equal(await page.title(), 'a:Enter;a:!;a:Escape;');
+  assert.equal(await page.title(), 'a:Enter;a:Shift;a:!;a:Escape;'); // «!» — Shift+1, как на настоящей клавиатуре
   assert.equal(await page.inputValue('#a'), 'привет!');
   // Поле в open shadow: фокус ищется внутри корня (document.activeElement — это хост).
   await page.setContent('<body><div id="h"></div></body>');

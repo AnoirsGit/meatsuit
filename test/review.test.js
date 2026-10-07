@@ -25,7 +25,9 @@ const PAGES = {
 
 (async () => {
   // Чистые проверки.
-  assert.throws(() => validate({ cmd: 'fill', id: 1, gen: 1, text: 'hi\nthere' }), BadCommand);
+  // fill с переводом строки проходит validate, но выполняется только в textarea (иначе BadCommand до действия, test/forms.test.js).
+  validate({ cmd: 'fill', id: 1, gen: 1, text: 'hi\nthere' });
+  assert.throws(() => validate({ cmd: 'type', text: 'hi\nthere' }), BadCommand);
   assert.throws(() => validate({ cmd: 'type', text: 'a\rb' }), BadCommand);
   assert.throws(() => validate({ cmd: 'scroll', px: -300 }), BadCommand);
   const snap = (o) => ({ url: 'https://tinder.com/app/recs', title: '', text: '', elements: [], dialogs: [], frames: [], ...o });
@@ -109,6 +111,26 @@ const PAGES = {
   const left = count();
   assert.ok(left >= 2, 'окно после стопа остаётся человеку');
   await ctx.pages().find((p) => p.url().includes('other.test'))?.close();
+
+  // extraHosts: страница «спасибо» на другом хосте — не стоп, задача завершается, окно закрывается.
+  // goto туда по-прежнему нельзя: extraHosts только разрешает там оказаться.
+  const beforeThanks = count();
+  const landed = await ms.task('thanks', async ({ see, act }) => {
+    await act({ cmd: 'goto', url: 'https://example.test/out' });
+    const s = await see();
+    const r = await act({ cmd: 'click', id: s.elements[0].id, gen: s.gen });
+    await assert.rejects(act({ cmd: 'goto', url: 'https://other.test/x' }), BadCommand);
+    return (await see()).url;
+  }, { site: 'example.test', extraHosts: ['other.test'] });
+  assert.match(landed, /^https:\/\/other\.test\/x/);
+  assert.equal(notes.length, 1, 'на странице «спасибо» не должно быть уведомления о стопе');
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(count(), beforeThanks, 'окно задачи со страницей «спасибо» должно закрыться');
+  // extraHosts — массив хостов; ничего другого (строка, «*», адрес) task не принимает и браузер не трогает.
+  for (const extraHosts of ['other.test', ['*'], ['https://other.test/'], [''], [7]]) {
+    await assert.rejects(ms.task('bad-extra', async () => 1, { site: 'example.test', extraHosts }), /extraHosts/, JSON.stringify(extraHosts));
+  }
+  assert.equal(count(), beforeThanks);
 
   // Проект проглотил NeedsHuman и пошёл дальше: страницы больше не касаемся, окно не закрываем.
   const before = count();
