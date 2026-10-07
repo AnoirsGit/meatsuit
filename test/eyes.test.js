@@ -131,6 +131,23 @@ const HTML = `
     for (const id of ['a', 'b']) document.getElementById(id).attachShadow({ mode: 'open' }).innerHTML = '<button style="padding:10px"><slot></slot></button>';
   });
   assert.deepEqual((await see(shadowPage)).elements.map((e) => `${e.role}|${e.name}`), ['button|Label', 'button|Bare'], 'кнопка со слотом: в снимке и с подписью из слота');
+  // В имя кнопки со слотом не попадают CSS и скрытый текст, ни из light DOM, ни из шаблона корня;
+  // подпись за обёрткой вокруг слота (у обёртки своих прямоугольников нет) не теряется.
+  await shadowPage.setContent('<body><my-btn id="c"><style>.x{color:red}</style><span style="display:none">Скрытое</span><span style="visibility:hidden">Невидимое</span>Send</my-btn><my-btn id="d">Wrapped</my-btn><my-btn id="e"><span style="display:none">Скрытое</span></my-btn></body>');
+  await shadowPage.evaluate(() => {
+    document.getElementById('c').attachShadow({ mode: 'open' }).innerHTML = '<button style="padding:10px"><style>b{font-weight:bold}</style><slot></slot></button>';
+    document.getElementById('d').attachShadow({ mode: 'open' }).innerHTML = '<button style="padding:10px"><span><slot></slot></span></button>';
+    document.getElementById('e').attachShadow({ mode: 'open' }).innerHTML = '<button style="padding:10px" title="Пусто"><span style="display:none"><slot></slot></span></button>';
+  });
+  assert.deepEqual((await see(shadowPage)).elements.map((e) => `${e.role}|${e.name}`), ['button|Send', 'button|Wrapped', 'button|Пусто'], 'скрытое в имени кнопки со слотом');
+  // Текст прямо в shadow-корне (текстовый узел верхнего уровня, так рендерит Lit) есть в text.
+  await shadowPage.setContent('<body><p>Light</p><div id="h"></div></body>');
+  await shadowPage.evaluate(() => { document.getElementById('h').attachShadow({ mode: 'open' }).append('Голый текст корня', document.createElement('b')); });
+  const bare = await see(shadowPage);
+  assert.ok(bare.text.includes('Голый текст корня'), 'текстовый узел верхнего уровня в корне потерян');
+  assert.deepEqual(bare.textParts, ['Light'.length, 'Голый текст корня'.length], 'textParts: длины light DOM и корня');
+  assert.equal(bare.text, 'Light Голый текст корня');
+  assert.ok(!('textParts' in s2), 'без shadow-текста textParts нет');
 
   await browser.close();
   console.log('eyes.test: ok');

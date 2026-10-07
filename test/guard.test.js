@@ -23,6 +23,12 @@ assert.equal(check(snap({ url: 'https://hh.kz/account/login' })), 'страни�
 assert.equal(check(snap({ elements: [{ id: 1, role: 'textbox', name: 'Пароль' }] })), 'страница входа');
 // Слово в длинном био — не повод для остановки.
 assert.equal(check(snap({ text: 'captcha '.repeat(200) })), null);
+// Порог короткой страницы — к каждому куску text отдельно (textParts: длины light DOM и shadow-корней).
+const block = 'Too many requests. Try again later.';
+const banner = 'We use cookies to improve your experience. '.repeat(20).trim();
+assert.match(check(snap({ text: `${block} ${banner}`, textParts: [block.length, banner.length] })), /подозрительная/, 'длинный кусок спрятал короткую заглушку');
+const bio = 'captcha '.repeat(200).trim();
+assert.equal(check(snap({ text: `${bio} Привет`, textParts: [bio.length, 'Привет'.length] })), null, 'длинный кусок проверен рядом с коротким');
 
 (async () => {
   // Простая проверка совместимости импорта; подробно адаптер проверяет test/telegram.test.js.
@@ -142,6 +148,19 @@ assert.equal(check(snap({ text: 'captcha '.repeat(200) })), null);
     assert.match(await shadowCase(css, '<p>Too many requests. Try again later.</p>'), /подозрительная/);
     assert.equal(await shadowCase('<div style="display:none">Verify you are human (captcha)</div><p>Привет, Аня</p>'), null);
     assert.equal(await shadowCase('<slot>Подтвердите, что вы не робот</slot>'), 'капча', 'отрисованный display:contents (<slot>) не теряется');
+    // баннер cookie в shadow длиннее порога не прячет заглушку из light DOM: порог к каждому корню отдельно
+    assert.match(await shadowCase(`<div>${banner}</div>`, `<p>${block}</p>`), /подозрительная/, 'баннер в shadow спрятал заглушку');
+    assert.equal(await shadowCase(`<div>${banner}</div>`, '<p>Привет, Аня</p>'), null);
+    // текст прямо в корне, без элемента-обёртки (так рендерит Lit); у скрытого хоста он не отрисован
+    assert.equal(await shadowCase('Please verify you are human'), 'капча', 'текстовый узел верхнего уровня в корне потерян');
+    assert.equal(await shadowCase('<style>:host{display:none}</style>Please verify you are human'), null, 'текст скрытого хоста');
+    { // кнопка со слотом: скрытый текст из light DOM не попадает в имя и не даёт ложный стоп
+      const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
+      await page.setContent('<body><p>Привет, Аня</p><my-btn id="b"><span style="display:none">Подтвердите, что вы не робот</span>Отправить</my-btn></body>');
+      await page.evaluate(() => { document.getElementById('b').attachShadow({ mode: 'open' }).innerHTML = '<button><slot></slot></button>'; });
+      assert.equal(check(await see(page)), null, 'скрытый текст в имени кнопки со слотом');
+      await page.close();
+    }
   } finally { await browser.close(); }
 
   // гонка ждущих за брошенный замок: медленный процесс проверил возраст, быстрый забрал и взял замок,

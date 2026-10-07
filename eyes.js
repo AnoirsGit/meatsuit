@@ -91,12 +91,26 @@ function collect({ textLimit, nameLimit, gen }) {
     return 'textbox';
   };
 
+  // Отрисован ли узел. У неотрисованного (<style>, display:none, скрытый хост) innerText равен textContent, то есть
+  // с CSS и скрытым текстом. Range, а не checkVisibility: тот отбрасывает display:contents и <slot>.
+  const drawn = (n) => {
+    const r = document.createRange();
+    if (n.nodeType === Node.TEXT_NODE) r.selectNode(n); else r.selectNodeContents(n);
+    return r.getClientRects().length > 0;
+  };
+  // У обёртки, где лежит только <slot>, своих прямоугольников нет: её смотрим по display. Предков уже
+  // проверила рекурсия (slotText идёт вниз от видимого элемента), поэтому хватает своего стиля.
+  const shown = (e) => drawn(e) || (!!e.querySelector('slot') && getComputedStyle(e).display !== 'none');
+
   // innerText не заходит в <slot>: если внутри есть слот, собираем текст с назначенными ему узлами.
-  const textOf = (n) => n.nodeType === Node.TEXT_NODE ? n.data
+  // Неотрисованный элемент даёт '', у отрисованного берём innerText: скрытого текста в нём нет.
+  const slotText = (n) => n.nodeType === Node.TEXT_NODE ? n.data
     : n.nodeType !== Node.ELEMENT_NODE ? ''
-    : n.tagName === 'SLOT' ? n.assignedNodes({ flatten: true }).map(textOf).join(' ')
-    : n.querySelector('slot') ? [...n.childNodes].map(textOf).join(' ')
-    : n.innerText || n.textContent;
+    : n.tagName === 'SLOT' ? (getComputedStyle(n).display === 'none' ? '' : n.assignedNodes({ flatten: true }).map(slotText).join(' '))
+    : !shown(n) ? ''
+    : n.querySelector('slot') ? [...n.childNodes].map(slotText).join(' ')
+    : n.innerText;
+  const textOf = (el) => el.querySelector('slot') ? [...el.childNodes].map(slotText).join(' ') : el.innerText || el.textContent;
 
   const nameOf = (el) => {
     const labelledby = el.getAttribute('aria-labelledby');
@@ -113,12 +127,17 @@ function collect({ textLimit, nameLimit, gen }) {
       || el.querySelector('img[alt]')?.getAttribute('alt') || el.getAttribute('value'), nameLimit);
   };
 
-  // innerText не заходит в shadow-корни: их текст добавляем в конец (порядок документа теряется).
-  // У неотрисованного узла (<style>, display:none, скрытый хост) innerText равен textContent, поэтому берём
-  // только детей корня, чьё содержимое отрисовано. Range, а не checkVisibility: тот отбрасывает display:contents и <slot>.
-  const drawn = (e) => { const r = document.createRange(); r.selectNodeContents(e); return r.getClientRects().length > 0; };
-  const pageText = () => [document.body ? document.body.innerText : '']
-    .concat(deepAll(document, (e) => e.shadowRoot).flatMap((h) => [...h.shadowRoot.children].filter(drawn).map((c) => c.innerText))).join(' ');
+  // innerText не заходит в shadow-корни: текст каждого корня идёт отдельным куском после light DOM (порядок
+  // документа теряется). Из корня берём все отрисованные узлы верхнего уровня, в том числе текстовые (так рендерит Lit).
+  const squash = (s) => (s || '').replace(/\s+/g, ' ').trim();
+  const rootText = (root) => [...root.childNodes].map((c) => (
+    c.nodeType === Node.ELEMENT_NODE ? (drawn(c) ? c.innerText : '')
+      : c.nodeType === Node.TEXT_NODE && drawn(c) && getComputedStyle(root.host).visibility === 'visible' ? c.data
+        : '')).join(' ');
+  // Куски непустые и уже сжаты: text = их склейка через пробел, а длины кусков guard берёт из textParts.
+  const textParts = () => [document.body ? document.body.innerText : '']
+    .concat(deepAll(document, (e) => e.shadowRoot).map((h) => rootText(h.shadowRoot)))
+    .map(squash).filter(Boolean);
 
   const elements = [];
   let n = 0;
@@ -153,11 +172,14 @@ function collect({ textLimit, nameLimit, gen }) {
     dialogs.push({ name: nameOf(d) || clip(d.innerText, nameLimit), text: clip(d.innerText, 600), elements: ids });
   }
 
+  const parts = textParts();
   return {
     gen,
     url: location.href,
     title: document.title,
-    text: clip(pageText(), textLimit),
+    text: clip(parts.join(' '), textLimit),
+    // Длины кусков text (light DOM, затем каждый shadow-корень): порог короткой страницы в guard к каждому отдельно.
+    ...(parts.length > 1 ? { textParts: parts.map((p) => p.length) } : {}),
     elements,
     dialogs,
   };
@@ -215,7 +237,10 @@ function diff(prev, next) {
     added: next.elements.filter((e) => !had.has(keyOf(e))),
     removed: prev.elements.filter((e) => !has.has(keyOf(e))).map(({ role, name }) => ({ role, name })),
   };
-  if (prev.text !== next.text) out.text = next.text;
+  if (prev.text !== next.text) {
+    out.text = next.text;
+    if (next.textParts) out.textParts = next.textParts;
+  }
   if (JSON.stringify(prev.dialogs) !== JSON.stringify(next.dialogs)) out.dialogs = next.dialogs;
   out.frames = next.frames;
   if (next.screenshot) out.screenshot = next.screenshot;
