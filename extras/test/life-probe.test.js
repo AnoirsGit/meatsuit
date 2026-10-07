@@ -210,10 +210,10 @@ test('поиск целиком на настоящем браузере: рус
   try {
     await page.setViewportSize({ width: 1100, height: 700 });
     const env = { sleep: (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 120))), now: Date.now, rnd: seeded(9) };
-    await runSession(page, [{ url: `${s.origin}/`, kind: 'search', query: 'Алматы', follow: 0, budgetMs: 20000 }], { env, probe, log: (e) => journal.push(e), wander: 0 });
+    await runSession(page, [{ url: `${s.origin}/`, kind: 'search', query: 'Шахматы', follow: 0, budgetMs: 20000 }], { env, probe, log: (e) => journal.push(e), wander: 0 });
     const hit = s.hits.find((h) => h.startsWith('/w?'));
     assert.ok(hit, `форма не отправлена: ${s.hits}`);
-    assert.equal(new URL(s.origin + hit).searchParams.get('search'), 'Алматы', 'в поле ушло не то');
+    assert.equal(new URL(s.origin + hit).searchParams.get('search'), 'Шахматы', 'в поле ушло не то');
     assert.deepEqual(journal.filter((e) => e.event === 'step').map((e) => [e.kind, e.result]), [['search', 'ok']]);
   } finally { await page.close().catch(() => {}); await s.close(); }
 });

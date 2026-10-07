@@ -11,7 +11,7 @@ Requires Node 20+ and `npm install` (Patchright). The browser must already be ru
 ```sh
 node server.js [--host 127.0.0.1] [--port 8787] [--data data] [--cdp http://127.0.0.1:9222] \
                [--sites profiles/sites.json] [--clients profiles/clients.json] [--egress profiles/egress.json] \
-               [--tz Asia/Almaty]
+               [--tz Europe/Berlin]
 ```
 
 Environment: `MEATSUIT_HOST`, `MEATSUIT_PORT`, `MEATSUIT_CDP`, `MEATSUIT_TZ`, and optionally `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` for alerts. The service refuses to start without three files: `profiles/clients.json` (who may call; git-ignored; see [authentication](#authentication)), `profiles/sites.json` (which sites exist and their pacing; see [limits](#limits)) and `profiles/egress.json` (the expected exit; see [egress](#egress-check)).
@@ -169,7 +169,7 @@ A refusal is `429` with `reason`: `closed`, `too_big`, `hour`, `day`, `hours`, `
 
 **The numbers are the author's untested starting values.** Platforms do not publish thresholds for account behavior. Tune them for yourself and treat them as a way to behave moderately, not as a guarantee.
 
-**Time zone.** Day boundaries and `hours` use one zone for the whole service: `--tz` or `MEATSUIT_TZ`, an IANA name such as `Europe/Berlin`. The default is `Asia/Almaty` (the author's zone), so **set yours**. An unknown name stops the service at start. Pick the zone of the place your exit is in, since that is where the account "lives". The flag is covered by unit tests of argument parsing; it has not been run against a live service in another zone.
+**Time zone.** Day boundaries and `hours` use one zone for the whole service: `--tz` or `MEATSUIT_TZ`, an IANA name such as `Europe/Berlin`. The default built into `server.js` is the author's zone, so **set yours**. An unknown name stops the service at start. Pick the zone of the place your exit is in, since that is where the account "lives". The flag is covered by unit tests of argument parsing; it has not been run against a live service in another zone.
 
 ## Egress check
 

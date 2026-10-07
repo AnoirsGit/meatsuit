@@ -5,8 +5,8 @@
 ## Быстрый старт (на этой машине)
 
 ```sh
+npm run init                # из корня репозитория: docker/.env со случайными паролями, права 0600
 cd docker
-cp .env.example .env        # заполнить NEKO_PASSWORD и NEKO_ADMIN_PASSWORD (длинные, разные)
 docker compose up -d        # только зеркало
 ./verify.sh                 # проверка: открыть статью из зеркала, прокрутить, убедиться по CDP
 ```
@@ -69,15 +69,16 @@ docker compose up -d        # только зеркало
 
 ## Автопрогрев
 
-Сам не стартует (профиль `warmup`): без выхода через Алматы он ушёл бы с адреса сервера.
+Сам не стартует (профиль `warmup`): без выхода через дом он ушёл бы с адреса сервера.
 
 ```sh
+cp ../profiles/life.example.json ../profiles/life.json   # один раз: свои сайты и часы, в git не попадает
 docker compose --profile warmup up -d --build     # запустить
 docker compose --profile warmup logs -f life      # журнал
 docker compose --profile warmup stop life         # остановить
 ```
 
-Перед первым запуском на сервере создайте `../profiles/egress.json` (`{"country":"KZ","asn":[64500]}`): без него `life` не стартует; с ним перед каждой сессией проверяется выход в сеть, и не из Алматы сессия пропускается. Настройка расписания — [../docs/ru/06-warmup.md](../docs/ru/06-warmup.md).
+Перед первым запуском на сервере создайте `../profiles/egress.json` (`{"country":"DE","asn":[64500]}`): без него `life` не стартует; с ним перед каждой сессией проверяется выход в сеть, и с чужого выхода сессия пропускается. Настройка расписания — [../docs/ru/06-warmup.md](../docs/ru/06-warmup.md).
 
 ## HTTP-сервис
 
@@ -85,7 +86,8 @@ docker compose --profile warmup stop life         # остановить
 
 ```sh
 cp ../profiles/clients.example.json ../profiles/clients.json    # свои длинные случайные токены; файл в git не попадает
-# ещё нужны в ../profiles: sites.json (лимиты) и egress.json (ожидаемый выход); без любого из трёх сервис не стартует
+cp ../profiles/sites.example.json ../profiles/sites.json        # свои лимиты площадок; файл в git не попадает
+# ещё нужен ../profiles/egress.json (ожидаемый выход); без любого из трёх сервис не стартует
 docker compose --profile api up -d --build
 curl -s http://127.0.0.1:8787/                                  # страница статуса, токен не нужен
 ```
@@ -95,7 +97,7 @@ curl -s http://127.0.0.1:8787/                                  # страниц
 ## Развернуть на сервере
 
 1. Docker и Docker Compose на сервере; Tailscale на хосте (вы уже в одном tailnet с ним).
-2. Склонировать репозиторий, `cd docker`, `cp .env.example .env`, пароли.
+2. Склонировать репозиторий, `npm run init` (пароли случайные; пароль участника: `grep NEKO_PASSWORD docker/.env`), `cd docker`. Файл можно держать вне репозитория: `MEATSUIT_CONFIG=<файл> npm run init` и `docker compose --env-file <файл> up -d`. Поправить: `npm run config` — временная страница с подсказками у каждого поля: процесс на хосте (не в контейнере и не в сети браузера), слушает 127.0.0.1 (`--tailnet` — адрес tailnet этой машины, чтобы открыть с телефона), печатает ссылку со случайным токеном один раз, выходит после 15 минут простоя или по кнопке «Закончить». Токен идёт заголовком, cookies нет, запрос с чужой страницы — 403. Пароли страница не получает: видно только «задан», можно ввести или создать новый. Запись атомарная с правами 0600; если файл успели поменять в другом месте — 409, а не перезапись.
 3. Адреса. В `.env`: `NEKO_BIND_IP` и `NEKO_WEBRTC_IP` — **tailnet-адрес сервера** (`tailscale ip -4`, вида 100.x.y.z). Наружу в публичный интернет порты не открываются. Открывать зеркало с телефона и ноутбука по `http://100.x.y.z:8080`.
 4. `docker compose up -d`, затем `./verify.sh persistence`.
 5. Выход через дом: поднять exit node на домашнем устройстве ([../docs/egress.md](../docs/egress.md)), в `.env` задать `TS_AUTHKEY` и `TS_EXTRA_ARGS=--exit-node=<имя узла> --exit-node-allow-lan-access=false`, запустить `docker compose -f docker-compose.yml -f docker-compose.egress.yml --profile egress up -d`. **Не ставьте exit node на сам хост по SSH через публичный адрес** (сессия повиснет): правила и откат — в docs/egress.md.

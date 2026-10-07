@@ -1,6 +1,28 @@
 node_modules/
 data/
-profiles/clients.json
-profiles/egress.json
-profiles/jobs.json
-docker/.env
+
+# Файл деплоя с паролями зеркала (npm run init) и всё похожее: в git только образцы.
+.env*
+!.env.example
+!*.example
+
+# Личные конфиги принадлежат вызывающему или владельцу: в git только *.example.json (решение 4).
+profiles/*.json
+!profiles/*.example.json
+sites.json
+life.json
+jobs.json
+
+# Личный список для tools/secret-scan.sh: город, имена машин, свой ASN.
+.secret-scan.local
+
+# Записки агентов, архивы, снимки и дампы страниц.
+.handoff*/
+archive-manual/
+capture/
+captures/
+*.tgz
+*.tar
+*.tar.gz
+*.zip
+*.7z

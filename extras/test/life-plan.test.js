@@ -1,5 +1,5 @@
 /**
- * Прогрев: расписание по Алматы, состав сессии, время чтения, выбор ссылок,
+ * Прогрев: расписание по UTC+5, состав сессии, время чтения, выбор ссылок,
  * решение планировщика «что делать сейчас». Всё чистые функции.
  *
  *   node --test
@@ -9,7 +9,7 @@ const assert = require('node:assert/strict');
 const { seeded } = require('../human/random.js');
 const { startOfLocalDay, localDay, planDay, planSession, readingTime, pickLink, nextAction, deadlineOf , weekDays, weekId, planWeek} = require('../life/plan.js');
 
-const TZ = 'Asia/Almaty';
+const TZ = 'Etc/GMT-5'; // UTC+5 без перевода часов
 const H = 3600e3, MIN = 60e3;
 const CFG = {
   tz: TZ, hours: [9, 23], sessionsPerDay: [2, 5], minGapMinutes: 60, lateMinutes: 90, cooldownHours: 24,
@@ -22,10 +22,10 @@ const CFG = {
 };
 const runs = (n, fn) => Array.from({ length: n }, (_, i) => fn(seeded(i + 1), i));
 const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
-const DAY = startOfLocalDay(Date.UTC(2026, 9, 5, 12), TZ); // полночь 5 октября по Алматы
+const DAY = startOfLocalDay(Date.UTC(2026, 9, 5, 12), TZ); // полночь 5 октября по UTC+5
 
-test('сутки считаются по Алматы, а не по UTC', () => {
-  assert.equal(DAY, Date.UTC(2026, 9, 4, 19)); // Алматы = UTC+5
+test('сутки считаются по UTC+5, а не по UTC', () => {
+  assert.equal(DAY, Date.UTC(2026, 9, 4, 19)); // пояс UTC+5
   assert.equal(startOfLocalDay(Date.UTC(2026, 9, 5, 20), TZ), Date.UTC(2026, 9, 5, 19)); // 01:00 6 октября
   assert.equal(localDay(Date.UTC(2026, 9, 5, 12), TZ), '2026-10-05');
   assert.equal(localDay(Date.UTC(2026, 9, 5, 20), TZ), '2026-10-06');
@@ -166,24 +166,24 @@ test('выбор ссылки по зоне: меню, содержимое; п�
 
 test('шаг поиска получает один из запросов сайта, остальные виды запроса не имеют', () => {
   const cfg = { ...CFG, sites: [
-    { url: 'https://wiki.test/', kind: 'search', weight: 3, queries: ['Алматы', 'Docker', 'Шахматы'] },
+    { url: 'https://wiki.test/', kind: 'search', weight: 3, queries: ['Кофе', 'Docker', 'Шахматы'] },
     { url: 'https://a.test/', kind: 'read', weight: 3 },
   ] };
   const steps = runs(300, (r) => planSession(cfg, r)).flat();
   const search = steps.filter((x) => x.kind === 'search'), other = steps.filter((x) => x.kind !== 'search');
   assert.ok(search.length > 50 && other.length > 50);
-  assert.ok(search.every((x) => ['Алматы', 'Docker', 'Шахматы'].includes(x.query)), 'запрос не из списка');
+  assert.ok(search.every((x) => ['Кофе', 'Docker', 'Шахматы'].includes(x.query)), 'запрос не из списка');
   assert.equal(new Set(search.map((x) => x.query)).size, 3, 'всегда один и тот же запрос');
   assert.ok(other.every((x) => x.query === undefined));
   assert.ok(search.every((x) => x.follow >= 0 && x.follow <= 3));
 });
 
-test('неделя считается по Алматы с понедельника: семь дат и номер по ISO', () => {
+test('неделя считается по UTC+5 с понедельника: семь дат и номер по ISO', () => {
   const week = ['2026-10-05', '2026-10-06', '2026-10-07', '2026-10-08', '2026-10-09', '2026-10-10', '2026-10-11'];
   assert.deepEqual(weekDays(Date.UTC(2026, 9, 7, 12), TZ), week); // среда
-  assert.deepEqual(weekDays(Date.UTC(2026, 9, 5, 0), TZ), week);  // понедельник 05:00 в Алматы
-  assert.deepEqual(weekDays(Date.UTC(2026, 9, 11, 18), TZ), week); // воскресенье 23:00 в Алматы
-  assert.equal(weekDays(Date.UTC(2026, 9, 11, 20), TZ)[0], '2026-10-12', '01:00 понедельника по Алматы уже новая неделя, хотя по UTC ещё воскресенье');
+  assert.deepEqual(weekDays(Date.UTC(2026, 9, 5, 0), TZ), week);  // понедельник 05:00 по UTC+5
+  assert.deepEqual(weekDays(Date.UTC(2026, 9, 11, 18), TZ), week); // воскресенье 23:00 по UTC+5
+  assert.equal(weekDays(Date.UTC(2026, 9, 11, 20), TZ)[0], '2026-10-12', '01:00 понедельника по UTC+5 уже новая неделя, хотя по UTC ещё воскресенье');
   assert.equal(weekId(Date.UTC(2026, 9, 7, 12), TZ), '2026-W41');
   assert.equal(weekId(Date.UTC(2026, 9, 11, 20), TZ), '2026-W42');
   assert.equal(weekId(Date.UTC(2026, 0, 1, 12), TZ), '2026-W01'); // четверг 1 января

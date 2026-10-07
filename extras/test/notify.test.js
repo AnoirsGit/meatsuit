@@ -35,11 +35,11 @@ test('отправляет sendMessage в Bot API: хост, путь с ток�
 test('нет токена: ничего не отправляет, пишет в журнал и не падает', async () => {
   for (const cfg of [{ token: '' }, { token: undefined }, { chatId: '' }]) {
     const { notify, sent, logs } = setup({ cfg });
-    const r = await notify('выход не из Алматы');
+    const r = await notify('выход не тот');
     assert.deepEqual(r, { sent: false, reason: 'no_token' });
     assert.equal(sent.length, 0);
     assert.equal(logs[0].result, 'no_token');
-    assert.match(logs[0].text, /выход не из Алматы/);
+    assert.match(logs[0].text, /выход не тот/);
   }
 });
 

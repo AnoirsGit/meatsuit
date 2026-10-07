@@ -17,13 +17,13 @@ const { createEgress } = require('../egress.js');
 const { createRunner, createStore, createJournal, loadEgress, cleanState } = require('../life/runner.js');
 
 const H = 3600e3, MIN = 60e3;
-const TZ = 'Asia/Almaty';
+const TZ = 'Etc/GMT-5'; // UTC+5 без перевода часов
 const CFG = normalizeConfig({
   tz: TZ, hours: [9, 23], sessionsPerDay: [2, 2], minGapMinutes: 60, lateMinutes: 90, cooldownHours: 24,
   session: { minutes: [5, 8], sites: [2, 2] },
   sites: [{ url: 'https://a.test/' }, { url: 'https://b.test/' }],
 });
-const DAY = startOfLocalDay(Date.UTC(2026, 9, 5, 7), TZ); // полночь 5 октября по Алматы
+const DAY = startOfLocalDay(Date.UTC(2026, 9, 5, 7), TZ); // полночь 5 октября по UTC+5
 const NOON = DAY + 12 * H;
 
 /** Виртуальные часы: sleep двигает время; hook может остановить цикл, когда время вышло. */
