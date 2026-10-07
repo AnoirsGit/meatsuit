@@ -127,6 +127,32 @@ const rejects = (c, hosts) => assert.throws(() => validate(c, hosts), BadCommand
   await assert.rejects(clickTab(`<div role="tab" aria-label="Messages">${CLOSE}</div>`, true), StaleElement);
   assert.equal(await page.title(), '', 'dryRun нажал кнопку внутри tab в shadow');
 
+  // Вкладка внутри ссылки, кнопки или метки: клик всплывёт к предку (переход, отправка формы, переключение поля).
+  // Под курсором сама вкладка, поэтому проверка точки клика этого не видит; нужен подъём от вкладки вверх.
+  const clickWrapped = async (label, html, shadow) => {
+    await page.setContent(`<body style="margin:0">${html}</body>`);
+    if (shadow) {
+      await page.evaluate((inner) => {
+        const root = document.getElementById('h').attachShadow({ mode: 'open' });
+        root.innerHTML = inner;
+        root.querySelector('button')?.addEventListener('click', () => { document.title += 'button'; });
+      }, shadow);
+    }
+    const hx = hands(page, { dryRun: true, dryRunNavigation: true });
+    const x0 = await hx.see();
+    const tab = x0.elements.find((e) => e.role === 'tab');
+    assert.ok(tab, `${label}: вкладки нет в снимке`);
+    await assert.rejects(hx.act({ cmd: 'click', id: tab.id, gen: x0.gen }), StaleElement, `${label}: клик не отклонён`);
+    const after = await page.evaluate(() => [document.title, location.hash, !!document.querySelector('input:checked')]);
+    assert.deepEqual(after, ['', '', false], `${label}: dryRun выполнил запись`);
+  };
+  await clickWrapped('ссылка', `<a href="#go" onclick="document.title+='link'"><div role="tab" style="padding:20px">Messages</div></a>`);
+  await clickWrapped('кнопка формы', `<form onsubmit="document.title+='submit';return false"><button style="padding:10px"><span role="tab">Messages</span></button></form>`);
+  await clickWrapped('метка', `<label><input type="checkbox"><span role="tab" style="padding:10px">Messages</span></label>`);
+  // Составное дерево: хост shadow-корня лежит в ссылке; вкладка из light DOM назначена слоту внутри кнопки.
+  await clickWrapped('хост в ссылке', `<a href="#go" onclick="document.title+='link'"><div id="h"></div></a>`, '<div role="tab" style="padding:20px">Messages</div>');
+  await clickWrapped('слот в кнопке', '<div id="h"><span role="tab">Messages</span></div>', '<button style="padding:10px"><slot></slot></button>');
+
   // see({ settle }): SPA рисует элементы через 2 с. Обычный see() видит пустоту, settle ждёт.
   const LATE = '<body><script>setTimeout(()=>{for(const n of ["A","B","C"]){const b=document.createElement("button");b.textContent=n;document.body.append(b)}},2000)</script></body>';
   await page.setContent(LATE);
