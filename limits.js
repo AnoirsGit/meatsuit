@@ -1,8 +1,8 @@
 /**
  * Лимиты площадки, часы работы и очередь «один бот за раз».
  *
- * check() — чистая функция (test/limits.test.js). Площадки нет в sites.json —
- * значит нельзя: по умолчанию закрыто.
+ * check() — чистая функция (test/limits.test.js). Площадки нет в sites.json
+ * и нет правила "*" — значит нельзя: по умолчанию закрыто.
  */
 const fs = require('node:fs');
 const path = require('node:path');
@@ -16,6 +16,20 @@ function parseHours(s) {
   const m = /^(\d{1,2})-(\d{1,2})$/.exec(s);
   if (!m || +m[1] > 24 || +m[2] > 24 || m[1] === m[2]) throw new Error(`hours: ждали "10-21", пришло ${JSON.stringify(s)}`);
   return [+m[1], +m[2]];
+}
+
+/**
+ * Правило площадки из разобранного sites.json: своя запись по точному ключу, иначе общее "*"
+ * (если есть), иначе undefined. Записи не сливаются: явная заменяет "*" целиком.
+ * Счётчики при этом всё равно ведутся по хосту, поэтому "*" — ключ правила, а не хост.
+ * Поддомен описанной площадки под "*" не попадает и её правило не наследует: undefined,
+ * иначе закрытую площадку обошли бы сменой site на www.
+ */
+function ruleFor(sites, site) {
+  if (site === '*') throw new Error('site: "*" — ключ правила по умолчанию, а не хост');
+  if (Object.hasOwn(sites, site)) return sites[site];
+  if (Object.keys(sites).some((k) => k !== '*' && site.endsWith('.' + k))) return undefined;
+  return sites['*'];
 }
 
 /**
@@ -121,4 +135,4 @@ async function lock(file, { pollMs = 500, timeoutMs = 30 * 60e3, heartbeatMs = 5
   }
 }
 
-module.exports = { check, peek, reserve, charge, lock, LimitReached };
+module.exports = { ruleFor, check, peek, reserve, charge, lock, LimitReached };
