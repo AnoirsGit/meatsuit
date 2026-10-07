@@ -22,7 +22,7 @@ const { telegramNotifier, createTelegram, findChats, TelegramError } = require('
 const { openWindow } = require('./window.js');
 const { supervise, BudgetExceeded } = require('./supervise.js');
 const { signature, normalizeName, urlPattern } = require('./capture.js');
-const { reserve, charge, peek, lock, LimitReached } = require('./limits.js');
+const { ruleFor, reserve, charge, peek, lock, LimitReached } = require('./limits.js');
 
 async function connect({
   cdpUrl,
@@ -72,7 +72,7 @@ async function connect({
 
   async function task(name, fn, { site, maxCommands = 60, maxMinutes = 10, dryRun = false, dryRunNavigation = false, readOnly = false, capture } = {}) {
     if (!site) throw new Error('task: нужен site');
-    const rule = JSON.parse(fs.readFileSync(sitesFile, 'utf8'))[site];
+    const rule = ruleFor(JSON.parse(fs.readFileSync(sitesFile, 'utf8')), site); // своя запись или "*"
     // Потолок бюджета задаёт площадка, а не вызывающий проект.
     if (rule && rule.maxCommands) maxCommands = Math.min(maxCommands, rule.maxCommands);
     if (rule && rule.maxMinutes) maxMinutes = Math.min(maxMinutes, rule.maxMinutes);

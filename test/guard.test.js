@@ -67,6 +67,27 @@ assert.equal(check(snap({ text: `${bio} Привет`, textParts: [bio.length, '
   assert.throws(() => limits.reserve('s', { perDay: 2 }, f, now), /на сегодня/);
   assert.equal(JSON.parse(fs.readFileSync(f, 'utf8')).s.length, 2, 'отказ не должен писаться');
 
+  // правило по умолчанию "*": неописанный хост берёт его, явная запись заменяет целиком, без "*" как раньше
+  const sites = { '*': rule, 'closed.example.test': { perDay: 0 }, 'own.example.test': { perDay: 1 } };
+  assert.equal(limits.ruleFor(sites, 'new.example.test'), rule);
+  limits.check('new.example.test', limits.ruleFor(sites, 'new.example.test'), [], at(12));
+  assert.throws(() => limits.check('closed.example.test', limits.ruleFor(sites, 'closed.example.test'), [], at(12)), /perDay 0/);
+  limits.check('own.example.test', limits.ruleFor(sites, 'own.example.test'), [], at(9)); // hours из "*" не подмешиваются
+  // поддомен описанной площадки под "*" не попадает: закрытую площадку не обойти сменой site
+  assert.equal(limits.ruleFor(sites, 'www.closed.example.test'), undefined);
+  assert.throws(() => limits.check('www.closed.example.test', limits.ruleFor(sites, 'www.closed.example.test'), [], at(12)), /не описана/);
+  assert.equal(limits.ruleFor(sites, 'a.b.own.example.test'), undefined);
+  assert.equal(limits.ruleFor(sites, 'xclosed.example.test'), rule, 'совпадение без точки — не поддомен');
+  assert.equal(limits.ruleFor({ 'a.example.test': rule }, 'b.example.test'), undefined);
+  assert.throws(() => limits.check('b.example.test', limits.ruleFor({ 'a.example.test': rule }, 'b.example.test'), [], at(12)), /не описана/);
+  assert.throws(() => limits.ruleFor(sites, '*'), (e) => !(e instanceof limits.LimitReached) && /не хост/.test(e.message), '"*" — ключ правила, а не хост');
+  const fstar = path.join(dir, 'star.json'); // счётчики у каждого "*"-хоста свои
+  const star = limits.ruleFor({ '*': { perDay: 1 } }, 'one.example.test');
+  limits.reserve('one.example.test', star, fstar, now);
+  assert.throws(() => limits.reserve('one.example.test', star, fstar, now), /на сегодня/);
+  limits.reserve('two.example.test', star, fstar, now);
+  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(fstar, 'utf8'))).sort(), ['one.example.test', 'two.example.test']);
+
   // readOnly: тратит perHour, а не perDay; charge делает слот полным
   const fr = path.join(dir, 'ro.json');
   const ro = { perDay: 1, perHour: 3 };
