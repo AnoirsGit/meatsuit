@@ -22,7 +22,7 @@ const onSite = (url, site) => {
 
 /** Команда записи: меняет что-то на площадке. Клик не по заведомой вкладке считается записью. */
 const isWrite = (c, els) => {
-  if (c.cmd === 'fill' || c.cmd === 'type') return true;
+  if (c.cmd === 'fill' || c.cmd === 'type' || c.cmd === 'select' || c.cmd === 'upload') return true;
   if (c.cmd === 'press') return c.key === 'Enter';
   if (c.cmd === 'click') return !(els && els.gen === c.gen && els.elements.some((e) => e.id === c.id && e.role === 'tab'));
   return false;

@@ -11,9 +11,10 @@ const { openWorld, run } = require('./dom.js');
 
 const TEXT_LIMIT = 6000;
 const NAME_LIMIT = 80;
+const OPTIONS_LIMIT = 100; // вариантов <select> в снимке; больше — первые 100 и optionsTotal
 
 /** Выполняется внутри страницы, поэтому самодостаточна. */
-function collect({ textLimit, nameLimit, gen }) {
+function collect({ textLimit, nameLimit, optionsLimit, gen }) {
   // Хранилище живёт в изолированном мире: страница его не видит.
   const norm = (el) => (el.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 60);
   const store = (globalThis.__ms = {
@@ -154,7 +155,13 @@ function collect({ textLimit, nameLimit, gen }) {
     const inputType = el.tagName === 'INPUT' ? (el.getAttribute('type') || 'text').toLowerCase() : undefined;
     if (el.tagName === 'A' && el.getAttribute('href')) item.href = clip(el.getAttribute('href'), 200); // нужен проектам, чтобы узнавать страницы и записи по адресу
     if (inputType === 'password') item.inputType = 'password'; // значение пароля модели не отдаём никогда
-    else if (role === 'textbox' || role === 'select') item.value = clip(el.value ?? el.textContent, nameLimit);
+    else if (el.tagName === 'SELECT') {
+      // Человек видит подписи, а не value: подпись выбранного и подписи вариантов (по ним команда select).
+      const opts = [...el.options];
+      item.value = clip(opts.filter((o) => o.selected).map((o) => o.label).join(', '), nameLimit);
+      item.options = opts.slice(0, optionsLimit).map((o) => clip(o.label, nameLimit));
+      if (opts.length > optionsLimit) item.optionsTotal = opts.length;
+    } else if (role === 'textbox' || role === 'select') item.value = clip(el.value ?? el.textContent, nameLimit);
     if (role === 'checkbox' || role === 'radio' || role === 'switch') {
       item.checked = el.checked ?? el.getAttribute('aria-checked') === 'true';
     }
@@ -209,7 +216,7 @@ async function frameHidden(frame) {
 async function observe(page, opts = {}) {
   const gen = opts.gen || ++standaloneGen;
   const world = await openWorld(page);
-  const snap = await run(world, collect, { textLimit: TEXT_LIMIT, nameLimit: NAME_LIMIT, gen });
+  const snap = await run(world, collect, { textLimit: TEXT_LIMIT, nameLimit: NAME_LIMIT, optionsLimit: OPTIONS_LIMIT, gen });
   // Чужие iframe (капча, Arkose) в DOM страницы не видны, поэтому отдаём их адреса.
   // page.frames() отдаёт все кадры, в том числе скрытые. Какие из них человек сейчас не видит,
   // отдаём отдельно: по этому guard отличает спрятанное задание reCAPTCHA от показанного.
