@@ -44,6 +44,7 @@ fi
 # DNS (адреса control и DERP): после перезапуска Tailscale не входил никогда. Запросы к этим серверам идут
 # через основной интерфейс; трафик браузера к сайтам по-прежнему только через туннель (правила выше).
 for ns in ${KILLSWITCH_DNS_BYPASS:-1.1.1.1 9.9.9.9}; do
-  ip rule add to "$ns" lookup main priority 5200 2>/dev/null || true
+  ip rule add to "$ns" ipproto udp dport 53 lookup main priority 5200 2>/dev/null || true
+  ip rule add to "$ns" ipproto tcp dport 53 lookup main priority 5200 2>/dev/null || true
 done
 exec "$@"
