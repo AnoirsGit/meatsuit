@@ -1,7 +1,7 @@
 #!/bin/sh
 # Проверка зеркала по-настоящему: управление браузером через протокол Neko и независимая проверка по CDP.
 #   docker/verify.sh              открыть статью, прокрутить, убедиться, что браузер это сделал
-#   docker/verify.sh persistence  дополнительно: cookie переживает немедленную остановку и запуск
+#   docker/verify.sh persistence  дополнительно: cookie и localStorage переживают остановку и пересоздание
 # Нужны: поднятое зеркало (docker/up.sh) и файл деплоя (MEATSUIT_CONFIG или docker/.env, npm run init).
 # Все команды compose идут через up.sh: тот же файл, тот же браузер, при MEATSUIT_EGRESS=tailscale — с Tailscale.
 # Проверки работают в контейнере замороженного прогрева (extras/, образ life): он собирается при первом запуске.
@@ -42,13 +42,22 @@ Y=$(echo "$TAB" | sed -n 's/.*"scrollY":\([0-9]*\).*/\1/p')
 [ "${Y:-0}" -gt 500 ] && ok "страница прокручена колесом из зеркала (scrollY=$Y)" || bad "страница не прокрутилась (scrollY=${Y:-нет})"
 
 if [ "${1:-}" = persistence ]; then
-  echo "3. профиль: свежая cookie переживает немедленную остановку"
-  $RUN /app/docker/verify/cdp-read.js set-cookie >/dev/null 2>&1
-  BEFORE=$($RUN /app/docker/verify/cdp-read.js 2>&1 | tail -1 | sed -n 's/.*"cookie":"\([0-9]*\)".*/\1/p')
+  echo "3. профиль: cookie и localStorage переживают немедленную остановку и пересоздание контейнера"
+  state() { $RUN /app/docker/verify/cdp-read.js storage 2>&1 | tail -1; }
+  field() { echo "$1" | sed -n "s/.*\"$2\":\"\([0-9]*\)\".*/\1/p"; }
+  $RUN /app/docker/verify/cdp-read.js set >/dev/null 2>&1
+  S=$(state); C0=$(field "$S" cookie); L0=$(field "$S" storage)
+  [ -n "$C0" ] && [ -n "$L0" ] && ok "cookie и localStorage поставлены" || bad "не удалось поставить cookie/localStorage ($S)"
   "$DC" stop neko >/dev/null 2>&1; "$DC" start neko >/dev/null 2>&1
   wait_healthy || bad "после перезапуска контейнер не здоров"
-  AFTER=$($RUN /app/docker/verify/cdp-read.js 2>&1 | tail -1 | sed -n 's/.*"cookie":"\([0-9]*\)".*/\1/p')
-  [ -n "$BEFORE" ] && [ "$BEFORE" = "$AFTER" ] && ok "cookie на месте после stop/start" || bad "cookie пропала (было '$BEFORE', стало '$AFTER'): профиль не сохраняется"
+  S=$(state)
+  [ "$(field "$S" cookie)" = "$C0" ] && ok "cookie на месте после stop/start" || bad "cookie пропала после stop/start: профиль не сохраняется"
+  [ "$(field "$S" storage)" = "$L0" ] && ok "localStorage на месте после stop/start" || bad "localStorage пропал после stop/start (так слетает вход в Тиндер)"
+  "$DC" up -d --force-recreate neko >/dev/null 2>&1
+  wait_healthy || bad "после пересоздания контейнер не здоров"
+  S=$(state)
+  [ "$(field "$S" cookie)" = "$C0" ] && ok "cookie на месте после пересоздания контейнера" || bad "cookie пропала после пересоздания"
+  [ "$(field "$S" storage)" = "$L0" ] && ok "localStorage на месте после пересоздания контейнера" || bad "localStorage пропал после пересоздания"
 fi
 
 [ "$FAILED" = 0 ] && echo "ВСЁ В ПОРЯДКЕ" || { echo "ЕСТЬ ПРОБЛЕМЫ"; exit 1; }
