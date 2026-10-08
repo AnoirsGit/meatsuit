@@ -7,8 +7,9 @@
 # идёт через туннель, а правило из egress/killswitch.sh не даёт им выйти мимо него. Порты зеркала
 # публикуются у tailscale (у контейнера в чужой сети своих портов быть не может).
 #
-# Нужны в файле деплоя: TS_AUTHKEY (одноразовый ключ), TS_EXTRA_ARGS=--exit-node=<имя домашнего узла>
-# --exit-node-allow-lan-access=false. Подробности и порядок проверки: README.md и ../docs/egress.md.
+# В файле деплоя: TS_EXTRA_ARGS="--exit-node=<IP домашнего узла> --exit-node-allow-lan-access=true" (в кавычках;
+# без доступа к LAN ответы зеркалу уходят в туннель и зеркало не открывается). TS_AUTHKEY не обязателен: без него
+# ссылка для входа — в `docker/up.sh logs tailscale`. Подробности и порядок проверки: README.md и ../docs/egress.md.
 # Имя хоста у браузера здесь — имя контейнера tailscale (TS_HOSTNAME): своё задать в чужой сети нельзя,
 # и оно так же постоянное. Вызывающие подключаются так же: network_mode: "container:meatsuit-browser".
 #
