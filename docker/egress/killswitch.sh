@@ -39,4 +39,11 @@ else
   exit 1
 fi
 
+# DNS мимо exit node. Docker разрешает имена за контейнер (127.0.0.11) и шлёт запросы к серверам из `dns:`
+# compose без метки Tailscale, поэтому с выбранным exit node они уходили в туннель, а туннелю для старта нужен
+# DNS (адреса control и DERP): после перезапуска Tailscale не входил никогда. Запросы к этим серверам идут
+# через основной интерфейс; трафик браузера к сайтам по-прежнему только через туннель (правила выше).
+for ns in ${KILLSWITCH_DNS_BYPASS:-1.1.1.1 9.9.9.9}; do
+  ip rule add to "$ns" lookup main priority 5200 2>/dev/null || true
+done
 exec "$@"
