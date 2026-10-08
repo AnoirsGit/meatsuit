@@ -122,7 +122,7 @@ Without it the browser's traffic leaves from the server's own address. With `MEA
 It needs the deploy file and a running stack, and runs every Compose command through `up.sh`. Its checks run inside the image of the frozen warm-up service (`life`), which it builds on first use.
 
 1. **The mirror is up.** It waits up to two minutes for the browser container to be healthy: both Neko's web part and the browser's CDP port answer.
-2. **The control channel works.** It logs in with the member password and drives the mirror over Neko's own protocol, the same events the web client sends: take control, Ctrl+L, Ctrl+A, type an article address key by key, Enter, then the mouse wheel. Then it asks the browser itself over CDP: the tab's address must be the article and `scrollY` above 500.
+2. **The control channel works.** It logs in with the member password and drives the mirror over Neko's own protocol, the same events the web client sends: take control, Ctrl+L, Ctrl+A, type an article address key by key with a fresh mark of this run (`#verify<time>`), Enter, then the mouse wheel. Then it asks the browser itself over CDP: the tab with this run's mark must be the article, with `scrollY` above 500. Only that tab counts: Chrome restores tabs with their scroll position, so an article tab left from an earlier run (the acceptance runs `verify.sh` twice) would otherwise pass without a single command from the mirror.
 3. **Persistence** (`docker/verify.sh persistence`). It sets a cookie over CDP, immediately stops and starts the browser container, and checks the cookie is still there.
 
 It does not prove that a real keyboard in a real web client works, that video and sound arrive, or anything about egress.
