@@ -103,11 +103,11 @@ Then check the sign-ins in the mirror. Keep the old volume until you have. Not v
 Without it the browser's traffic leaves from the server's own address. With `MEATSUIT_EGRESS=tailscale`, `docker/up.sh` adds [`docker-compose.egress.yml`](docker-compose.egress.yml) and the `egress` profile: a Tailscale container uses an exit node at home, and the browser (and the frozen services) share its network namespace, so everything they send goes through the tunnel; [`egress/killswitch.sh`](egress/killswitch.sh) rejects any non-root connection that would leave another way.
 
 1. Set up the exit node on the home device ([egress.md](../docs/egress.md#recommended-setup)).
-2. In the deploy file add `MEATSUIT_EGRESS=tailscale`, `TS_AUTHKEY` (a one-time key) and `TS_EXTRA_ARGS=--exit-node=<home-node-name> --exit-node-allow-lan-access=false`.
+2. In the deploy file add `MEATSUIT_EGRESS=tailscale` and `TS_EXTRA_ARGS="--exit-node=<home node> --exit-node-allow-lan-access=true"`, in double quotes because of the space; without LAN access the mirror does not open. `TS_AUTHKEY` (a one-time key) is optional: without it the sign-in link is in `docker/up.sh logs tailscale`.
 3. `docker/up.sh`. The browser waits until Tailscale is logged in and the exit node is online.
 4. Open `https://ipinfo.io` in the mirror: it must show your home connection.
 
-**Do not set the exit node on the host itself over an SSH session on its public address**: the session hangs ([egress.md](../docs/egress.md#ssh-safety-warning)). **Not verified:** the whole egress setup has never been run.
+**Do not set the exit node on the host itself over an SSH session on its public address**: the session hangs ([egress.md](../docs/egress.md#ssh-safety-warning)). Runs on the owner's server since 8 October 2026 (see below); the kill switch with the exit node switched off has not been checked.
 
 ## Deploying on a server
 
@@ -129,10 +129,11 @@ It does not prove that a real keyboard in a real web client works, that video an
 
 ## What was verified, and what was not
 
-Most runs below were made with **Brave**, before the browser became a choice. This compose file was started once with **Google Chrome** on a laptop, without an account (the first row); with Brave it has not been started yet, and on a server not with either. What is tested now: `docker compose config` for both browsers, with and without the Tailscale overlay, and `docker/up.sh` (`test/docker.test.js`, `test/config.test.js`). `profile-init` was run for real with the Brave image on fresh volumes: `meatsuit_profile` and its `state/` came out owned by 1000:1000.
+Since 8 October 2026 this compose file runs on the owner's server with **Google Chrome** and the Tailscale exit (the first row). Most other runs below were made with **Brave**, before the browser became a choice; this compose file has not been started with Brave yet. What is tested now: `docker compose config` for both browsers, with and without the Tailscale overlay, and `docker/up.sh` (`test/docker.test.js`, `test/config.test.js`). `profile-init` was run for real with the Brave image on fresh volumes: `meatsuit_profile` and its `state/` came out owned by 1000:1000.
 
 | What | How | Result |
 |---|---|---|
+| This compose file with Google Chrome on the owner's server, with the Tailscale exit through a home exit node | `docker/up.sh`, `verify.sh`, `verify.sh persistence`; a caller's stack attached with `container:meatsuit-browser`, signed in by hand once | `verify.sh` green; cookies and `localStorage` kept after a restart and a re-create; traffic leaves through the home exit node; the caller's sign-in holds and its `dryRun` passed. Reported by the owner's check of the server, no row in [the acceptance](../docs/acceptance.md) yet |
 | This compose file with Google Chrome (`3.1.6`) on a laptop, the acceptance procedure without an account | `docker/up.sh` on fresh volumes, `verify.sh`, `restart`, `up -d --force-recreate`, `verify.sh persistence`, `tools/live-check.js` from a sibling container, a caller's stack (tinder-matcher `deploy/`) attached with `container:meatsuit-browser` | Healthy within about 10 s; `profile-init` made `meatsuit_profile` and its `state/` 1000:1000; verify and persistence OK; no "profile in use" window after the re-create (Neko screenshot); live check four `OK`, exit 0; the caller reached CDP and wrote its journal to `state/` (one run) |
 | Neko and Brave start, CDP port alive | healthcheck, `verify.sh` | Healthy within about 15 s; about 750 MB of the 3 GB limit and about 10% CPU at idle (one machine, one run) |
 | The mirror shows the live browser | Signed in from a Chromium, screenshots | Video plays, the "You took the controls" note appears |
@@ -145,7 +146,7 @@ Most runs below were made with **Brave**, before the browser became a choice. Th
 
 Separately, the library ran for one caller project against a Neko mirror with Google Chrome using the same `chrome.conf` and `chrome-policies.json`, started from that project's own compose file.
 
-**Not verified:** this compose file with Brave, and with either browser on a server; a site signed in by hand surviving a restart and a re-create (steps 2 and 3 of [the acceptance](../docs/acceptance.md)); moving a profile in; Enter and shortcuts from a real keyboard; sound, and video in a real browser or on a phone; the whole Tailscale exit (container, overlay, kill switch, WebRTC and DNS through the tunnel); load while someone uses the mirror on a weak server.
+**Not verified:** this compose file with Brave; a recorded acceptance row on the server; moving a profile in; Enter and shortcuts from a real keyboard; sound, and video on a phone; the kill switch with the exit node switched off; load while someone uses the mirror on a weak server.
 
 ## Brave: six fixes that are not obvious
 
@@ -200,6 +201,6 @@ The HTTP service needs `profiles/clients.json`, `profiles/sites.json` and `profi
 | "Profile in use on another computer" | The profile came from a container with another host name: stop the browser and remove `SingletonLock`, `SingletonCookie`, `SingletonSocket` from the profile folder |
 | Choppy video, high CPU | Lower `NEKO_SCREEN` and `NEKO_CPUS` |
 | The container exits with code 137 | A memory ceiling was hit. Raise `NEKO_MEM` if a heavy page needs it |
-| With the Tailscale exit nothing starts | The browser waits for `tailscale` to be healthy: it needs a valid `TS_AUTHKEY` and an approved, online exit node. `docker/up.sh logs tailscale` |
+| With the Tailscale exit nothing starts | The browser waits for `tailscale` to be healthy: it needs to be signed in (a valid `TS_AUTHKEY` or the link from the log) and an approved, online exit node. `docker/up.sh logs tailscale` |
 
 Russian version: [README.ru.md](README.ru.md).

@@ -1,10 +1,10 @@
 # meatsuit
 
-**Launch a browser, remember the session, give your code eyes and hands.**
+**meatsuit is just this: launch a browser, remember, and then eyes and hands. Every credential is handed over by whoever calls it.**
 
-[Русская версия](README.ru.md) · [Documentation](docs/README.md) · [Contributing](CONTRIBUTING.md)
+[Русская версия](README.ru.md) · [Documentation](docs/README.md) · [What's next](docs/ROADMAP.md) · [Contributing](CONTRIBUTING.md)
 
-meatsuit is two things:
+Nothing more. meatsuit starts one browser, keeps its profile so a session signed in once stays signed in, and lets your code look at a page (eyes) and act on it like a person (hands). It has no accounts, no tasks and no schedule of its own: the caller brings the passwords, tokens, limits and the decision what to do. In practice that is two pieces:
 
 1. **A Node library** (`connect` / `task` / `see` / `act`). Your project connects to a running browser over CDP, takes it for one short task at a time, reads the page as a numbered list of elements and acts on it with human-paced mouse and keyboard. A captcha, a login page or a block stops the task with `NeedsHuman` and leaves the window to a person.
 2. **A browser mirror** in Docker ([Neko](https://github.com/m1k1o/neko)): one persistent browser, Google Chrome by default or Brave, that a person opens from an ordinary web page. The profile lives in a volume, so you sign in once by hand and every caller uses that session.
@@ -86,17 +86,20 @@ Optional: send the browser's traffic out through a Tailscale exit node (`MEATSUI
 | `sites.example.json` | an example limits file; the real one belongs to each caller |
 | `config.js`, `tools/` | the deploy file (`npm run init`, `npm run config`), the secret scan, small tools for people |
 | `docker/` | the mirror: Neko with Chrome or Brave, `up.sh`, `verify.sh`, the optional Tailscale exit |
-| `extras/` | **frozen**: the HTTP service, warm-up, egress check and their own copies of hands and limits. They work and are tested (`npm run test:extras`) but are not developed, and the core loads nothing from them |
+| `extras/` | **frozen**: the HTTP service, warm-up, egress check and their own copies of hands and limits from an earlier line of work. They work and are tested (`npm run test:extras`) but are not developed, nothing new goes there, and the core loads nothing from them |
 | `test/` | tests of the core, the deploy file, the secret scan and the Docker files |
 
 ## Status
 
+As of 8 October 2026.
+
 | | |
 |---|---|
+| **Running on a server** | this compose file with Google Chrome, the profile in `meatsuit_profile`, traffic leaving through a home Tailscale exit node (the `egress` profile); `docker/verify.sh` green; cookies and `localStorage` survive a restart and a re-create of the container (`verify.sh persistence`). One caller project is attached with `container:meatsuit-browser`, signed in by hand once, and the sign-in holds; it has run `dryRun` tasks only |
 | **Tested** | the library in real Chromium on local pages (`npm test`); the deploy file, `npm run init`, `npm run config` and the secret scan; `docker compose config` for both browsers, with and without Tailscale |
-| **Run for real, earlier versions** | the library against a Neko mirror with Chrome for one caller project; the mirror with Brave on one desktop and, mirror only, once on a rented server |
-| **Run locally, this version** | this compose file with Chrome on a laptop, without an account: [the acceptance](docs/acceptance.md) except signing in (healthy, `verify.sh`, restart and re-create, persistence, the live check) and a caller's stack attached to it ([docker/README.md](docker/README.md#what-was-verified-and-what-was-not)) |
-| **Not run yet** | this compose file on a server, and with Brave; a signed-in site through a restart and a re-create; the Tailscale exit |
+| **Not run yet** | this compose file with Brave; the kill switch with the exit node switched off (does the browser really lose the network instead of falling back to the server); Enter and shortcuts from a real keyboard; a recorded row of [the acceptance](docs/acceptance.md) on the server |
+
+The git history still contains personal data from earlier work and is going to be rewritten; `main` on GitHub is older than the working branch. Open items, by priority: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 meatsuit is for automating **your own** accounts at low volume. It does not solve captchas, does not spoof fingerprints and promises nothing about how sites react. Platforms' terms apply, and you are responsible for following them.
 
