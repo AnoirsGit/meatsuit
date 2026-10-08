@@ -151,6 +151,11 @@ services:
     sysctls:
       net.ipv6.conf.all.disable_ipv6: "1"
       net.ipv6.conf.default.disable_ipv6: "1"
+      # С exit node маршрут по умолчанию в контейнере — туннель (таблица 52). Ответы на соединения самого tailscaled
+      # (control, DERP — помечены 0x80000) строгий rp_filter без src_valid_mark выбрасывал: туннель не поднимался.
+      net.ipv4.conf.all.src_valid_mark: "1"
+      net.ipv4.conf.all.rp_filter: "2"
+      net.ipv4.conf.default.rp_filter: "2"
     mem_limit: 256m
     memswap_limit: 256m
     pids_limit: 256
