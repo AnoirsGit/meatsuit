@@ -129,10 +129,11 @@ It does not prove that a real keyboard in a real web client works, that video an
 
 ## What was verified, and what was not
 
-The runs below were made with **Brave**, before the browser became a choice; this compose file with Chrome or Brave has not been started yet. What is tested now: `docker compose config` for both browsers, with and without the Tailscale overlay, and `docker/up.sh` (`test/docker.test.js`, `test/config.test.js`). `profile-init` was run for real with the Brave image on fresh volumes: `meatsuit_profile` and its `state/` came out owned by 1000:1000.
+Most runs below were made with **Brave**, before the browser became a choice. This compose file was started once with **Google Chrome** on a laptop, without an account (the first row); with Brave it has not been started yet, and on a server not with either. What is tested now: `docker compose config` for both browsers, with and without the Tailscale overlay, and `docker/up.sh` (`test/docker.test.js`, `test/config.test.js`). `profile-init` was run for real with the Brave image on fresh volumes: `meatsuit_profile` and its `state/` came out owned by 1000:1000.
 
 | What | How | Result |
 |---|---|---|
+| This compose file with Google Chrome (`3.1.6`) on a laptop, the acceptance procedure without an account | `docker/up.sh` on fresh volumes, `verify.sh`, `restart`, `up -d --force-recreate`, `verify.sh persistence`, `tools/live-check.js` from a sibling container, a caller's stack (tinder-matcher `deploy/`) attached with `container:meatsuit-browser` | Healthy within about 10 s; `profile-init` made `meatsuit_profile` and its `state/` 1000:1000; verify and persistence OK; no "profile in use" window after the re-create (Neko screenshot); live check four `OK`, exit 0; the caller reached CDP and wrote its journal to `state/` (one run) |
 | Neko and Brave start, CDP port alive | healthcheck, `verify.sh` | Healthy within about 15 s; about 750 MB of the 3 GB limit and about 10% CPU at idle (one machine, one run) |
 | The mirror shows the live browser | Signed in from a Chromium, screenshots | Video plays, the "You took the controls" note appears |
 | Mouse and typing from the web client | Clicked an address-bar suggestion, typed letters and a dot | Worked |
@@ -144,7 +145,7 @@ The runs below were made with **Brave**, before the browser became a choice; thi
 
 Separately, the library ran for one caller project against a Neko mirror with Google Chrome using the same `chrome.conf` and `chrome-policies.json`, started from that project's own compose file.
 
-**Not verified:** this compose file with either browser; `profile-init` with the Chrome image; moving a profile in; Enter and shortcuts from a real keyboard; sound, and video in a real browser or on a phone; the whole Tailscale exit (container, overlay, kill switch, WebRTC and DNS through the tunnel); load while someone uses the mirror on a weak server.
+**Not verified:** this compose file with Brave, and with either browser on a server; a site signed in by hand surviving a restart and a re-create (steps 2 and 3 of [the acceptance](../docs/acceptance.md)); moving a profile in; Enter and shortcuts from a real keyboard; sound, and video in a real browser or on a phone; the whole Tailscale exit (container, overlay, kill switch, WebRTC and DNS through the tunnel); load while someone uses the mirror on a weak server.
 
 ## Brave: six fixes that are not obvious
 

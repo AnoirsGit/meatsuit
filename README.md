@@ -95,7 +95,8 @@ Optional: send the browser's traffic out through a Tailscale exit node (`MEATSUI
 |---|---|
 | **Tested** | the library in real Chromium on local pages (`npm test`); the deploy file, `npm run init`, `npm run config` and the secret scan; `docker compose config` for both browsers, with and without Tailscale |
 | **Run for real, earlier versions** | the library against a Neko mirror with Chrome for one caller project; the mirror with Brave on one desktop and, mirror only, once on a rented server |
-| **Not run yet** | this compose file (Chrome or Brave) on a server; the Tailscale exit; the live check in [docs/acceptance.md](docs/acceptance.md) |
+| **Run locally, this version** | this compose file with Chrome on a laptop, without an account: [the acceptance](docs/acceptance.md) except signing in (healthy, `verify.sh`, restart and re-create, persistence, the live check) and a caller's stack attached to it ([docker/README.md](docker/README.md#what-was-verified-and-what-was-not)) |
+| **Not run yet** | this compose file on a server, and with Brave; a signed-in site through a restart and a re-create; the Tailscale exit |
 
 meatsuit is for automating **your own** accounts at low volume. It does not solve captchas, does not spoof fingerprints and promises nothing about how sites react. Platforms' terms apply, and you are responsible for following them.
 
