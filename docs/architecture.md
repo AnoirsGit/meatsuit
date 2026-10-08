@@ -70,4 +70,5 @@ An earlier line of the project built an HTTP service (`GET /view`, `POST /act`) 
 
 - Tested: the library in real headless Chromium on local pages; the deploy file, `init`, the config page in a real browser; `docker compose config` for both browsers, with and without Tailscale.
 - Run for real with earlier versions: the library against a Neko mirror with Chrome for one caller project; the mirror with Brave on a desktop and once on a rented server.
-- Not yet run: this compose file on a server, the Tailscale exit, and the live check in [acceptance.md](acceptance.md).
+- Running on a server since 8 October 2026: this compose file with Chrome and the Tailscale exit, `verify.sh` green, cookies and `localStorage` survive a restart and a re-create, one caller signed in and running `dryRun` tasks.
+- Not yet: Brave with this compose file, the kill switch with the exit node off, a recorded row of the live check in [acceptance.md](acceptance.md). Open items: [ROADMAP.md](ROADMAP.md).

@@ -47,7 +47,7 @@ sudo tailscale set --advertise-exit-node
 
 Then approve it in the admin console (login.tailscale.com/admin/machines, the node, "Edit route settings", "Use as exit node"). These commands match Tailscale's exit-node documentation. Also consider disabling key expiry for that node in the console (the exact menu name was not checked), or it drops off the tailnet when its key expires.
 
-**2. The server.** In the deploy file set `MEATSUIT_EGRESS=tailscale`, `TS_AUTHKEY` (a one-time key) and `TS_EXTRA_ARGS=--exit-node=<home-node-name> --exit-node-allow-lan-access=false`, then start through `docker/up.sh`, which adds the egress override and profile:
+**2. The server.** In the deploy file set `MEATSUIT_EGRESS=tailscale` and `TS_EXTRA_ARGS="--exit-node=<home node> --exit-node-allow-lan-access=true"` (in double quotes; without LAN access the mirror does not open); `TS_AUTHKEY` (a one-time key) is optional, without it the sign-in link is in `docker/up.sh logs tailscale`, then start through `docker/up.sh`, which adds the egress override and profile:
 
 ```sh
 docker/up.sh     # = docker compose --env-file <deploy file> -f docker-compose.yml -f docker-compose.egress.yml --profile egress up -d
@@ -120,5 +120,6 @@ The rollback was not tested on a real server. Check that `tailscale` is in root'
 ## What is verified and what is not
 
 - **Verified:** `egress.js` and its use in `life.js` and `server.js`, by unit tests on a fake network (country and ASN match, fallback service, timeouts, caching, fail closed). The exit-node commands against Tailscale's documentation. The egress override as a configuration only (`docker compose config` accepts it). The kill switch relies on the browser not running as root: the Neko image sets `USER=neko` (read from the image metadata) and our supervisord configs start Chrome and Brave with `user=%(ENV_USER)s`, so the owner rule should apply to it; a process listing in a running container has not been checked. On the rented server where the mirror was tried, a throwaway container accepted `/dev/net/tun`, `iptables -m owner`, `-m conntrack` and `ip6tables`, so the kill switch rules can be installed there; Tailscale itself was not started ([docker/README.md](../docker/README.md#what-was-verified-and-what-was-not)).
-- **Not verified:** the egress profile has not been run at all: Tailscale inside the container, Neko, warm-up, the HTTP service and Tailscale in one network namespace, the kill switch, WebRTC and DNS through the tunnel. Also not run: `begin` returning `503` with a real exit node, and the SSH rollback script on a server.
+- **Running on a server since 8 October 2026:** the egress profile with the mirror (Chrome): Tailscale in the container, the browser in its network namespace, traffic through the home exit node, the container's DNS bypassing the exit node so Tailscale can sign in after a restart.
+- **Not verified:** the kill switch with the exit node switched off (step 3 of [Verify](#verify)); WebRTC through the tunnel measured; warm-up and the HTTP service in that namespace; `begin` returning `503` with a real exit node; the SSH rollback script on a server.
 
