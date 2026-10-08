@@ -30,11 +30,15 @@ echo "1. зеркало поднято"
 wait_healthy && ok "Neko и порт CDP отвечают (healthcheck)" || { bad "контейнер не стал здоровым за 2 минуты: docker/up.sh logs neko"; exit 1; }
 
 echo "2. открыть статью и прокрутить через зеркало"
-URL="en.wikipedia.org/wiki/web_browser" SCROLL=8 $RUN /app/docker/verify/mirror.mjs >/dev/null 2>&1 && ok "команды отправлены (вход, управление, адрес, Enter, колесо)" || bad "не удалось войти или отправить команды: проверьте NEKO_PASSWORD"
+# Метка прогона в адресе (#verify<время>): браузер восстанавливает вкладки с прокруткой, и вкладка статьи от прошлого
+# прогона прошла бы обе проверки без единой команды из зеркала. Считается только вкладка с меткой этого прогона.
+MARK="verify$(date +%s)"
+URL="en.wikipedia.org/wiki/web_browser#$MARK" SCROLL=8 $RUN /app/docker/verify/mirror.mjs >/dev/null 2>&1 && ok "команды отправлены (вход, управление, адрес, Enter, колесо)" || bad "не удалось войти или отправить команды: проверьте NEKO_PASSWORD"
 STATE=$($RUN /app/docker/verify/cdp-read.js 2>&1 | tail -1)
 echo "   браузер сейчас: $STATE"
-echo "$STATE" | grep -q 'wikipedia.org/wiki/Web_browser' && ok "адрес набран из зеркала и страница загружена (интернет есть)" || bad "браузер не открыл статью"
-Y=$(echo "$STATE" | sed -n 's/.*"scrollY":\([0-9]*\).*/\1/p' | head -1)
+TAB=$(echo "$STATE" | grep -o "\"url\":\"[^\"]*#$MARK\",\"scrollY\":[0-9]*" | head -1)
+echo "$TAB" | grep -q 'wikipedia.org/wiki/Web_browser#' && ok "адрес набран из зеркала и страница загружена (интернет есть)" || bad "браузер не открыл статью (вкладки с #$MARK нет)"
+Y=$(echo "$TAB" | sed -n 's/.*"scrollY":\([0-9]*\).*/\1/p')
 [ "${Y:-0}" -gt 500 ] && ok "страница прокручена колесом из зеркала (scrollY=$Y)" || bad "страница не прокрутилась (scrollY=${Y:-нет})"
 
 if [ "${1:-}" = persistence ]; then
