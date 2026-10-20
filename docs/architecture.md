@@ -69,22 +69,26 @@ CDP is the Chrome DevTools Protocol, the interface Playwright-style tools use to
 | HTTP service | Three routes (`GET /view`, `POST /act`, `GET /`), bearer tokens, per-client site lists, a journal. | [`server.js`](../server.js) |
 | Driver | Attaches to the running browser with [Patchright](https://github.com/Kaliiiiiiiiii-Vinyzu/patchright) over CDP, opens one window per task, runs actions. | [`driver.js`](../driver.js) |
 | Eyes | Builds the "visible HTML" copy of a page with numbers on clickable things. Finds targets by number, text or CSS. | [`view.js`](../view.js) |
-| Hands | Mouse curves, wheel scrolling, typing with typos. They are computed as pure "plans" and then replayed on the page. | [`human.js`](../human.js), [`human/`](../human/) |
+| Hands | Mouse curves, wheel scrolling, typing with typos, and the "think" pause before an action. They are computed as pure "plans" and then replayed on the page. | [`human.js`](../human.js), [`human/`](../human/) |
+| Window | Opens a window of its own for a task or a warm-up session, sized like the owner's window. | [`window.js`](../window.js) |
+| Self-check | Opens a window in the running browser and prints what a site can see there (automation and container tells), with red and yellow marks. | [`selfcheck.js`](../selfcheck.js), [stealth notes](stealth.md) |
 | Guard | Recognises a captcha, a block page or a login page from a snapshot of the page. | [`guard.js`](../guard.js) |
 | Queue | One task at a time, tickets for waiters, idle timeout. | [`queue.js`](../queue.js) |
 | Limits | Per-site pacing that behaves like a person (see below). | [`limits.js`](../limits.js), [`profiles/sites.json`](../profiles/sites.json) |
 | Egress check | Confirms the traffic really leaves from the expected country and provider. | [`egress.js`](../egress.js), [egress notes](egress.md) |
+| Owner presence | Asks Neko whether the owner holds control of the mirror; bots and warm-up step aside while they do. | [`presence.js`](../presence.js) |
+| Browser lock | One file lock shared by the service and the warm-up, so a task and a session never overlap. | [`lease.js`](../lease.js) |
 | Notifier | Telegram message when a human is needed. | [`notify.js`](../notify.js) |
 | Warm-up | Separate command that reads ordinary sites at random hours. | [`life.js`](../life.js), [`life/`](../life/), [notes](warmup.md) |
 
-State on disk: `data/journal.jsonl` and `data/limits.json` (service), `data/life.json`, `data/life.jsonl` and `data/persona.json` (warm-up), and the browser profile in a Docker volume. Tokens are in `profiles/clients.json`, which is git-ignored.
+State on disk: `data/journal.jsonl` and `data/limits.json` (service), `data/life.json`, `data/life.jsonl` and `data/persona.json` (warm-up), `data/browser.lock` (shared by both), and the browser profile in a Docker volume. Tokens are in `profiles/clients.json`, which is git-ignored.
 
 ### One task, start to finish
 
 1. A bot sends `begin` with a site name. The service checks the request and the client's rights (400, 401, 403), then joins the queue.
 2. When it is the bot's turn, the service checks the exit address (503 on failure) and the site's pacing limit (429 on failure).
 3. The service opens a **new browser window** and returns a task id. The owner's tabs are not touched.
-4. The bot sends actions (`goto`, `click`, `fill`, ...) and reads `GET /view`. After every action the guard looks at the page. A captcha, block or login page returns `409 needs_human`.
+4. The bot sends actions (`goto`, `click`, `fill`, ...) and reads `GET /view`. Before every action the guard looks at the page and the service waits out a human reaction time; after the action the guard looks again. A captcha, block or login page returns `409 needs_human`.
 5. `end` closes the window. A task that is left alone for 5 minutes is closed automatically.
 
 Exact fields and codes are in the [HTTP API](http-api.md).
@@ -136,8 +140,10 @@ Exact fields and codes are in the [HTTP API](http-api.md).
 | Built, not verified | Telegram messages | Tests use a local fake server. No live bot run is recorded |
 | Built, not verified | Pacing numbers | Untested starting values |
 | Built, not verified | The HTTP service as a Docker service | Compose has a `server` service (profile `api`) that `docker compose config` accepts; it has not been started in a container |
-| Not built | Warm-up that cooperates | It does not queue behind bot tasks, does not detect that the owner is in the mirror, uses a tab in the first window instead of its own window, and sends no Telegram message |
-| Not built | `paste` action | Long texts are typed key by key |
+| Built and verified | Pacing between actions, guard check before an action, `hover`, task window sized like the owner's | Tests on real Chromium (`test/driver.test.js`): reaction pauses are waited only when the client was faster than a person, a page with a captcha refuses every action before the hands touch it, a new window takes the first window's bounds. Pause lengths are guesses |
+| Built and verified | Softer handling of an undetermined exit | Tests with a fake network: an echo outage during a task re-checks for about a minute before closing it; a wrong exit still closes it at once |
+| Built and verified | Owner presence and the browser lock | Unit tests on both; the Neko API calls were run against a local Neko 3.1.6 with a real member session (20.10.2026). Warm-up still does not queue behind a task (it skips) and sends no Telegram message |
+| Built, verified locally | Self-check against the Brave in the mirror | Run on the author's machine (20.10.2026): no red marks (`webdriver` false, no `Runtime.enable` trace, `window.chrome`, 7 plugins); WebGL restored with `--enable-unsafe-swiftshader`; the one yellow left is the notifications policy. Not run on the server |
+| Not built | `paste` action | Long texts are typed key by key. A real paste needs a real clipboard (the browser's own), otherwise a page can tell it was inserted by script |
 | Not built | Model-assisted button finding | An idea only |
-| Not built | Softer handling of brief network outages | Today any failed exit check closes the running task |
 | Not built | Translations | The status page, Telegram texts and the `message` field of errors are in Russian |

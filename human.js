@@ -124,11 +124,11 @@ async function linger(page, ms, opts = {}) {
   if (left > 0) await env.sleep(left);
 }
 
-/** Колесо мыши: рывки по 100 с паузами на чтение; знак px — направление. */
+/** Колесо мыши: рывки по делению колеса (NOTCH в human/mouse.js) с паузами на чтение; знак px — направление. opts.seek — ищет, не читает (быстрее). */
 async function scroll(page, px = rand(600, 2200), opts = {}) {
   const env = envOf(opts);
   await cursorOf(page, env.rnd);
-  await play(planScroll(px, {}, env.rnd), env, (e) => page.mouse.wheel(0, e.dy));
+  await play(planScroll(px, { seek: !!opts.seek }, env.rnd), env, (e) => page.mouse.wheel(0, e.dy));
 }
 
 /**

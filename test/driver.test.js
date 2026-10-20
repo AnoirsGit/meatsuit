@@ -183,7 +183,7 @@ test('settle: навигация и новый запрос в ожидании 
 // ------------------------------------------------------------ настоящий Chromium
 
 const skip = chromium.unavailable();
-let browser, site, driver, realTime, ids = [];
+let browser, site, driver, realTime, virtual, vclock, ids = [];
 // Человеческий темп ускорен в 25 раз: часы рук идут быстрее настоящих и согласованы со сном, иначе план печати «догоняет» время и не ускоряется.
 const SPEED = 25;
 const fastHands = { sleep: (ms) => new Promise((r) => setTimeout(r, ms / SPEED)), now: () => Date.now() * SPEED };
@@ -195,6 +195,7 @@ const shop = `
   <button onclick="out.textContent='вошли'">Войти</button>
   <button onclick="out.textContent='вошли-через-google'">Войти через Google</button>
   <a href="/next">Дальше</a> <a href="/blocked">Опасная ссылка</a> <a href="/popup">Окна</a>
+  <a href="/next?hover" onmouseover="out.textContent='навели'">Наведи сюда</a>
   <button onclick="fetch('/api/slow').then(r => r.text()).then(t => out.textContent = t)">Загрузить</button>
   <button onclick="fetch('/api/hang')">Зависнуть</button>
   <p id="out">пусто</p>`;
@@ -224,6 +225,9 @@ before(async () => {
   const cfg = { cdpUrl: browser.cdpUrl, env: fastHands, settle: { quietMs: 120, maxMs: 4000 } };
   driver = await createDriver(cfg);
   realTime = await createDriver({ cdpUrl: browser.cdpUrl, settle: { quietMs: 120, maxMs: 4000 } });
+  // Виртуальные часы: идут только в sleep. Паузы «подумать» видно по paced, а ждать их не приходится.
+  vclock = { t: 0 };
+  virtual = await createDriver({ cdpUrl: browser.cdpUrl, env: { sleep: async (ms) => { vclock.t += ms; }, now: () => vclock.t }, settle: { quietMs: 120, maxMs: 4000 } });
 });
 
 after(async () => {
@@ -231,6 +235,7 @@ after(async () => {
   await Promise.all(ids.map((id) => driver.close(id).catch(() => {})));
   await driver.disconnect().catch(() => {});
   await realTime.disconnect().catch(() => {});
+  await virtual.disconnect().catch(() => {});
   await site.close();
   await browser.stop();
 });
@@ -252,14 +257,25 @@ const rejects = async (promise, status, code) => {
   assert.fail(`ждали ${status} ${code}, а вышло без ошибки`);
 };
 
-test('open: отдельное окно, а не вкладка в моём; close закрывает его', { skip }, async () => {
+test('open: отдельное окно, а не вкладка в моём, размером с моё окно; close закрывает его', { skip }, async () => {
   const before = await chromium.windows(browser.cdpUrl);
+  // Окно хозяина сделаем нестандартного размера: новое окно должно повторить его, а не взять размер по умолчанию.
+  const { browser: cdp, context } = await chromium.connect(browser.cdpUrl);
+  const bcdp = await cdp.newBrowserCDPSession();
+  const { windowId: ownerWindow } = await bcdp.send('Browser.getWindowForTarget', { targetId: before[0].targetId });
+  await bcdp.send('Browser.setWindowBounds', { windowId: ownerWindow, bounds: { left: 0, top: 0, width: 1000, height: 700, windowState: 'normal' } });
   const { id } = await driver.open({ site: '127.0.0.1', allow: [] });
   assert.ok(typeof id === 'string' && id);
   const mid = await chromium.windows(browser.cdpUrl);
   const fresh = mid.filter((t) => !before.some((b) => b.targetId === t.targetId));
   assert.equal(fresh.length, 1, 'должна появиться одна страница');
   assert.ok(!before.some((b) => b.windowId === fresh[0].windowId), `страница открылась вкладкой в окне ${fresh[0].windowId}, а не в своём`);
+  const { bounds } = await bcdp.send('Browser.getWindowBounds', { windowId: fresh[0].windowId });
+  assert.deepEqual([bounds.width, bounds.height], [1000, 700], 'окно задачи не того размера, что окно хозяина');
+  const page = context.pages().find((p) => p.url() === 'about:blank' && p !== context.pages()[0]);
+  assert.equal(await page.evaluate(() => innerWidth), 1000, 'страница в окне задачи не той ширины');
+  await bcdp.send('Browser.setWindowBounds', { windowId: ownerWindow, bounds: { left: 0, top: 0, width: 1280, height: 800, windowState: 'normal' } });
+  await cdp.close().catch(() => {});
 
   await driver.close(id);
   const end = await chromium.windows(browser.cdpUrl);
@@ -351,8 +367,9 @@ test('goto за пределы сайтов задачи и не http(s): 403, �
   assert.equal((await driver.view(id)).url, site.origin + '/next');
 });
 
-test('страница-блок: 409 needs_human, окно остаётся, resume перепроверяет', { skip }, async () => {
+test('страница-блок: 409 needs_human, окно остаётся, на ней ничего не нажимается, resume перепроверяет', { skip }, async () => {
   const id = await win();
+  const hits = () => site.hits.length;
   const e = await rejects(driver.act(id, { do: 'click', target: 'Опасная ссылка' }), 409, 'needs_human');
   assert.equal(e.guard, 'captcha');
   assert.ok(e.url.endsWith('/blocked'));
@@ -362,9 +379,55 @@ test('страница-блок: 409 needs_human, окно остаётся, res
   assert.ok(v.html.includes('Checking your browser'));
   assert.deepEqual(await driver.resume(id), { guard: 'captcha' }, 'пока не решено, guard остаётся');
 
+  // Пока капча на экране, любое действие отвергается до того, как рука что-то тронет: даже несуществующая цель
+  // даёт 409, а не 404, и уход со страницы тоже не наш (решает человек).
+  const n = hits();
+  await rejects(driver.act(id, { do: 'click', target: 'Нет такой кнопки' }), 409, 'needs_human');
+  await rejects(driver.act(id, { do: 'scroll', px: 300 }), 409, 'needs_human');
+  await rejects(driver.act(id, { do: 'goto', url: site.origin + '/next' }), 409, 'needs_human');
+  await rejects(driver.act(id, { do: 'pause', from: 1, to: 2 }), 409, 'needs_human');
+  assert.equal(hits(), n, 'с капчи ушли сами');
+
   // «я решил капчу в зеркале»: страница сменилась без участия бота
-  await driver.act(id, { do: 'goto', url: site.origin + '/next' });
+  const { browser: cdp, context } = await chromium.connect(browser.cdpUrl);
+  try {
+    const page = context.pages().find((p) => p.url().endsWith('/blocked'));
+    await page.goto(site.origin + '/next');
+  } finally { await cdp.close().catch(() => {}); }
   assert.deepEqual(await driver.resume(id), { guard: null });
+  assert.equal((await driver.act(id, { do: 'click', target: 'Назад на главную' })).ok, true, 'после решения работа продолжается');
+});
+
+test('hover: мышь подходит к элементу и остаётся над ним, без клика и перехода', { skip }, async () => {
+  const id = await win();
+  const r = await driver.act(id, { do: 'hover', target: 'Наведи сюда' });
+  assert.deepEqual([r.ok, r.url, r.guard], [true, site.origin + '/', null]);
+  assert.ok((await driver.view(id)).html.includes('навели'), 'страница не увидела наведения');
+  await rejects(driver.act(id, { do: 'hover', target: 'Нет такой' }), 404, 'not_found');
+  await rejects(driver.act(id, { do: 'hover' }), 400, 'bad_request');
+});
+
+test('пауза «подумать»: после смены страницы дольше, на той же короче, а кто думал сам, не ждёт', { skip }, async () => {
+  const { id } = await virtual.open({ site: '127.0.0.1' });
+  try {
+    const first = await virtual.act(id, { do: 'goto', url: site.origin + '/' });
+    assert.equal(first.paced, 0, 'первое действие в окне: думать не над чем');
+    const t0 = vclock.t;
+    const after = await virtual.act(id, { do: 'click', target: 'Войти' }); // страница сменилась с прошлого действия: осмотреться
+    assert.ok(after.paced >= 700 && after.paced <= 6000, `после новой страницы пауза ${after.paced} мс`);
+    assert.ok(vclock.t - t0 >= after.paced, 'пауза не выдержана по часам');
+    const same = await virtual.act(id, { do: 'click', target: 'Войти через Google' }); // та же страница
+    assert.ok(same.paced >= 250 && same.paced <= 2500, `на той же странице пауза ${same.paced} мс`);
+    const typed = await virtual.act(id, { do: 'key', key: 'Tab' });
+    assert.ok(typed.paced >= 120 && typed.paced <= 1200, `клавиша после клика: ${typed.paced} мс`);
+    vclock.t += 20000; // клиент думал сам 20 с
+    assert.equal((await virtual.act(id, { do: 'click', target: 'Войти' })).paced, 0, 'ждать нечего');
+    assert.equal((await virtual.act(id, { do: 'scroll', px: 200 })).paced, 0, 'прокрутка без паузы: человек листает сразу');
+    const nav = await virtual.act(id, { do: 'goto', url: site.origin + '/next' });
+    assert.ok(nav.paced >= 250, `перед новым адресом тоже думают: ${nav.paced}`);
+    const back = await virtual.act(id, { do: 'back' });
+    assert.ok(back.paced >= 700, `страница сменилась на goto: перед следующим действием осмотреться (${back.paced})`);
+  } finally { await virtual.close(id); }
 });
 
 test('goto на страницу-блок тоже 409, а ответ guard после обычного действия — null', { skip }, async () => {

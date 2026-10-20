@@ -2,9 +2,13 @@
  * guard: по снимку страницы решает, можно ли продолжать. Только распознавание,
  * обхода нет: капча и блок останавливают бота, вход означает «сессия потеряна».
  *
- * Снимок: { url, title, text, captchaFrame }. Фразы ищутся только на коротких
+ * Снимок: { url, title, text, captchaFrame, passwordField }. Фразы ищутся только на коротких
  * страницах (страница-заглушка мала, а длинная статья про капчу не повод
  * останавливаться); структурный признак (фрейм капчи) работает всегда.
+ * Видимое поле пароля на недлинной странице — вход: сайт просит войти заново, даже если
+ * адрес обычный (вход в модальном окне на главной, как у Tinder). На длинной странице
+ * (форма входа в боковой колонке статьи) это не считается: цена ложной тревоги — пауза
+ * площадки на несколько суток.
  */
 const CAPTCHA_TEXT = /verify (that )?you('| a)?re (a )?human|are you a robot|i'?m not a robot|checking your browser|подтвердите,? что (вы не робот|запросы отправляли вы)|я не робот|вы не робот|введите символы с картинки|press\s*(&|and)\s*hold|confirm you are a human/i;
 const BLOCKED_TEXT = /unusual traffic|access denied|too many requests|temporarily blocked|подозрительн[а-яё]+ (активност|трафик)|доступ (запрещ|ограничен)|превышен лимит запросов/i;
@@ -13,9 +17,10 @@ const CHALLENGE_TITLE = /just a moment|attention required/i;
 const ERROR_TITLE = /^\s*(?:(?:error|http)\s*)?(?:403|429)\s*(?:[-–—:.]?\s*(?:forbidden|too many requests|access denied|error|доступ запрещ|запрещ|слишком много)[^]*)?$/i;
 const CHALLENGE_URL = /\/(show)?(captcha|challenge)\b/i;
 const BLOCKED_URL = /\/(sorry|checkpoint|blocked)\b/i;
-const LOGIN_PATH = /\/(log-?in|sign-?in)(?=[/.]|$)/i; // /signin ловит и вход Google (/v3/signin); «/login-security-tips» — статья, не вход
+const LOGIN_PATH = /\/(log[-_]?in|sign[-_]?in)(?=[/.]|$)/i; // /signin ловит и вход Google (/v3/signin), /users/sign_in — Rails; «/login-security-tips» — статья, не вход
 
 const SHORT = 2000;
+const LONG = 3000; // столько знаков текста отдаёт снимок (life/probe.js): страница длиннее обрезана до LONG, и это «длинная»
 
 /** Путь адреса без строки запроса и якоря: «?next=/login» входом не считается. */
 function pathOf(url) {
@@ -23,7 +28,7 @@ function pathOf(url) {
 }
 
 /** 'captcha' | 'blocked' | 'login' | null */
-function classify({ url = '', title = '', text = '', captchaFrame = false } = {}) {
+function classify({ url = '', title = '', text = '', captchaFrame = false, passwordField = false } = {}) {
   if (captchaFrame) return 'captcha';
   const short = text.length < SHORT;
   if (short && CHALLENGE_TITLE.test(title)) return 'captcha';
@@ -33,6 +38,7 @@ function classify({ url = '', title = '', text = '', captchaFrame = false } = {}
   if (short && ERROR_TITLE.test(title)) return 'blocked';
   if (short && BLOCKED_TEXT.test(`${title} ${text}`)) return 'blocked';
   if (LOGIN_PATH.test(pathOf(url))) return 'login';
+  if (passwordField && text.length < LONG) return 'login';
   return null;
 }
 

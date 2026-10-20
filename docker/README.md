@@ -15,7 +15,7 @@ docker compose up -d        # the mirror only
 ./verify.sh                 # opens an article through the mirror, scrolls, and confirms over CDP
 ```
 
-Open `http://127.0.0.1:8080`, enter any name and `NEKO_PASSWORD`. Control is taken implicitly: hover over the video and you are in control. The admin password is only needed for taking screenshots through Neko's API.
+Open `http://127.0.0.1:8080`, enter any name and `NEKO_PASSWORD`. Control is taken implicitly: hover over the video and you are in control. The admin password is used by the HTTP service and the warm-up to ask Neko whether you hold control (they step aside while you do), and for screenshots through Neko's API.
 
 Stop with `docker compose stop` (Brave exits cleanly in 1 to 2 s and writes its cookies to disk). `docker compose down -v` deletes everything, including the browser profile, the warm-up journal and the Tailscale identity.
 
@@ -86,7 +86,7 @@ Settings in `.env` (all optional except the passwords):
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `NEKO_PASSWORD`, `NEKO_ADMIN_PASSWORD` | required | Member and admin passwords of the mirror |
+| `NEKO_PASSWORD`, `NEKO_ADMIN_PASSWORD` | required | Member and admin passwords of the mirror. The admin one is also passed to the `server` and `life` containers (with `MEATSUIT_NEKO_URL`) so they can tell when you are at the controls |
 | `NEKO_BIND_IP`, `NEKO_PORT` | `127.0.0.1`, `8080` | Host address and port the mirror binds to (the WebRTC UDP ports follow the address) |
 | `NEKO_WEBRTC_IP` | `127.0.0.1` | The address clients use to reach the video: the same one you open the mirror at |
 | `MEATSUIT_TZ` | `Asia/Almaty` | Time zone (IANA name) of the containers, so of the browser; the HTTP service also counts its day limits in it. Set the zone of your exit country. The warm-up schedule uses `tz` in `profiles/life.json` instead |
@@ -125,6 +125,14 @@ curl -s http://127.0.0.1:8787/                                  # status page, n
 ```
 
 It uses the same `/data` volume as warm-up, so both share `persona.json` and the hands are the same "person". **Not verified:** this service was added to the compose file after the last real run; `docker compose config` accepts it (with and without the egress override), but it has not been started in a container.
+
+**Self-check of what sites see.** With the browser up, run the check inside the same network namespace (the `server` image has Patchright and the code):
+
+```sh
+docker compose --profile api run --rm server node selfcheck.js --tz "${MEATSUIT_TZ:-Asia/Almaty}"
+```
+
+It opens a window in the Brave, prints red and yellow marks (automation tells, container tells) and closes the window. What each mark means and what to do about it: [docs/stealth.md](../docs/stealth.md). Run against this image on the author's machine on 20.10.2026: no red marks; WebGL needed `--enable-unsafe-swiftshader` in `neko/brave-start.sh` (now there, `--disable-software-rasterizer` dropped); the one yellow left is notifications denied by `policies.json`.
 
 ## Deploying on a server
 

@@ -8,10 +8,12 @@
  *     и соединение закрываются, в цикле старт считается сделанным;
  *   - остановка (SIGTERM, Ctrl+C) закрывает вкладку и соединение, сессия не доигрывается;
  *   - перед сессией проверяется выход в сеть: не тот — сессия пропущена, пауза суток не ставится;
+ *   - хозяин у руля в зеркале (presence.js) — сессия пропущена; взялся посреди сессии — она тихо кончается;
+ *   - браузер занят задачей сервиса (замок lease.js) — сессия пропущена; свою сессию прогрев закрывает замком;
  *   - файл состояния может быть оборван или недописан: планируем заново, но паузу не теряем.
  */
 const { createEgress } = require('../egress.js');
-const { planDay, planWeek, planSession, nextAction, startOfLocalDay, localDay, weekId } = require('./plan.js');
+const { planDay, planWeek, planSession, nextAction, startOfLocalDay, localDay, weekId, deadlineOf } = require('./plan.js');
 const { runSession, Blocked } = require('./session.js');
 
 const H = 3600000, MIN = 60000;
@@ -71,9 +73,10 @@ function loadEgress({ fs = require('node:fs'), file, fetch, skip = false } = {})
 
 /**
  * connect() → { openPage(), close() }; store → { read(), write(v) }; egress — { check() } или null;
+ * presence — { check() } (presence.js) или null; lease — замок на браузер (lease.js) или null;
  * session — runSession (подменяется в тестах). cfg уже прошёл normalizeConfig.
  */
-function createRunner({ cfg, connect, store, journal = () => {}, egress = null, now = Date.now, sleep = realSleep, rnd = Math.random, session = runSession }) {
+function createRunner({ cfg, connect, store, journal = () => {}, egress = null, presence = null, lease = null, now = Date.now, sleep = realSleep, rnd = Math.random, session = runSession }) {
   let stopping = false;
   let active = null; // { link, page }: что открыто сейчас, stop() закрывает это
   let busy = false;  // идёт сессия: об остановке пишет stop() (процесс выходит сразу после него)
@@ -88,8 +91,11 @@ function createRunner({ cfg, connect, store, journal = () => {}, egress = null, 
     return { event: 'egress-wrong', reason: r.error, country: r.country ?? null, asn: r.asn ?? null, ...(r.org ? { org: r.org } : {}), ...(r.detail ? { detail: r.detail } : {}) };
   }
 
+  /** Хозяин держит управление в зеркале? Сбой Neko — нет (вежливость, не предохранитель). */
+  const ownerBusy = async () => !!presence && !!(await presence.check().catch(() => null) || {}).present;
+
   /**
-   * Одна сессия. Не бросает: итог 'ok' | 'blocked' | 'error' | 'egress-wrong' | 'stopped'.
+   * Одна сессия. Не бросает: итог 'ok' | 'blocked' | 'error' | 'egress-wrong' | 'owner' | 'busy' | 'stopped'.
    * Капча или блок ставят state.pausedUntil.
    */
   async function oneSession(state) {
@@ -102,8 +108,15 @@ function createRunner({ cfg, connect, store, journal = () => {}, egress = null, 
     const wrong = await egressVerdict();
     if (wrong) { journal(wrong); return 'egress-wrong'; }
     if (stopping) return 'stopped';
+    if (await ownerBusy()) { journal({ event: 'owner-present', reason: 'хозяин управляет браузером в зеркале: сессия пропущена' }); return 'owner'; }
 
     const steps = planSession(cfg, rnd);
+    let locked = false;
+    if (lease) {
+      const got = lease.acquire(deadlineOf(steps) + 2 * MIN); // срок замка: самый долгий исход сессии с запасом
+      if (!got.ok) { journal({ event: 'busy', reason: `браузер занят: ${got.holder}`, holder: got.holder, until: new Date(got.until).toISOString() }); return 'busy'; }
+      locked = true;
+    }
     journal({ event: 'session-start', steps: steps.map((s) => ({ url: s.url, kind: s.kind, minutes: +(s.budgetMs / MIN).toFixed(1), follow: s.follow })) });
     let stage = 'connect', link = null, page = null;
     try {
@@ -115,8 +128,8 @@ function createRunner({ cfg, connect, store, journal = () => {}, egress = null, 
       active.page = page;
       if (stopping) return 'stopped';
       stage = 'session';
-      const out = await session(page, steps, { log: journal, env: { sleep, now, rnd }, consent: cfg.consent });
-      journal({ event: 'session-end', ...(out && out.cut ? { cut: true } : {}) });
+      const out = await session(page, steps, { log: journal, env: { sleep, now, rnd }, consent: cfg.consent, yieldTo: presence ? ownerBusy : null });
+      journal({ event: 'session-end', ...(out && out.cut ? { cut: true } : {}), ...(out && out.yielded ? { yielded: true } : {}) });
       return 'ok';
     } catch (err) {
       if (stopping) return 'stopped';
@@ -132,6 +145,7 @@ function createRunner({ cfg, connect, store, journal = () => {}, egress = null, 
       active = null;
       if (page) await page.close().catch(() => {});
       if (link) await link.close().catch(() => {}); // close только отключает нас, браузер живёт
+      if (locked) lease.release();
     }
   }
 

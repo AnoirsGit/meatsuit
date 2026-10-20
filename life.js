@@ -11,6 +11,9 @@
  *
  * Опции: --config profiles/life.json  --cdp http://127.0.0.1:9222  --data data
  *        --egress profiles/egress.json  --force  --no-egress-check
+ * Окружение: MEATSUIT_CDP; MEATSUIT_NEKO_URL и NEKO_ADMIN_PASSWORD — пока хозяин управляет браузером в зеркале,
+ * сессия не начинается, а начатая тихо кончается (без адреса не проверяется). Замок на браузер (data/browser.lock)
+ * общий с HTTP-сервисом: пока идёт задача сервиса, сессия пропускается, и наоборот.
  * Браузер должен быть запущен с --remote-debugging-port, к нему подключаемся по CDP.
  * Перед каждой сессией проверяется выход в сеть по egress.json ({"country":"KZ","asn":[64500]});
  * не совпало — сессия пропускается. Нет файла — now и run не стартуют (иначе прогрев мог бы
@@ -22,6 +25,9 @@ const { loadPersona } = require('./human/persona-file.js');
 const { normalizeConfig } = require('./life/config.js');
 const { startOfLocalDay, localDay, planDay, planWeek, planSession } = require('./life/plan.js');
 const { createRunner, createStore, createJournal, loadEgress } = require('./life/runner.js');
+const { windowOpener } = require('./window.js');
+const presenceMod = require('./presence.js');
+const { createLease } = require('./lease.js');
 
 const MIN = 60000;
 
@@ -42,22 +48,23 @@ const readJson = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8
 
 const fmt = (ms, tz) => new Date(ms).toLocaleString('ru-RU', { timeZone: tz, dateStyle: 'short', timeStyle: 'short' });
 
+/** Подключение к браузеру. Страница прогрева открывается в своём окне (window.js), а не вкладкой в окне хозяина. */
 async function connect(cdpUrl) {
   let chromium;
   try { ({ chromium } = require('patchright')); } catch { throw new Error('не установлен patchright: выполните npm install'); }
   const browser = await chromium.connectOverCDP(cdpUrl);
   const context = browser.contexts()[0] || await browser.newContext();
-  return { openPage: () => context.newPage(), close: () => browser.close() }; // close только отключает нас, браузер живёт
+  return { openPage: windowOpener(browser, context), close: () => browser.close() }; // close только отключает нас, браузер живёт
 }
 
-/** SIGTERM (docker stop) и Ctrl+C: закрыть вкладку и соединение, потом выйти. Второй сигнал или 5 с без ответа браузера — выход сразу. */
-function exitOnSignals(runner) {
+/** SIGTERM (docker stop) и Ctrl+C: закрыть окно и соединение, снять замок, потом выйти. Второй сигнал или 5 с без ответа браузера — выход сразу. */
+function exitOnSignals(runner, cleanup = async () => {}) {
   let stopping = false;
   const onSignal = () => {
     if (stopping) process.exit(1);
     stopping = true;
     setTimeout(() => process.exit(1), 5000);
-    runner.stop().finally(() => process.exit(0));
+    runner.stop().then(() => cleanup()).catch(() => {}).finally(() => process.exit(0));
   };
   process.on('SIGTERM', onSignal);
   process.on('SIGINT', onSignal);
@@ -89,21 +96,28 @@ async function main() {
 
   if (cmd === 'now' && opts.dry) { for (const s of planSession(cfg)) console.log(JSON.stringify(s)); return; }
 
+  const presence = presenceMod.fromEnv(process.env);
+  const lease = createLease({ file: path.join(opts.data, 'browser.lock'), holder: 'life' });
   const runner = createRunner({
     cfg,
     connect: () => connect(opts.cdp),
     store: createStore({ file: path.join(opts.data, 'life.json') }),
     journal: createJournal({ dir: opts.data }),
     egress: loadEgress({ file: opts.egress, skip: opts.noEgressCheck }), // нет файла или он неверный — ошибка здесь, до всякой сессии
+    presence: presence.enabled ? presence : null,
+    lease,
   });
-  exitOnSignals(runner);
+  exitOnSignals(runner, async () => { lease.release(); await presence.logout(); });
 
   if (cmd === 'now') {
     const out = await runner.runNow({ force: opts.force });
     if (out.result === 'paused') {
       console.error(`Пауза до ${fmt(out.until, cfg.tz)} (${cfg.tz}) после капчи или блока: сессия не запущена. Всё равно запустить: node life.js now --force`);
       process.exitCode = 1;
-    } else if (out.result === 'error' || out.result === 'egress-wrong') process.exitCode = 1;
+    } else if (out.result === 'owner') { console.error('Хозяин управляет браузером в зеркале: сессия не запущена.'); process.exitCode = 1; }
+    else if (out.result === 'busy') { console.error('Браузер занят задачей HTTP-сервиса (data/browser.lock): сессия не запущена.'); process.exitCode = 1; }
+    else if (out.result === 'error' || out.result === 'egress-wrong') process.exitCode = 1;
+    await presence.logout();
     return;
   }
 
@@ -111,4 +125,6 @@ async function main() {
   await runner.loop();
 }
 
-main().catch((err) => { console.error(`Ошибка: ${err.message}`); process.exit(1); });
+if (require.main === module) main().catch((err) => { console.error(`Ошибка: ${err.message}`); process.exit(1); });
+
+module.exports = { connect };

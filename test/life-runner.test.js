@@ -15,6 +15,7 @@ const { startOfLocalDay } = require('../life/plan.js');
 const { Blocked } = require('../life/session.js');
 const { createEgress } = require('../egress.js');
 const { createRunner, createStore, createJournal, loadEgress, cleanState } = require('../life/runner.js');
+const { createLease } = require('../lease.js');
 
 const H = 3600e3, MIN = 60e3;
 const TZ = 'Asia/Almaty';
@@ -79,13 +80,78 @@ function make(over = {}) {
   const session = over.session || fakeSession(clock);
   const runner = createRunner({
     cfg: over.cfg || CFG, connect: browser.connect, store, journal: (e) => journal.push(e), egress: over.egress ?? null,
+    presence: over.presence ?? null, lease: over.lease ?? null,
     now: clock.now, sleep: clock.sleep, rnd: over.rnd || seeded(11), session,
   });
   return { runner, clock, journal, store, browser, session };
 }
+
+/** Файловая система в памяти для замка на браузер. */
+function memLockFs() {
+  const files = new Map();
+  return {
+    readFileSync(f) { if (!files.has(f)) throw Object.assign(new Error('нет файла'), { code: 'ENOENT' }); return files.get(f); },
+    writeFileSync(f, data) { files.set(f, String(data)); },
+    renameSync(a, b) { files.set(b, files.get(a)); files.delete(a); },
+    unlinkSync(f) { files.delete(f); },
+    mkdirSync() {},
+  };
+}
 const events = (journal) => journal.map((e) => e.event);
 
 // ---------- одна сессия ----------
+
+test('хозяин управляет в зеркале: сессия пропущена, браузер не трогается; ушёл — сессия идёт и получает yieldTo', async () => {
+  const owner = { present: true };
+  const presence = { check: async () => ({ present: owner.present }) };
+  const { runner, journal, browser, session } = make({ presence });
+  assert.equal((await runner.runNow()).result, 'owner');
+  assert.deepEqual(events(journal), ['warning', 'owner-present']);
+  assert.equal(browser.connects, 0);
+  owner.present = false;
+  assert.equal((await runner.runNow()).result, 'ok');
+  assert.equal(typeof session.calls[0].opts.yieldTo, 'function', 'сессии дан способ уступить хозяину');
+  owner.present = true;
+  assert.equal(await session.calls[0].opts.yieldTo(), true);
+});
+
+test('без presence сессии не дают yieldTo; сбой Neko не мешает сессии', async () => {
+  const { runner, session } = make();
+  await runner.runNow();
+  assert.equal(session.calls[0].opts.yieldTo, null);
+  const broken = make({ presence: { check: async () => { throw new Error('Neko лежит'); } } });
+  assert.equal((await broken.runner.runNow()).result, 'ok');
+});
+
+test('замок на браузер: занят сервисом — сессия пропущена; свободен — прогрев держит его на время сессии и снимает после', async () => {
+  const clock = clockAt(NOON), fs = memLockFs();
+  const server = createLease({ file: 'data/browser.lock', holder: 'server', fs, now: clock.now });
+  const mine = createLease({ file: 'data/browser.lock', holder: 'life', fs, now: clock.now });
+  server.acquire(5 * MIN);
+  const busy = make({ clock, lease: mine });
+  assert.equal((await busy.runner.runNow()).result, 'busy');
+  assert.deepEqual(events(busy.journal), ['warning', 'busy']);
+  assert.equal(busy.journal[1].holder, 'server');
+  assert.equal(busy.browser.connects, 0);
+  server.release();
+
+  let seen = null;
+  const session = fakeSession(clock, async () => { seen = mine.peek(); return { cut: false }; });
+  const free = make({ clock, lease: mine, session });
+  assert.equal((await free.runner.runNow()).result, 'ok');
+  assert.equal(seen && seen.holder, 'life', 'во время сессии замок у прогрева');
+  assert.ok(seen.until - clock.now() >= 2 * MIN, 'срок замка покрывает сессию с запасом');
+  assert.equal(mine.peek(), null, 'после сессии замок снят');
+  assert.deepEqual(server.acquire(MIN), { ok: true });
+});
+
+test('замок снимается и когда сессия упала или браузер не открылся', async () => {
+  const clock = clockAt(NOON), fs = memLockFs();
+  const mine = createLease({ file: 'data/browser.lock', holder: 'life', fs, now: clock.now });
+  const { runner } = make({ clock, lease: mine, browser: fakeBrowser({ failConnect: 'ECONNREFUSED' }) });
+  assert.equal((await runner.runNow()).result, 'error');
+  assert.equal(mine.peek(), null);
+});
 
 test('сессия: план в журнал, страница и соединение закрыты, итог ok', async () => {
   const { runner, journal, browser, session } = make();

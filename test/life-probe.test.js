@@ -100,6 +100,22 @@ test('видимый чекбокс «Я не робот» (reCAPTCHA v2) и д�
   }
 });
 
+test('поле пароля в снимке: видимое — да; скрытое, за краем, под накладкой, выключенное — нет', { skip }, async () => {
+  const pw = (style = '', attrs = '') => `<form><input type="password" name="p" style="width:200px;height:28px;${style}" ${attrs}></form>`;
+  assert.equal((await withPage(pw(), (p) => probe.snapshot(p))).passwordField, true, 'видимое поле не замечено');
+  assert.equal((await withPage('<input type="text" name="login" style="width:200px;height:28px">', (p) => probe.snapshot(p))).passwordField, false, 'обычное поле принято за пароль');
+  const none = {
+    'display:none': pw('display:none'),
+    'visibility:hidden': pw('visibility:hidden'),
+    'opacity:0': pw('opacity:0'),
+    'за краем окна': pw('position:absolute;left:-9999px'),
+    'выключено': pw('', 'disabled'),
+    'под накладкой': `${pw('position:absolute;top:50px;left:50px')}<div style="position:absolute;top:0;left:0;width:100%;height:300px;background:#fff"></div>`,
+    'в закрытом диалоге': '<dialog><input type="password" style="width:200px;height:28px"></dialog>',
+  };
+  for (const [name, body] of Object.entries(none)) assert.equal((await withPage(body, (p) => probe.snapshot(p))).passwordField, false, name);
+});
+
 test('показанный фрейм проверки (reCAPTCHA, hCaptcha, Cloudflare) по-прежнему капча', { skip }, async () => {
   const shown = {
     'reCAPTCHA в окне': frame('position:absolute;top:40px;left:100px;visibility:visible;opacity:1'),

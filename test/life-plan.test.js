@@ -107,6 +107,22 @@ test('выбор ссылки: только того же сайта, осмыс
   assert.equal(pickLink([], origin, seeded(1)), null);
 });
 
+test('выбор ссылки: действия в аккаунте хозяина (удалить, пожаловаться, отписаться, голосовать) не берутся', () => {
+  const link = (href, text) => ({ href, text, target: '' });
+  const origin = 'https://a.test/news/1';
+  const bad = [
+    link('https://a.test/news/2/delete', 'Удалить эту запись навсегда'), link('https://a.test/news/2', 'Пожаловаться на эту публикацию'),
+    link('https://a.test/report/2', 'Report this post to moderators'), link('https://a.test/unfollow/x', 'Отписаться от автора канала'),
+    link('https://a.test/vote/2', 'Проголосовать за эту новость'), link('https://a.test/news/2', 'Поделиться записью с друзьями'),
+    link('https://a.test/news/2/remove', 'Remove from my bookmarks now'), link('https://a.test/block/u1', 'Заблокировать пользователя'),
+    link('https://a.test/news/2', 'Мне нравится эта запись'), link('https://a.test/follow/u1', 'Follow this author today'),
+  ];
+  const good = link('https://a.test/news/3', 'Ещё одна интересная новость');
+  const picked = new Set(runs(200, (r) => pickLink([...bad, good], origin, r).href));
+  assert.deepEqual([...picked], ['https://a.test/news/3']);
+  assert.equal(pickLink(bad, origin, seeded(1)), null);
+});
+
 test('выбор ссылки на видео: по шаблону адреса', () => {
   const links = [
     { href: 'https://c.test/about', text: 'О проекте и команде сервиса', target: '' },

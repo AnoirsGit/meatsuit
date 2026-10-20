@@ -15,8 +15,16 @@
 #   - --force-dark-mode, --disable-file-system, --disable-dev-shm-usage
 #                                    убраны: первые два видны страницам и отличают браузер от обычного;
 #                                    третий не нужен при shm_size 2g.
-#   Остальное как в образе: --no-sandbox (контейнер, пользователь не root), --disable-gpu и
-#   --disable-software-rasterizer (в контейнере без видеокарты).
+#   - --disable-software-rasterizer  убран 20.10.2026: с ним WebGL недоступен вовсе, а у людей на настольных
+#                                    системах он есть почти всегда (selfcheck.js показывал жёлтую отметку).
+#   + --enable-unsafe-swiftshader    без него Brave с интерфейсом (в отличие от headless Chromium) WebGL всё равно
+#                                    не даёт: новые Chromium не включают программный SwiftShader сами. Измерено
+#                                    20.10.2026 в этом образе через selfcheck.js: без флага webgl: null, с флагом
+#                                    WebGL есть (Brave отдаёт vendor/renderer «Brave»: это его защита отпечатка,
+#                                    у всех пользователей Brave так). Страницы с тяжёлым WebGL грузят процессор;
+#                                    отключить можно, убрав флаг здесь.
+#   Остальное как в образе: --no-sandbox (контейнер, пользователь не root), --disable-gpu (в контейнере
+#   без видеокарты).
 set -eu
 
 PROFILE=/home/neko/.config/brave
@@ -89,5 +97,5 @@ exec /opt/brave.com/brave/brave \
   --password-store=basic \
   --lang=en-US \
   --disable-gpu \
-  --disable-software-rasterizer \
+  --enable-unsafe-swiftshader \
   ${BRAVE_EXTRA_FLAGS:-}

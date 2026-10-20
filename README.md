@@ -31,7 +31,9 @@ This is a hypothesis, not a guarantee. Nobody publishes what sites actually look
 - **A mirror of the browser** ([Neko](https://github.com/m1k1o/neko) with Brave in Docker). The profile persists, so you sign in once and stay signed in.
 - **An HTTP interface** for your scripts: `GET /view` returns a plain-HTML copy of what is visible, with numbers on the interactive elements; `POST /act` performs one action (click, fill, type, scroll, go to a page) on an element chosen by number, by visible text, or by CSS.
 - **Human-like hands.** Mouse paths are slightly curved with Fitts's-law timing, hand tremor, the occasional twitch and overshoot. Typing is key by key with realistic rhythm, adjacent-key typos that get corrected, and real Latin and Cyrillic layouts. Scrolling is wheel notches with reading pauses.
-- **Rails.** One task at a time. Per-site limits that behave like a person (gradual ramp-up, rest days, daily jitter, a multi-day pause after a challenge). Captcha, block and login pages are detected and the task stops; the human solves it in the mirror. An egress check refuses to run unless traffic leaves from the expected country and network.
+- **Rails.** One task at a time. Per-site limits that behave like a person (gradual ramp-up, rest days, daily jitter, a multi-day pause after a challenge). A human "think" pause before every action, so a fast script still moves at a person's rhythm. Captcha, block and login pages are detected before and after every action and the task stops; the human solves it in the mirror. An egress check refuses to run unless traffic leaves from the expected country and network.
+- **It steps aside for you.** While you hold control in the mirror, bots and warm-up wait (`503 owner_present`); a bot task and a warm-up session never run at the same time (one browser lock).
+- **A self-check.** `node selfcheck.js` opens a window in the running browser and prints what a site can see there (automation and container tells) with red and yellow marks. On the author's mirror it shows no red marks. What they mean: [docs/stealth.md](docs/stealth.md).
 - **Optional warm-up.** A scheduler that, a few days a week, reads ordinary sites like a person would (scrolls, follows a link, closes a cookie banner, searches Wikipedia). It only reads; it never signs in or posts.
 
 ## What this is not
@@ -100,9 +102,11 @@ Full reference: [docs/http-api.md](docs/http-api.md). Never expose the service o
 
 | Path | What it is |
 |---|---|
-| `human.js`, `human/` | mouse, keyboard and scroll with human timing |
-| `view.js`, `driver.js` | the visible-HTML copy and the browser driver (Patchright over CDP) |
+| `human.js`, `human/` | mouse, keyboard and scroll with human timing, and the think pause between actions |
+| `view.js`, `driver.js`, `window.js` | the visible-HTML copy, the browser driver (Patchright over CDP), a window of its own sized like the owner's |
+| `selfcheck.js` | what a site can see in this browser, with red and yellow marks |
 | `server.js`, `queue.js`, `limits.js`, `egress.js`, `notify.js` | the HTTP service: tokens, one-at-a-time queue, limits, egress check, Telegram alerts |
+| `presence.js`, `lease.js` | is the owner at the controls (Neko API); the browser lock shared by the service and the warm-up |
 | `guard.js` | recognises captcha, block and login pages |
 | `life.js`, `life/` | the warm-up scheduler and sessions |
 | `docker/` | the mirror: Neko and Brave, the optional warm-up and HTTP services, the optional exit-node setup |
@@ -116,6 +120,7 @@ Full reference: [docs/http-api.md](docs/http-api.md). Never expose the service o
 - [HTTP API](docs/http-api.md): `GET /view`, `POST /act`, tasks, limits, errors
 - [Warm-up](docs/warmup.md): what it does, what it deliberately does not do, configuration
 - [Egress](docs/egress.md): why your own IP matters and how to route the browser through it
+- [Stealth](docs/stealth.md): what a site can see, what is done about each tell, what is left, and how to measure it
 - [Docker mirror](docker/README.md): running it, what was verified, deploying to a server
 
 Russian working notes are kept in [docs/ru/](docs/ru/).

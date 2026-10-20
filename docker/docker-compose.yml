@@ -76,9 +76,12 @@ services:
     environment:
       TZ: ${MEATSUIT_TZ:-Asia/Almaty} # часовой пояс браузера должен совпадать с поясом страны выхода
       MEATSUIT_CDP: http://127.0.0.1:9222
+      # Хозяин у руля в зеркале: Neko в той же сети; пока он управляет, сессия не начинается.
+      MEATSUIT_NEKO_URL: http://127.0.0.1:8080
+      NEKO_ADMIN_PASSWORD: ${NEKO_ADMIN_PASSWORD}
     volumes:
       - ..:/app:ro # код из репозитория; зависимости (patchright) лежат в образе
-      - life_data:/data # состояние, журнал data/life.jsonl, повадки persona.json
+      - life_data:/data # состояние, журнал data/life.jsonl, повадки persona.json, замок data/browser.lock (общий с сервисом)
     command: ["node", "life.js", "run", "--config", "${LIFE_CONFIG:-/app/profiles/life.json}", "--data", "/data"]
 
   # HTTP-сервис: GET /view и POST /act для ваших скриптов (docs/http-api.md). Профиль api. Сеть общая с Neko
@@ -105,6 +108,8 @@ services:
       TZ: ${MEATSUIT_TZ:-Asia/Almaty}
       MEATSUIT_TZ: ${MEATSUIT_TZ:-Asia/Almaty}
       MEATSUIT_CDP: http://127.0.0.1:9222
+      MEATSUIT_NEKO_URL: http://127.0.0.1:8080 # хозяин у руля в зеркале: задачи ждут (503 owner_present)
+      NEKO_ADMIN_PASSWORD: ${NEKO_ADMIN_PASSWORD}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
     volumes:

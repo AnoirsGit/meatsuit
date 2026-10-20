@@ -126,7 +126,9 @@ function readingTime(chars, rnd = Math.random) {
   return clamp(fullMs * clamp(lognormal(rnd, 0.4, 0.35), 0.15, 1), 8000, 240000);
 }
 
-const DENY = /log-?out|log-?in|sign-?(in|up)|register|subscribe|unsubscribe|\bcart\b|checkout|\bbuy\b|download|account|settings|password|donate|sponsor|advert|\/ads?\b|mailto:|tel:|javascript:|войти|выйти|регистрац|подпис|корзин|купить|скачать|пожертв|реклам/i;
+// Прогрев идёт в браузере, где хозяин может быть залогинен: ссылка «удалить», «пожаловаться», «отписаться» или
+// голосование меняет что-то в его аккаунте. Такие не берутся вместе со входом, покупкой и подпиской.
+const DENY = /log-?out|log-?in|sign-?(in|up)|register|subscribe|unsubscribe|\bcart\b|checkout|\bbuy\b|download|account|settings|password|donate|sponsor|advert|\/ads?\b|mailto:|tel:|javascript:|войти|выйти|регистрац|подпис|корзин|купить|скачать|пожертв|реклам|delete|remove|\breport\b|complain|\bblock\b|unfollow|\bfollow\b|\blike\b|\bvote\b|\bshare\b|удал|пожалов|жалоб|заблок|отписа|поделит|нравит|голос|оцени/i;
 
 /**
  * Ссылка, по которой можно пойти: того же сайта, осмысленная по длине текста,
