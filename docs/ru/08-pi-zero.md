@@ -118,8 +118,9 @@
 6. **Админка Tailscale** — это делает владелец: одобрить узел и exit node, отключить срок ключа.
 7. **Замер с сервера** по [egress.md, «Verify» и «SSH safety warning»](../egress.md#verify), с автоматическим
    откатом. Скорость вверх должна быть заметно выше 8 Мбит/с.
-8. **Переключить сервер.** В `/opt/meatsuit/docker/.env` в `TS_EXTRA_ARGS` сменить имя узла с `anoir-pc` на
-   `home-exit` и перезапустить контейнер Tailscale. После этого пересоздать сервис `apply` у cvs
+8. **Переключить сервер.** В `/opt/meatsuit/docker/.env` добавить `home-exit` в `MEATSUIT_EXIT_NODES` (порядок —
+   [09-phone-exit-node.md](09-phone-exit-node.md), шаг 5) или, без списка, в `TS_EXTRA_ARGS` сменить узел на 100.x-адрес
+   `home-exit` (имя Tailscale 1.102 при старте не принимает) и перезапустить контейнер Tailscale. После этого пересоздать сервис `apply` у cvs
    (`--force-recreate apply`): он живёт в сети браузера.
 
 ## Где что лежит (на `anoir-pc`, вне репозитория)
