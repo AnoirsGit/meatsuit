@@ -63,7 +63,9 @@ The rule: **no tunnel means no network.** If the tunnel or the exit node is down
 
 `docker/egress/killswitch.sh` enforces it. It runs in the Tailscale container before Tailscale starts and installs `iptables` rules on outgoing traffic, for IPv4 and IPv6 (the Tailscale container also switches IPv6 off with `sysctl`, and the script refuses to start if `ip6tables` is missing and IPv6 is not switched off; the rule order and this refusal are tested on stand-in commands; the real rules ran on the owner's server, see [What is verified](#what-is-verified-and-what-is-not)): loopback and the tunnel interface are allowed, replies on established connections are allowed, anything run by root (that is `tailscaled`, which must reach the internet to build the tunnel) is allowed, and everything else is rejected. Neko, warm-up and the HTTP service run as non-root users in the same namespace, so they have no route out except the tunnel. The catch: any process running as root in that namespace would bypass it.
 
-Not verified, because the egress profile has never been run: that this rule does not break WebRTC, that the browser really stays silent when the tunnel is down, and that DNS goes through the tunnel (the aim: otherwise CDNs pick servers by the datacenter's resolver).
+On the owner's server (8 October 2026) the browser stayed silent with the exit node unset, and the mirror (its own WebRTC to you over the tailnet) works in this namespace. Not verified: that WebRTC from pages to sites goes through the tunnel.
+
+**DNS does not go through the tunnel.** Docker resolves names for the container and sends the queries to the servers in compose `dns:` (`1.1.1.1`, `9.9.9.9` by default, `KILLSWITCH_DNS_BYPASS` in `killswitch.sh`); with the exit node set these queries went into a tunnel that needs DNS to come up, and after a restart Tailscale never signed in. So port 53 to those servers is routed through the server's own interface. Sites see only the home address, but resolvers see the server's, and a CDN may pick its servers for the server's region. Page traffic itself still has no route out except the tunnel.
 
 ## The egress check
 

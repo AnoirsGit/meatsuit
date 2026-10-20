@@ -159,7 +159,8 @@ services:
     mem_limit: 256m
     memswap_limit: 256m
     pids_limit: 256
-    # DNS браузера идёт обычным запросом через общий маршрут, то есть через туннель.
+    # DNS браузера идёт к этим серверам мимо туннеля, через основной интерфейс сервера (egress/killswitch.sh,
+    # KILLSWITCH_DNS_BYPASS): иначе Tailscale после перезапуска не входил. Сайты видят только домашний адрес.
     dns: [1.1.1.1, 9.9.9.9]
     environment:
       TS_AUTHKEY: ${TS_AUTHKEY:-}
