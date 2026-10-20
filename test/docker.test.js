@@ -128,9 +128,19 @@ test('Tailscale — необязательный профиль: MEATSUIT_EGRESS
     assert.ok(ts.ports.some((p) => p.target === 8080) && !ts.ports.some((p) => p.target === 9222));
     for (const s of ['life', 'server']) assert.equal(m.services[s].network_mode, 'service:tailscale', s);
     assert.equal(m.services.neko.depends_on.tailscale.condition, 'service_healthy');
+    // выключатель, затем выбор exit node по списку, затем containerboot
+    assert.deepEqual(ts.entrypoint, ['/bin/sh', '/killswitch.sh']);
+    assert.deepEqual(ts.command, ['/bin/sh', '/exit-picker.sh', 'launch', '/usr/local/bin/containerboot']);
+    assert.ok(ts.volumes.some((v) => v.target === '/exit-picker.sh' && v.read_only && v.source.endsWith(path.join('egress', 'exit-picker.sh'))));
+    assert.equal(ts.environment.MEATSUIT_EXIT_NODES, '', 'без списка — как раньше, выход из TS_EXTRA_ARGS');
+    assert.match(ts.healthcheck.test.join(' '), /! grep -qx closed \/tmp\/exit-picker\/gate/);
   }
   // и из окружения, как остальные переменные compose
   assert.ok(model(envFile(t), { MEATSUIT_EGRESS: 'tailscale' }).services.tailscale);
+  // список exit node и ожидаемый выход доходят до контейнера из файла деплоя
+  const listed = model(envFile(t, {}, 'MEATSUIT_EGRESS=tailscale\nMEATSUIT_EXIT_NODES=home-phone,anoir-pc\nMEATSUIT_EXIT_COUNTRY=KZ\nMEATSUIT_EXIT_ASN=64500\n'));
+  const env = listed.services.tailscale.environment;
+  assert.deepEqual([env.MEATSUIT_EXIT_NODES, env.MEATSUIT_EXIT_COUNTRY, env.MEATSUIT_EXIT_ASN], ['home-phone,anoir-pc', 'KZ', '64500']);
 });
 
 test('up.sh: без файла и с непонятным MEATSUIT_EGRESS — отказ с подсказкой, docker не зовётся', (t) => {
