@@ -55,7 +55,9 @@ function entryFor(k, shift, layout) {
 }
 const special = (code, key, text, vk, finger, row) => ({ code, key, text, name: key === ' ' ? ' ' : key, vk, shift: false, finger, row, raw: false });
 const SPACE = special('Space', ' ', ' ', 32, 8, 4);
-const ENTER = special('Enter', 'Enter', '\n', 13, 7, 2);
+// Перевод строки — Shift+Enter: в обычном textarea это та же новая строка, а в чате голый Enter
+// отправил бы полсообщения. Shift жмёт левая рука (Enter у правого мизинца), как у человека.
+const ENTER = { ...special('Enter', 'Enter', '\n', 13, 7, 2), shift: true };
 const BACKSPACE = special('Backspace', 'Backspace', '', 8, 7, 0);
 const shiftFor = (finger) => {
   const code = handOf(finger) === 'L' ? 'ShiftRight' : 'ShiftLeft';

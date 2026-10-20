@@ -1,39 +1,80 @@
 /**
- * guard: по снимку страницы решает, можно ли продолжать. Только распознавание,
- * обхода нет: капча и блок останавливают бота, вход означает «сессия потеряна».
+ * Предохранитель: по снимку страницы решает, что дальше без человека нельзя.
+ * Капча, страница входа, «подозрительная активность» — стоп и сообщение мне.
+ * Обхода нет.
  *
- * Снимок: { url, title, text, captchaFrame }. Фразы ищутся только на коротких
- * страницах (страница-заглушка мала, а длинная статья про капчу не повод
- * останавливаться); структурный признак (фрейм капчи) работает всегда.
+ * check() — чистая функция, её проверяет test/guard.test.js.
  */
-const CAPTCHA_TEXT = /verify (that )?you('| a)?re (a )?human|are you a robot|i'?m not a robot|checking your browser|подтвердите,? что (вы не робот|запросы отправляли вы)|я не робот|вы не робот|введите символы с картинки|press\s*(&|and)\s*hold|confirm you are a human/i;
-const BLOCKED_TEXT = /unusual traffic|access denied|too many requests|temporarily blocked|подозрительн[а-яё]+ (активност|трафик)|доступ (запрещ|ограничен)|превышен лимит запросов/i;
-const CHALLENGE_TITLE = /just a moment|attention required/i;
-// Заголовок страницы-ошибки: «403», «Error 403», «403 Forbidden». «403 — Википедия» и «429 год» — это статьи.
-const ERROR_TITLE = /^\s*(?:(?:error|http)\s*)?(?:403|429)\s*(?:[-–—:.]?\s*(?:forbidden|too many requests|access denied|error|доступ запрещ|запрещ|слишком много)[^]*)?$/i;
-const CHALLENGE_URL = /\/(show)?(captcha|challenge)\b/i;
-const BLOCKED_URL = /\/(sorry|checkpoint|blocked)\b/i;
-const LOGIN_PATH = /\/(log-?in|sign-?in)(?=[/.]|$)/i; // /signin ловит и вход Google (/v3/signin); «/login-security-tips» — статья, не вход
-
-const SHORT = 2000;
-
-/** Путь адреса без строки запроса и якоря: «?next=/login» входом не считается. */
-function pathOf(url) {
-  try { return new URL(url).pathname; } catch { return String(url).split(/[?#]/)[0]; }
+class NeedsHuman extends Error {
+  constructor(reason, url) { super(reason); this.reason = reason; this.url = url; }
 }
 
-/** 'captcha' | 'blocked' | 'login' | null */
-function classify({ url = '', title = '', text = '', captchaFrame = false } = {}) {
-  if (captchaFrame) return 'captcha';
-  const short = text.length < SHORT;
-  if (short && CHALLENGE_TITLE.test(title)) return 'captcha';
-  if (short && CHALLENGE_URL.test(url)) return 'captcha';
-  if (short && BLOCKED_URL.test(url)) return 'blocked';
-  if (short && CAPTCHA_TEXT.test(`${title} ${text}`)) return 'captcha';
-  if (short && ERROR_TITLE.test(title)) return 'blocked';
-  if (short && BLOCKED_TEXT.test(`${title} ${text}`)) return 'blocked';
-  if (LOGIN_PATH.test(pathOf(url))) return 'login';
+const CAPTCHA = /captcha|hcaptcha|arkose|verify (that )?you('| a)re (a )?human|i'?m not a robot|не робот/i;
+const SUSPICIOUS = new RegExp([
+  'unusual activity', 'suspicious activity', 'подозрительн\\w* активност',
+  'account (has been )?(suspended|banned|restricted|locked)', 'аккаунт (заблокирован|ограничен|приостановлен)',
+  'too many requests', 'слишком много запросов', 'access denied', 'доступ ограничен',
+].join('|'), 'i');
+const CAPTCHA_FRAME = /recaptcha|hcaptcha|arkoselabs|funcaptcha|challenges\.cloudflare\.com|geetest/i;
+const LOGIN_URL = /\/(log-?in|sign-?in)(\/|$|\?)/i;
+const PASSWORD = /password|пароль/i;
+
+// reCAPTCHA на формах — это два iframe: якорь (anchor) и задание (bframe). Невидимый якорь
+// (size=invisible, v3 и Enterprise) у человека ничего не просит, а bframe висит в DOM скрытым
+// рядом с любым якорем и показывается только вместе с заданием. Поэтому стоп — это галочка
+// «I'm not a robot» (якорь без size=invisible) или показанный bframe. Адрес разбираем через URL:
+// size=invisible в чужом параметре, во фрагменте или не на хосте reCAPTCHA ничего не меняет.
+const RECAPTCHA_HOST = /(^|\.)(google\.com|recaptcha\.net)$/i;
+const RECAPTCHA_PATH = /^\/recaptcha\/(api2|enterprise)\/(anchor|bframe)$/;
+const recaptcha = (u) => {
+  let x; try { x = new URL(u); } catch { return null; }
+  const m = RECAPTCHA_HOST.test(x.hostname) && RECAPTCHA_PATH.exec(x.pathname);
+  return m ? { frame: m[2], invisible: x.searchParams.get('size') === 'invisible' } : null;
+};
+
+/** Есть ли среди frames капча, которую человек видит. Без hiddenFrames кадр считается показанным. */
+function captchaFrame(frames, hiddenFrames) {
+  const count = (arr, u) => arr.filter((x) => x === u).length;
+  return frames.some((u) => {
+    const rc = recaptcha(u);
+    if (!rc) return CAPTCHA_FRAME.test(u);
+    if (rc.frame === 'anchor') return !rc.invisible;
+    return count(frames, u) > count(hiddenFrames, u); // bframe: хотя бы один такой кадр показан
+  });
+}
+
+// Страницы-заглушки малы. Длинный текст — это профили и переписка, а в
+// био у человека может быть слово «captcha»: по нему не останавливаемся.
+const BLOCK_PAGE_MAX_TEXT = 600;
+
+// Порог — к каждому куску text отдельно: light DOM и каждый shadow-корень (длины в textParts от eyes).
+// Иначе баннер cookie в shadow на несколько сотен символов прятал бы заглушку из light DOM.
+const shortText = (s) => {
+  if (typeof s.text !== 'string') return '';
+  const ok = Array.isArray(s.textParts) && s.textParts.every((n) => Number.isInteger(n) && n >= 0);
+  const out = [];
+  let at = 0;
+  for (const n of ok ? s.textParts : [s.text.length]) {
+    if (n <= BLOCK_PAGE_MAX_TEXT) out.push(s.text.slice(at, at + n));
+    at += n + 1; // куски склеены через пробел
+  }
+  return out.join(' ');
+};
+
+const urlPath = (u) => { try { const x = new URL(u); return x.pathname + x.search; } catch { return ''; } };
+
+/** null, если всё нормально, иначе причина остановки. */
+function check(s) {
+  const dialogs = (s.dialogs || []).map((d) => `${d.name} ${d.text}`).join(' ');
+  const names = (s.elements || []).map((e) => e.name).join(' ');
+  const short = shortText(s);
+  const haystack = [s.title, dialogs, short, names].filter(Boolean).join(' ');
+
+  if (CAPTCHA.test(haystack) || captchaFrame(s.frames || [], s.hiddenFrames || [])) return 'капча';
+  if (SUSPICIOUS.test(haystack)) return 'подозрительная активность или ограничение аккаунта';
+  const passwordField = (s.elements || []).some((e) => e.inputType === 'password' || (e.role === 'textbox' && PASSWORD.test(e.name)));
+  if (passwordField || (s.url && LOGIN_URL.test(urlPath(s.url)))) return 'страница входа';
   return null;
 }
 
-module.exports = { classify };
+module.exports = { check, NeedsHuman };
