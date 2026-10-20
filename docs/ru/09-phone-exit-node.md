@@ -73,8 +73,15 @@ MEATSUIT_EXIT_ASN=<номер>           # там же: число из поля
 docker/up.sh up -d --force-recreate
 ```
 
-После этого пересоздать стеки, которые подключены к браузеру через `container:meatsuit-browser` (сервис `apply` у cvs,
-бот tinder-matcher): со старым сетевым окружением они остаются без сети, как в шаге 8 [08-pi-zero.md](08-pi-zero.md).
+После этого пересоздать то, что подключено к браузеру через `container:meatsuit-browser` и живёт постоянно: со старым
+сетевым окружением оно остаётся без сети, как в шаге 8 [08-pi-zero.md](08-pi-zero.md).
+
+```sh
+cd /opt/cvs && docker compose --profile apply up -d --force-recreate apply   # отклики и коды из remora (идут через tailscale0 этого стека)
+```
+
+Бот tinder-matcher (`deploy/run.sh` → `docker compose run --rm matcher`) — новый контейнер на каждый запуск cron, сам
+берёт новое сетевое окружение; его `pult` и `ui` живут в своей сети, их пересоздавать не нужно.
 
 Если в `profiles/egress.json` (замороженный прогрев и HTTP-сервис) записаны номера провайдеров — там должен быть только
 домашний, не мобильный.
