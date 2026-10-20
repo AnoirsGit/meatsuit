@@ -2,7 +2,7 @@
 
 One long-lived browser in Docker. A person opens it from an ordinary browser (picture and sound over WebRTC), signs in to sites there once, and solves whatever a bot stops on. Callers' code attaches to the same browser over CDP with the meatsuit library.
 
-Terms: **Neko** is a self-hosted virtual browser that streams a desktop to a web page. **WebRTC** is the browser technology it uses for video and sound. **CDP** (Chrome DevTools Protocol) is the debugging port that automation libraries connect to. For the project as a whole see the [README](../README.md); the library's API is in [04-contract.md](../docs/04-contract.md).
+Terms: **Neko** is a self-hosted virtual browser that streams a desktop to a web page. **WebRTC** is the browser technology it uses for video and sound. **CDP** (Chrome DevTools Protocol) is the debugging port that automation libraries connect to. For the project as a whole see the [README](../README.md); the library's API is in [contract.md](../docs/contract.md).
 
 meatsuit is personal automation of your own accounts at low volume. Platforms' terms apply, and you are responsible for them. A captcha is never solved by the software: you solve it yourself in the mirror.
 
@@ -82,7 +82,7 @@ volumes:
     external: true
 ```
 
-All callers of one browser must pass the same `dir` to `connect()`: the queue lock lives there, and with different locks two bots would enter the browser at once. `peek(site, { sitesFile, dir })` from the library reads what is left of a site's limits without spending a slot ([04-contract.md](../docs/04-contract.md)).
+All callers of one browser must pass the same `dir` to `connect()`: the queue lock lives there, and with different locks two bots would enter the browser at once. `peek(site, { sitesFile, dir })` from the library reads what is left of a site's limits without spending a slot ([contract.md](../docs/contract.md)).
 
 The container's host name is fixed too (`meatsuit-browser`): Chromium's profile lock remembers the host name, and after a re-create under a new name the browser would open a "profile in use on another computer" window. With the Tailscale overlay the browser shares the Tailscale container's network and host name instead (Docker allows no own host name there), which is just as stable.
 

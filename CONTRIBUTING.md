@@ -54,7 +54,7 @@ The tests use fake pages and never touch real sites. The live check on a real mi
 - **Check that your test can fail.** Break the code on purpose and make sure a test notices.
 - **Say what is verified and what is not.** Put "not verified" next to the claim it belongs to, in code comments and docs. Write what you ran and what you saw, not what should work.
 - **Keep the safety rails.** A task must stop on a captcha, a block or a login page and leave the window to the human. The command set stays closed: no arbitrary JavaScript, no navigation off the task's site.
-- **Keep the contract.** `docs/04-contract.md` and the export list (`test/api.test.js`) change only together with the callers.
+- **Keep the contract.** `docs/contract.md` with its Russian version `docs/04-contract.md`, and the export list (`test/api.test.js`) change only together with the callers.
 
 ## Pull requests
 

@@ -4,11 +4,12 @@ Start with the [project README](../README.md). meatsuit is just this: launch a b
 
 | Document | Read it to learn |
 |---|---|
-| [04-contract.md](04-contract.md) (Russian) | the library's API, the contract callers rely on: `connect`, `task`, `see`, `act`, `sites.json`, errors, journal |
+| [contract.md](contract.md) ([Russian](04-contract.md)) | the library's API, the contract callers rely on: `connect`, `task`, `see`, `act`, `sites.json`, errors, journal |
 | [architecture.md](architecture.md) | how the library, the mirror and the deploy file fit together, and why |
 | [../docker/README.md](../docker/README.md) | running the mirror: the deploy file, choosing Chrome or Brave, attaching another stack, the optional Tailscale exit |
 | [acceptance.md](acceptance.md) (Russian) | the live check on a real mirror: sign in once, restart, the session survives, a `dryRun` task from another machine |
 | [egress.md](egress.md) | why and how to send the browser's traffic out through your own home connection (the mirror's optional `egress` profile) |
+| [ru/08-pi-zero.md](ru/08-pi-zero.md) (Russian) | the home device meant to become the 24/7 exit node: what is prepared, what went wrong, the steps left |
 | [ROADMAP.md](ROADMAP.md) (Russian) | the one list of open items: priority, who does it, when it counts as done |
 
 [../CONTRIBUTING.md](../CONTRIBUTING.md) explains how to run the tests and what changes are in scope.

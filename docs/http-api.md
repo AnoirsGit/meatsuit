@@ -1,6 +1,6 @@
 # HTTP API reference
 
-> **Frozen.** This page describes `extras/`: code from an earlier line of meatsuit that works and is tested (`npm --prefix extras ci`, then `npm run test:extras`) but is not developed. The modules named here live in `extras/` (`extras/server.js`, `extras/life.js`, `extras/limits.js` and so on) and run from the repository root as `node extras/<file>`. The maintained product is the library and the mirror: [README](../README.md), [04-contract.md](04-contract.md).
+> **Frozen.** This page describes `extras/`: code from an earlier line of meatsuit that works and is tested (`npm --prefix extras ci`, then `npm run test:extras`) but is not developed. The modules named here live in `extras/` (`extras/server.js`, `extras/life.js`, `extras/limits.js` and so on) and run from the repository root as `node extras/<file>`. The maintained product is the library and the mirror: [README](../README.md), [contract.md](contract.md).
 
 meatsuit exposes one browser to your own scripts through a small HTTP service. A script asks for a task, looks at a page with `GET /view`, does things with `POST /act`, and ends the task. The service queues tasks, paces them, checks the network exit, and moves the mouse and keyboard like a person. For the idea behind this, see [architecture](architecture.md).
 

@@ -55,7 +55,7 @@ const title = await ms.task('read-title', async ({ see, act }) => {
 await ms.close();
 ```
 
-`peek(site, { sitesFile, dir })` tells how much of a site's limits is left without spending a slot. The full API — `see()` snapshots, the closed command set, `sites.json`, errors, the journal and recordings — is in [docs/04-contract.md](docs/04-contract.md) (Russian).
+`peek(site, { sitesFile, dir })` tells how much of a site's limits is left without spending a slot. The full API — `see()` snapshots, the closed command set, `sites.json`, errors, the journal and recordings — is in [docs/contract.md](docs/contract.md).
 
 ## The deploy file
 
