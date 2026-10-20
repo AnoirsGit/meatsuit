@@ -142,9 +142,10 @@ services:
     image: tailscale/tailscale:${TS_TAG:-stable}
     restart: unless-stopped
     hostname: ${TS_HOSTNAME:-meatsuit}
-    # Перед запуском Tailscale ставит аварийный выключатель, затем отдаёт управление containerboot.
+    # Перед запуском Tailscale ставит аварийный выключатель, затем exit-picker.sh (при MEATSUIT_EXIT_NODES закрывает
+    # ворота и фоном выбирает exit node по списку) отдаёт управление containerboot.
     entrypoint: ["/bin/sh", "/killswitch.sh"]
-    command: ["/usr/local/bin/containerboot"]
+    command: ["/bin/sh", "/exit-picker.sh", "launch", "/usr/local/bin/containerboot"]
     cap_add: [NET_ADMIN]
     devices: ["/dev/net/tun:/dev/net/tun"]
     # IPv6 в общей сети закрыт совсем: выход идёт по IPv4, а открытый IPv6 был бы дырой мимо туннеля.
@@ -169,12 +170,17 @@ services:
       TS_USERSPACE: "false" # ядерный режим: настоящий интерфейс tailscale0, нужен для правила по владельцу
       TS_ACCEPT_DNS: "false"
       TS_EXTRA_ARGS: ${TS_EXTRA_ARGS:-}
+      # Выбор exit node по списку с запасным (egress/exit-picker.sh, ../docs/egress.md#fallback-order). Пусто — как раньше.
+      MEATSUIT_EXIT_NODES: ${MEATSUIT_EXIT_NODES:-}
+      MEATSUIT_EXIT_COUNTRY: ${MEATSUIT_EXIT_COUNTRY:-}
+      MEATSUIT_EXIT_ASN: ${MEATSUIT_EXIT_ASN:-}
     volumes:
       - tailscale_state:/var/lib/tailscale
       - ./egress/killswitch.sh:/killswitch.sh:ro
+      - ./egress/exit-picker.sh:/exit-picker.sh:ro
     healthcheck:
-      # Вошёл в tailnet И выбранный exit node в сети.
-      test: ["CMD-SHELL", "tailscale status --json | grep -q '\"BackendState\": \"Running\"' && tailscale status --json | awk '/\"ExitNodeStatus\"/{f=1} f&&/\"Online\"/{print;exit}' | grep -q true"]
+      # Вошёл в tailnet И выбранный exit node в сети И (при проверке выхода в exit-picker.sh) ворота открыты.
+      test: ["CMD-SHELL", "tailscale status --json | grep -q '\"BackendState\": \"Running\"' && tailscale status --json | awk '/\"ExitNodeStatus\"/{f=1} f&&/\"Online\"/{print;exit}' | grep -q true && ! grep -qx closed /tmp/exit-picker/gate 2>/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 6

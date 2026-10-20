@@ -10,6 +10,8 @@
 # В файле деплоя: TS_EXTRA_ARGS="--exit-node=<IP домашнего узла> --exit-node-allow-lan-access=true" (в кавычках;
 # без доступа к LAN ответы зеркалу уходят в туннель и зеркало не открывается). TS_AUTHKEY не обязателен: без него
 # ссылка для входа — в `docker/up.sh logs tailscale`. Подробности и порядок проверки: README.md и ../docs/egress.md.
+# Запасной exit node: MEATSUIT_EXIT_NODES=home-phone,anoir-pc (и MEATSUIT_EXIT_COUNTRY/MEATSUIT_EXIT_ASN для проверки выхода) —
+# egress/exit-picker.sh в контейнере tailscale сам переключает узел по списку, см. ../docs/egress.md#fallback-order.
 # Имя хоста у браузера здесь — имя контейнера tailscale (TS_HOSTNAME): своё задать в чужой сети нельзя,
 # и оно так же постоянное. Вызывающие подключаются так же: network_mode: "container:meatsuit-browser".
 #
