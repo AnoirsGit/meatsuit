@@ -73,7 +73,21 @@ test('ссылок нет совсем: ищет не вечно и идёт д�
   const journal = [];
   await runSession(page, [read('https://a.test/', 40000, 2), read('https://b.test/', 20000)], { env, probe: mkProbe(), log: (e) => journal.push(e) });
   assert.deepEqual(journal.filter((e) => e.event === 'step').map((e) => e.result), ['ok', 'ok']);
-  assert.ok(log.filter((e) => e.op === 'wheel' && e.dy < 0).length <= 250, 'бесконечно ищет ссылки');
+  const backUp = (1000 + 2500 + 6000) / 53; // три возврата вверх делениями колеса (NOTCH), за два перехода по ссылкам
+  assert.ok(log.filter((e) => e.op === 'wheel' && e.dy < 0).length <= 2 * backUp * 1.25, 'бесконечно ищет ссылки');
+});
+
+test('yieldTo: хозяин взялся за руль между сайтами — сессия тихо кончается, новых сайтов не открывает', async () => {
+  const { page, env, state } = fakePage();
+  const journal = [];
+  let asked = 0;
+  const out = await runSession(page, [read('https://a.test/', 5000), read('https://b.test/', 5000), read('https://c.test/', 5000)], { env, probe: mkProbe(), log: (e) => journal.push(e), yieldTo: async () => ++asked >= 2 });
+  assert.deepEqual(out, { cut: false, yielded: true });
+  assert.deepEqual(state.visited, ['https://a.test/']);
+  assert.deepEqual(journal.filter((e) => e.event === 'yield').length, 1);
+  assert.deepEqual(journal.filter((e) => e.event === 'step').map((e) => e.result), ['ok']);
+  const quiet = await runSession(page, [read('https://a.test/', 5000)], { env, probe: mkProbe(), log: () => {}, yieldTo: async () => { throw new Error('Neko лежит'); } });
+  assert.deepEqual(quiet, { cut: false, yielded: false }, 'сбой проверки не останавливает сессию');
 });
 
 // ---------------------------------------------------------------- всплывающее

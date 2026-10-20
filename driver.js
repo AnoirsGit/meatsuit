@@ -12,19 +12,25 @@
  * Все ошибки — DriverError с status и code (400 bad_request, 403 forbidden, 404 not_found,
  * 409 needs_human, 410 stale_ref, 422 ambiguous), плюс 502 nav_failed и 503 browser_gone.
  *
- * Окно, а не вкладка. context.newPage() через CDP зовёт Target.createTarget без newWindow:
- * проверено на настоящем Chromium, страница получает тот же windowId, то есть открывается
- * вкладкой в чужом окне (моём). Поэтому окно создаётся браузерным сеансом CDP,
- * Target.createTarget {newWindow: true}, и страница находится по targetId.
+ * Окно, а не вкладка (window.js): окно создаётся браузерным сеансом CDP и получает размеры окна
+ * хозяина, чтобы не трогать его вкладки и выглядеть для сайта тем же окном, что у него.
  *
  * Ссылка с target=_blank или window.open открывает вкладку в окне задачи: окно следует за ней
  * (view и act работают со всплывшей страницей), закрылась она — возвращается к прежней.
+ *
+ * Перед каждым действием страница проверяется guard: капча, блок или вход, появившиеся между
+ * действиями (отложенная проверка, слетевшая сессия), останавливают до того, как рука что-то
+ * нажмёт. И перед действием выдерживается пауза «подумать» (human/pace.js): недостающее до
+ * человеческой реакции с конца прошлого действия; после смены страницы дольше; прокрутка и пауза
+ * без неё. Сколько ждали, возвращается в paced (мс): клиент видит, что его притормозили.
  */
 const human = require('./human.js');
 const { between, clamp, lognormal } = require('./human/random.js');
+const { reactionMs, owed } = require('./human/pace.js');
 const { classify } = require('./guard.js');
 const probe = require('./life/probe.js');
 const V = require('./view.js');
+const { windowOpener } = require('./window.js');
 
 // ---------------------------------------------------------------- ошибки
 
@@ -85,6 +91,7 @@ function parseAction(action) {
       return { do: 'goto', url };
     }
     case 'click': return { do: 'click', target: parseTarget(action.target) };
+    case 'hover': return { do: 'hover', target: parseTarget(action.target) };
     case 'fill': return { do: 'fill', target: parseTarget(action.target), text: need('text', 'string') };
     case 'type': return { do: 'type', text: need('text', 'string') };
     case 'key': {
@@ -229,7 +236,7 @@ async function createDriver({ cdpUrl, cdp, env = {}, settle: settleOpts = {} } =
 
   const browser = await chromium.connectOverCDP(endpoint);
   const context = browser.contexts()[0] || await browser.newContext(); // основной контекст: профиль с моими входами
-  const bcdp = await browser.newBrowserCDPSession();
+  const openWindow = windowOpener(browser, context);
   let dead = false;
   browser.on('disconnected', () => { dead = true; });
 
@@ -240,33 +247,20 @@ async function createDriver({ cdpUrl, cdp, env = {}, settle: settleOpts = {} } =
 
   const alive = () => { if (dead) throw new DriverError('browser_gone', 'браузер отключился'); };
 
-  /** Страница → targetId: так среди страниц контекста находится именно та, что создана нами. */
-  async function targetIdOf(page) {
-    const s = await context.newCDPSession(page);
-    try { return (await s.send('Target.getTargetInfo')).targetInfo.targetId; } finally { await s.detach().catch(() => {}); }
-  }
-
   async function newWindow() {
-    let made;
-    const known = new Promise((resolve) => { made = resolve; });
-    const waiting = context.waitForEvent('page', { timeout: 15000, predicate: async (p) => (await targetIdOf(p).catch(() => null)) === await known });
-    waiting.catch(() => {}); // если Target.createTarget упадёт, висящее ожидание не должно давать необработанную ошибку
-    try {
-      const { targetId } = await bcdp.send('Target.createTarget', { url: 'about:blank', newWindow: true });
-      made(targetId);
-      return await waiting;
-    } catch (err) {
-      made(null);
+    try { return await openWindow(); } catch (err) {
       throw new DriverError('browser_gone', `не удалось открыть окно: ${err.message}`, { status: 503 });
     }
   }
 
-  /** Страницы окна: подписка на сеть, всплывающие вкладки. */
+  /** Страницы окна: подписка на сеть, всплывающие вкладки, счёт переходов (для паузы «подумать»). */
   function adopt(w, page) {
     const net = watchNetwork(page, { longMs: wait.longMs });
     w.nets.set(page, net);
     w.pages.push(page);
     w.page = page;
+    w.navs++;
+    page.on('framenavigated', (f) => { if (f === page.mainFrame()) w.navs++; });
     page.on('popup', (popup) => { net.touch(); adopt(w, popup); });
     page.on('close', () => {
       net.dispose();
@@ -331,6 +325,8 @@ async function createDriver({ cdpUrl, cdp, env = {}, settle: settleOpts = {} } =
     },
 
     click: (w, a) => withElement(w.page, a.target, (el) => human.click(w.page, el, hands)),
+
+    hover: (w, a) => withElement(w.page, a.target, (el) => human.hover(w.page, el, hands)),
 
     fill: (w, a) => withElement(w.page, a.target, async (el) => {
       const kind = await el.evaluate((e) => {
@@ -398,6 +394,18 @@ async function createDriver({ cdpUrl, cdp, env = {}, settle: settleOpts = {} } =
 
   /** Снимок страницы для guard; перешедшая страница читается устойчиво (probe.snapshot повторяет). */
   const guardOf = async (page) => classify(await probe.snapshot(page));
+  const needsHuman = (guard, url) => new DriverError('needs_human', `${guard}: ${url}`, { guard, url }); // окно остаётся открытым
+
+  // Какая пауза «подумать» нужна перед действием: после смены страницы с прошлого действия — осмотреться.
+  const THINK = { goto: 'act', back: 'act', click: 'act', fill: 'act', hover: 'act', type: 'keys', key: 'keys' };
+  async function think(w, kind) {
+    const navigated = w.navs !== w.mark;
+    w.mark = w.navs;
+    if (!THINK[kind] || w.lastAt === null) return 0; // первое действие в окне: страницы ещё не было
+    const ms = owed(reactionMs(navigated ? 'page' : THINK[kind], hands.rnd), hands.now() - w.lastAt);
+    if (ms > 0) await hands.sleep(ms);
+    return ms;
+  }
 
   return {
     async open({ site, allow } = {}) {
@@ -407,8 +415,9 @@ async function createDriver({ cdpUrl, cdp, env = {}, settle: settleOpts = {} } =
       if (!hosts.length) throw bad('open: нужен site или allow');
       const page = await newWindow();
       const id = `w${++counter}-${Math.random().toString(36).slice(2, 8)}`;
-      const w = { id, allow: hosts, pages: [], page: null, nets: new Map() };
+      const w = { id, allow: hosts, pages: [], page: null, nets: new Map(), navs: 0, mark: 0, lastAt: null };
       adopt(w, page);
+      w.mark = w.navs;
       windows.set(id, w);
       return { id };
     },
@@ -424,14 +433,18 @@ async function createDriver({ cdpUrl, cdp, env = {}, settle: settleOpts = {} } =
     async act(id, action) {
       const w = win(id);
       const a = parseAction(action);
+      const before = await guardOf(w.page); // капча, блок или вход появились между действиями: не нажимать ничего
+      if (before) throw needsHuman(before, w.page.url());
+      const paced = await think(w, a.do);
       await doers[a.do](w, a);
       const page = w.page; // клик мог открыть вкладку: дальше работаем с ней
       if (!page) throw new DriverError('not_found', 'окно закрыто');
       const net = w.nets.get(page);
       const settled = a.do === 'pause' ? true : await settle(net, wait);
+      w.lastAt = hands.now();
       const guard = await guardOf(page);
-      if (guard) throw new DriverError('needs_human', `${guard}: ${page.url()}`, { guard, url: page.url() }); // окно остаётся открытым
-      return { ok: true, url: page.url(), settled, guard: null };
+      if (guard) throw needsHuman(guard, page.url());
+      return { ok: true, url: page.url(), settled, guard: null, paced };
     },
 
     async resume(id) {

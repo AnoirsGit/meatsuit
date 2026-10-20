@@ -78,9 +78,11 @@ node life.js now --dry
 
 | Путь | Что это |
 |---|---|
-| `human.js`, `human/` | мышь, клавиатура и прокрутка с человеческим темпом |
-| `view.js`, `driver.js` | копия видимого HTML и драйвер браузера (Patchright по CDP) |
+| `human.js`, `human/` | мышь, клавиатура и прокрутка с человеческим темпом, пауза «подумать» между действиями |
+| `view.js`, `driver.js`, `window.js` | копия видимого HTML, драйвер браузера (Patchright по CDP), своё окно размером с окно хозяина |
+| `selfcheck.js` | что сайт видит в этом браузере: признаки автоматизации и контейнера с красными и жёлтыми отметками |
 | `server.js`, `queue.js`, `limits.js`, `egress.js`, `notify.js` | HTTP-сервис: токены, очередь по одному, лимиты, проверка выхода, уведомления в Telegram |
+| `presence.js`, `lease.js` | хозяин у руля в зеркале (API Neko); замок на браузер, общий у сервиса и прогрева |
 | `guard.js` | распознаёт капчу, блок и страницу входа |
 | `life.js`, `life/` | планировщик и сессии прогрева |
 | `docker/` | зеркало: Neko и Brave, необязательные сервисы прогрева, HTTP-интерфейса и выхода через дом |
@@ -90,7 +92,7 @@ node life.js now --dry
 
 ## Документация
 
-Английские документы поддерживаются: [как устроено](docs/architecture.md), [HTTP API](docs/http-api.md), [прогрев](docs/warmup.md), [выход в сеть](docs/egress.md), [зеркало в Docker](docker/README.md). Рабочие заметки автора на русском: [docs/ru/](docs/ru/) и [docker/README.ru.md](docker/README.ru.md).
+Английские документы поддерживаются: [как устроено](docs/architecture.md), [HTTP API](docs/http-api.md), [прогрев](docs/warmup.md), [выход в сеть](docs/egress.md), [скрытность: что видит сайт](docs/stealth.md), [зеркало в Docker](docker/README.md). Рабочие заметки автора на русском: [docs/ru/](docs/ru/) (в том числе [ревью скрытности 20.10.2026](docs/ru/09-stealth.md)) и [docker/README.ru.md](docker/README.ru.md).
 
 ## Участие
 

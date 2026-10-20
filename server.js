@@ -10,7 +10,8 @@
  *                  [--egress profiles/egress.json] [--cdp http://127.0.0.1:9222]
  *                  [--tz Asia/Almaty]
  *
- * Окружение: MEATSUIT_HOST, MEATSUIT_PORT, MEATSUIT_CDP, MEATSUIT_TZ, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
+ * Окружение: MEATSUIT_HOST, MEATSUIT_PORT, MEATSUIT_CDP, MEATSUIT_TZ, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+ * MEATSUIT_NEKO_URL и NEKO_ADMIN_PASSWORD (присутствие хозяина в зеркале; без адреса не проверяется).
  * Нужен driver.js (open / view / act / resume / close).
  */
 const http = require('node:http');
@@ -19,12 +20,13 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const MIN = 60000;
-const ACTIONS = new Set(['goto', 'click', 'fill', 'type', 'key', 'scroll', 'back', 'pause']);
-// Действия на сайте, которые считает потолок задачи; прокрутка, «назад» и пауза сайту ничего не делают.
+const ACTIONS = new Set(['goto', 'click', 'fill', 'type', 'key', 'scroll', 'back', 'pause', 'hover']);
+// Действия на сайте, которые считает потолок задачи; прокрутка, наведение, «назад» и пауза сайту ничего не делают.
 const COUNTED = new Set(['goto', 'click', 'fill', 'type', 'key']);
 const DRIVER_STATUSES = new Set([400, 403, 404, 409, 410, 422, 502, 503]); // что Driver вправе бросать (502 сайт не открылся, 503 браузер пропал), остальное — 500
 const HOST = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/;
 const GUARD_RU = { captcha: 'капча', blocked: 'сайт заподозрил бота и блокирует', login: 'слетел вход' };
+const NO_PRESENCE = { enabled: false, check: async () => ({ present: false, disabled: true }), last: () => null, logout: async () => {} };
 
 class HttpError extends Error {
   constructor(status, code, extra = {}, headers = {}) { super(code); Object.assign(this, { status, code, extra, headers }); }
@@ -124,10 +126,17 @@ function createJournal({ file, fs = nodeFs, now = Date.now, keep = 200, echo } =
 
 function createServer({
   driver, queue, limits, egress, clients, journal, notify = async () => ({ sent: false }), now = Date.now,
+  setTimer = setTimeout, clearTimer = clearTimeout,
+  // presence — хозяин у руля в зеркале (presence.js): пока он управляет, задачи не начинаются и не идут (503 owner_present).
+  // lease — замок на браузер между сервисом и прогревом (lease.js): чужой замок — 503 browser_busy; свой продлевается каждым запросом.
+  presence = NO_PRESENCE, lease = null, leaseMs = 10 * MIN,
   tz = 'Asia/Almaty', needsHumanIdleMs = 30 * MIN, maxBodyBytes = 1 << 20, defaultWaitSec = 60, maxWaitSec = 300,
   // Потолок действий в одной задаче: actionsBase + actionsPerCost × cost. Нужен как предохранитель от бота с ошибкой в цикле:
   // лимиты площадки считают только begin, а cost клиент называет сам. Числа стартовые, не измеренные.
   actionsBase = 100, actionsPerCost = 30, maxTextChars = 5000,
+  // Выход «не определился» (сервис-эхо не ответил): идущая задача не закрывается сразу, выход перепроверяется
+  // через egressRetryMs ещё egressRetries раз; так и не определился — задача закрывается. «Не тот» закрывает сразу.
+  egressRetryMs = 20000, egressRetries = 3,
 }) {
   const roster = normalizeClients(clients).map((client) => ({ client, hash: crypto.createHash('sha256').update(client.token).digest() }));
 
@@ -206,13 +215,29 @@ function createServer({
 
   const noTask = (id, owner) => new HttpError(404, 'no_task', { message: 'такой задачи нет, она закончилась или истекла; начните новую через begin', ...(queue.why(id, owner) ? { reason: queue.why(id, owner) } : {}) });
 
-  /** Закрыть окно задачи один раз и записать в журнал; слот очереди освобождает вызывающий. */
+  /** Закрыть окно задачи один раз и записать в журнал; слот очереди освобождает вызывающий. Замок на браузер снимается. */
   async function closeWindow(task, why) {
     if (task.data.closed) return;
     task.data.closed = why;
     try { await driver.close(task.data.driverId); } catch (err) { log('error', 'close_failed', { task, detail: scrub(err && err.message, []).slice(0, 300) }); }
+    if (lease) lease.release();
     log('end', why === 'end' ? 'ok' : why, { task });
   }
+
+  // ---- хозяин в зеркале
+
+  let ownerWas = null; // last known: true | false
+  /** Хозяин держит управление? В журнал только смены состояния. task — чтобы продлить срок простоя: хозяин закончит, бот продолжит. */
+  async function ownerBusy(task) {
+    const who = await presence.check();
+    if (who.disabled) return false;
+    if (who.error) { if (ownerWas !== 'error') log('owner', 'unknown', { detail: String(who.error).slice(0, 200) }); ownerWas = 'error'; return false; } // вежливость, не предохранитель
+    if (who.present !== ownerWas && (who.present || ownerWas === true)) log('owner', who.present ? 'present' : 'gone'); // «нет хозяина» с самого начала — не событие
+    ownerWas = who.present;
+    if (who.present && task) queue.touch(task.id, { idleMs: needsHumanIdleMs });
+    return who.present;
+  }
+  const ownerPresent = () => new HttpError(503, 'owner_present', { message: 'хозяин управляет браузером в зеркале; попробуйте позже' }, { 'retry-after': '60' });
 
   /** Одно действие задачи за раз, по порядку прихода. */
   function exclusive(task, fn) {
@@ -254,7 +279,7 @@ function createServer({
   }
 
   /** Капча, вход или блок: окно остаётся, до resume ничего не нажимается, площадка замирает, мне сообщение (один раз на причину). */
-  function guardHit(task, reason) {
+  function noteGuard(task, reason) {
     const changed = task.data.guard !== reason;
     task.data.guard = reason;
     queue.touch(task.id, { idleMs: needsHumanIdleMs }); // человеку нужно время дойти до зеркала
@@ -263,6 +288,10 @@ function createServer({
       freezeSite(task);
       tell(`meatsuit: задача «${task.info.task}» на ${task.info.site}: ${GUARD_RU[reason] || reason}. Окно открыто, реши в зеркале и вызови resume.`);
     }
+    if (lease) lease.renew(needsHumanIdleMs + MIN); // замок живёт, пока человек решает
+  }
+  function guardHit(task, reason) {
+    noteGuard(task, reason);
     return new HttpError(409, 'needs_human', { guard: reason });
   }
 
@@ -301,15 +330,21 @@ function createServer({
     const task = got.task;
     ctx.task = task;
     const done = queue.hold(task.id); // открытие окна не должно считаться простоем
-    let taken = null, opened = false;
+    let taken = null, opened = false, locked = false;
     try {
       let seen;
       try { seen = await egress.check(); } catch (err) { seen = { ok: false, error: 'egress_unknown', detail: err && err.message }; }
       if (!seen.ok) throw new HttpError(503, seen.error, seen.country ? { country: seen.country } : {});
+      if (await ownerBusy()) throw ownerPresent();
       taken = limits.take(key, cost);
       if (!taken.ok) {
         const retry = taken.retry_at;
         throw new HttpError(429, 'limit', { reason: taken.reason, retry_at: retry === null ? null : iso(retry) }, retry === null ? {} : { 'retry-after': String(Math.max(0, Math.ceil((retry - now()) / 1000))) });
+      }
+      if (lease) {
+        const got = lease.acquire(leaseMs);
+        if (!got.ok) throw new HttpError(503, 'browser_busy', { holder: got.holder, retry_at: iso(got.until), message: `браузер занят: ${got.holder}` }, { 'retry-after': String(Math.max(1, Math.ceil((got.until - now()) / 1000))) });
+        locked = true;
       }
       const win = await driver.open({ site: key, allow });
       if (!win || win.id === undefined || win.id === null) throw new Error('driver.open не вернул id окна');
@@ -323,6 +358,7 @@ function createServer({
       sendJson(res, 200, { task: task.id });
     } catch (err) {
       if (taken && taken.ok && !opened) limits.refund(taken); // окно не открылось — единицы лимита не потрачены
+      if (locked && !opened) lease.release();
       queue.release(task.id, 'begin_failed');
       if (err instanceof HttpError && err.code === 'limit') log('limit', err.extra.reason, { client: client.name, label, site: key, cost });
       else log('begin', codeOf(err), { client: client.name, label, site: key });
@@ -349,7 +385,7 @@ function createServer({
         if (typeof a.url !== 'string') throw bad('goto: нужен url');
         try { new URL(a.url); } catch { throw bad('goto: нужен полный адрес http(s)://…'); }
         break;
-      case 'click': needTarget(); break;
+      case 'click': case 'hover': needTarget(); break;
       case 'fill': needTarget(); needText(); break;
       case 'type': needText(); break;
       case 'key': if (typeof a.key !== 'string' || !a.key) throw bad('key: нужен key, например «Enter»'); break;
@@ -368,7 +404,7 @@ function createServer({
   function describe(a) {
     const d = { do: a.do };
     if (a.do === 'goto') { try { const u = new URL(a.url); d.host = u.hostname; d.path = u.pathname; } catch { /* уже отвергнут */ } }
-    if (a.do === 'click' || a.do === 'fill') d.target = a.target && typeof a.target === 'object' ? 'css' : typeof a.target === 'string' ? a.target.slice(0, 60) : a.target;
+    if (a.do === 'click' || a.do === 'fill' || a.do === 'hover') d.target = a.target && typeof a.target === 'object' ? 'css' : typeof a.target === 'string' ? a.target.slice(0, 60) : a.target;
     if (a.do === 'key' && typeof a.key === 'string' && a.key.length > 1) d.key = a.key; // «Enter», но не напечатанный знак
     return d;
   }
@@ -394,12 +430,16 @@ function createServer({
     let code = 'ok';
     try {
       if (task.data.guard) throw new HttpError(409, 'needs_human', { guard: task.data.guard });
+      if (await ownerBusy(task)) throw ownerPresent(); // хозяин взялся за руль посреди задачи: окно остаётся, ждём его
+      if (lease) lease.renew(leaseMs);
       if (action.do === 'goto') checkGoto(task, action.url);
       if (COUNTED.has(action.do) && ++task.data.actions > actionsBase + actionsPerCost * task.data.cost) await overCap(task);
       let r;
       try { r = await driver.act(task.data.driverId, action); } catch (err) { throw afterDriverError(task, err); }
       if (r && r.guard) throw guardHit(task, String(r.guard));
-      return { ok: true, url: r && r.url, settled: r && r.settled, guard: null };
+      const out = { ok: true, url: r && r.url, settled: r && r.settled, guard: null };
+      if (r && Number.isFinite(r.paced)) out.paced = r.paced; // сколько мс сервис выдержал «подумать» перед действием
+      return out;
     } catch (err) {
       code = codeOf(err);
       throw err;
@@ -450,7 +490,13 @@ function createServer({
     const scope = params.get('scope') ?? 'document';
     if (scope !== 'viewport' && scope !== 'document') throw bad('scope: viewport или document');
     const v = await withTask(ctx, req, async (task) => {
-      try { return await driver.view(task.data.driverId, { scope }); } catch (err) { throw afterDriverError(task, err); }
+      let r;
+      if (lease) lease.renew(leaseMs);
+      try { r = await driver.view(task.data.driverId, { scope }); } catch (err) { throw afterDriverError(task, err); }
+      // Капча, блок или вход видны уже при просмотре: отмечаем сразу (сообщение, пауза площадки), страницу всё равно отдаём,
+      // а следующее действие получит 409, не тронув страницу.
+      if (r && r.guard) noteGuard(task, String(r.guard)); // повтор той же причины ничего не шлёт, только продлевает срок простоя
+      return r;
     });
     const eg = egress.last();
     let html = String(v.html ?? '');
@@ -473,6 +519,11 @@ function createServer({
     queue.release(task.id, 'egress');
   }
 
+  // «Не определился» не закрывает идущую задачу сразу: это чаще сбой сервиса-эхо, чем утечка (при утечке ответ был бы
+  // «не тот»). Перепроверяем несколько раз, и только упорное «не определился» закрывает задачу. Новые begin всё это
+  // время отвергаются (503): работа не начинается, пока выход не подтверждён.
+  let unknownStreak = 0, recheck = null;
+  const unknownTell = () => `meatsuit: не удалось определить выход в сеть. Задачи не берутся; идущая закроется, если выход не определится за ${Math.round(egressRetryMs * egressRetries / 1000)} с.`;
   if (egress.subscribe) {
     egress.subscribe((r, prev) => {
       const was = prev ? (prev.ok ? 'ok' : prev.error) : null, is = r.ok ? 'ok' : r.error;
@@ -481,9 +532,15 @@ function createServer({
         const who = [r.country, r.asn && `AS${r.asn}`].filter(Boolean).join(' ');
         tell(r.ok ? `meatsuit: выход в сеть восстановился (${who}), задачи принимаются.`
           : r.error === 'egress_wrong' ? `meatsuit: выход в сеть не тот, что в egress.json (${who}). Задачи не берутся, идущая закрыта.`
-            : 'meatsuit: не удалось определить выход в сеть. Задачи не берутся, идущая закрыта.');
+            : unknownTell());
       }
-      if (!r.ok) killActive(r.error).catch((err) => log('error', 'egress_close_failed', { detail: String(err && err.message).slice(0, 300) }));
+      const kill = () => killActive(r.error).catch((err) => log('error', 'egress_close_failed', { detail: String(err && err.message).slice(0, 300) }));
+      if (r.ok || r.error === 'egress_wrong') { unknownStreak = 0; if (recheck) { clearTimer(recheck); recheck = null; } }
+      if (r.error === 'egress_wrong') kill();
+      else if (r.error === 'egress_unknown') {
+        if (++unknownStreak > egressRetries) { kill(); return; }
+        if (!recheck && queue.active()) recheck = setTimer(() => { recheck = null; egress.check({ force: true }).catch(() => {}); }, egressRetryMs);
+      }
     });
   }
 
@@ -493,6 +550,14 @@ function createServer({
 
   const fmtTime = (ms) => new Date(ms).toLocaleString('ru-RU', { timeZone: tz, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
   const fmtDur = (ms) => (ms < MIN ? `${Math.round(ms / 1000)} с` : `${Math.round(ms / MIN)} мин`);
+
+  function ownerLine() {
+    if (!presence.enabled) return 'не проверяется (MEATSUIT_NEKO_URL не задан)';
+    const who = presence.last();
+    if (!who) return 'ещё не проверялось';
+    if (who.error) return `не удалось спросить Neko: ${who.error}`;
+    return who.present ? 'управляет браузером: задачи ждут' : 'не управляет';
+  }
 
   function egressLine(eg) {
     if (!eg) return 'ещё не проверялся';
@@ -530,6 +595,7 @@ table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:.25rem .
 </style></head><body>
 <h1>meatsuit</h1>
 <h2>Выход в сеть</h2><p>${esc(egressLine(egress.last()))}</p>
+<h2>Хозяин в зеркале</h2><p>${esc(ownerLine())}${lease && lease.peek() && lease.peek().holder !== lease.holder ? `; браузер занят: ${esc(lease.peek().holder)}` : ''}</p>
 <h2>Очередь</h2><div class="wrap">${table(['', 'клиент', 'задача', 'площадка', ''], queueRows, 'пусто')}</div>
 <h2>Лимиты (часы: ${esc(tz)})</h2><div class="wrap">${table(['площадка', 'за сутки', 'за час', 'часы', ''], limRows, 'нет площадок')}</div>
 <h2>Журнал</h2><div class="wrap">${table(['время', 'клиент', 'задача', 'площадка', 'событие', 'результат'], logRows, 'пока пусто')}</div>
@@ -614,6 +680,8 @@ async function main() {
   const { createLimits } = require('./limits.js');
   const { createEgress } = require('./egress.js');
   const { fromEnv } = require('./notify.js');
+  const presenceMod = require('./presence.js');
+  const { createLease } = require('./lease.js');
   const { loadPersona } = require('./human/persona-file.js');
 
   const clients = normalizeClients(loadJson(opts.clients, 'токены клиентов; образец profiles/clients.example.json, настоящий файл держать вне git'));
@@ -628,12 +696,14 @@ async function main() {
   const limits = createLimits({ sites, file: path.join(opts.data, 'limits.json'), tz: opts.tz });
   const egress = createEgress({ expected });
   const queue = createQueue();
+  const presence = presenceMod.fromEnv(process.env);
+  const lease = createLease({ file: path.join(opts.data, 'browser.lock'), holder: 'server' }); // тот же каталог data, что у прогрева
   loadPersona(opts.data); // повадки рук те же, что у прогрева (data/persona.json), а не новые случайные при каждом запуске
   const driver = await loadDriver(opts);
-  const server = createServer({ driver, queue, limits, egress, clients, journal, notify, tz: opts.tz });
+  const server = createServer({ driver, queue, limits, egress, clients, journal, notify, tz: opts.tz, presence, lease });
 
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(opts.port, opts.host, resolve); });
-  console.log(`meatsuit слушает http://${opts.host}:${server.address().port} (клиентов: ${clients.length}, площадок: ${limits.sites().length})`);
+  console.log(`meatsuit слушает http://${opts.host}:${server.address().port} (клиентов: ${clients.length}, площадок: ${limits.sites().length}, хозяин в зеркале: ${presence.enabled ? 'проверяется' : 'не проверяется'})`);
   egress.start().then((r) => console.log(`выход в сеть: ${r.ok ? `${r.country} AS${r.asn}` : r.error}`));
 
   const stop = async () => {
@@ -641,6 +711,8 @@ async function main() {
     server.close();
     const task = queue.active();
     if (task && task.data.driverId !== undefined) await driver.close(task.data.driverId).catch(() => {});
+    lease.release();
+    await presence.logout();
     process.exit(0);
   };
   process.on('SIGINT', stop);

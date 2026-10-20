@@ -19,9 +19,10 @@ async function stable(page, read) {
 }
 
 /**
- * Снимок для guard: адрес, заголовок, начало текста, виден ли фрейм проверки.
+ * Снимок для guard: адрес, заголовок, начало текста, виден ли фрейм проверки, видно ли поле пароля.
  * Фрейм виден, только если его не прячут (visibility, opacity) и он в окне: reCAPTCHA держит окно
  * проверки в странице всегда, но скрытым (visibility:hidden; opacity:0; top:-10000px).
+ * Поле пароля — то же: только показанное и в окне (форма входа в скрытом меню не в счёт).
  */
 const snapshot = (page) => stable(page, async () => {
   const s = await page.evaluate(() => {
@@ -43,10 +44,19 @@ const snapshot = (page) => stable(page, async () => {
       'iframe[src*="arkoselabs.com"]', 'iframe[src*="captcha-delivery.com"]', 'iframe[src*="smartcaptcha.yandexcloud.net"]',
       '#cf-challenge-running', '#px-captcha',
     ].join(', '));
+    const shownField = (el) => {
+      const r = el.getBoundingClientRect();
+      if (r.width < 40 || r.height < 12) return false;
+      if (r.right <= 0 || r.bottom <= 0 || r.left >= innerWidth || r.top >= innerHeight) return false;
+      if (typeof el.checkVisibility === 'function' && !el.checkVisibility({ visibilityProperty: true, opacityProperty: true })) return false;
+      const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return !!hit && (hit === el || el.contains(hit) || hit.contains(el)); // под накладкой (баннер cookies) поле не в счёт
+    };
     return {
       title: document.title,
-      text: (document.body ? document.body.innerText : '').slice(0, 3000), // длиннее 2000 — уже «длинная страница» для guard
+      text: (document.body ? document.body.innerText : '').slice(0, 3000), // длиннее 2000 — уже «длинная страница» для guard; 3000 — LONG в guard.js
       captchaFrame: [...challenge].some((el) => !el.closest('.grecaptcha-badge') && visible(el)),
+      passwordField: [...document.querySelectorAll('input[type=password]')].some((el) => !el.disabled && shownField(el)),
     };
   });
   return { url: page.url(), ...s };

@@ -15,6 +15,7 @@ const { createServer, createJournal, normalizeClients, parseArgs } = require('..
 const { createQueue } = require('../queue.js');
 const { createLimits } = require('../limits.js');
 const { createEgress } = require('../egress.js');
+const { createLease } = require('../lease.js');
 
 const MIN = 60000, H = 3600000;
 /** Местное время Алматы (UTC+5) → миллисекунды UTC. */
@@ -97,9 +98,16 @@ async function boot(t, over = {}) {
   });
   const notified = [];
   const journal = createJournal({ file: over.journalFile, now: clock.now });
+  // Хозяин в зеркале (подставной) и замок на браузер в памяти; «прогрев» — другой держатель того же файла.
+  const owner = { present: false, error: null };
+  const presence = { enabled: true, check: async () => (owner.error ? { present: false, error: owner.error } : { present: owner.present }), last: () => ({ present: owner.present }), logout: async () => {} };
+  const lockFs = memLockFs();
+  const lease = createLease({ file: 'data/browser.lock', holder: 'server', fs: lockFs, now: clock.now });
+  const life = createLease({ file: 'data/browser.lock', holder: 'life', fs: lockFs, now: clock.now });
   const server = createServer({
-    driver, queue, limits, egress, clients: CLIENTS, journal, now: clock.now, maxBodyBytes: 4096,
+    driver, queue, limits, egress, clients: CLIENTS, journal, now: clock.now, setTimer: clock.setTimer, clearTimer: clock.clearTimer, maxBodyBytes: 4096,
     notify: async (text) => { notified.push(text); return { sent: true }; },
+    presence, lease,
     ...over.server,
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
@@ -123,7 +131,20 @@ async function boot(t, over = {}) {
     assert.equal(r.status, 200, `begin: ${r.text}`);
     return r.json.task;
   };
-  return { call, act, begin, driver, queue, limits, egress, echo, timer, notified, journal, clock, server, cvs: CVS, tinder: TINDER };
+  return { call, act, begin, driver, queue, limits, egress, echo, timer, notified, journal, clock, server, owner, lease, life, cvs: CVS, tinder: TINDER };
+}
+
+/** Файловая система в памяти для замка. */
+function memLockFs() {
+  const files = new Map();
+  return {
+    files,
+    readFileSync(f) { if (!files.has(f)) throw Object.assign(new Error('нет файла'), { code: 'ENOENT' }); return files.get(f); },
+    writeFileSync(f, data) { files.set(f, String(data)); },
+    renameSync(a, b) { files.set(b, files.get(a)); files.delete(a); },
+    unlinkSync(f) { if (!files.has(f)) throw Object.assign(new Error('нет файла'), { code: 'ENOENT' }); files.delete(f); },
+    mkdirSync() {},
+  };
 }
 
 const until = async (cond, what = 'условие') => {
@@ -513,6 +534,47 @@ test('выход пропал, пока задача идёт: окно закр
   assert.match(s.notified[1], /восстанов/);
 });
 
+test('выход не определился во время задачи: задача не закрывается сразу, выход перепроверяется; определился — работа идёт', async (t) => {
+  const s = await boot(t);
+  await s.egress.start();
+  const task = await s.begin(CVS);
+  s.echo.reply = new Error('сервис-эхо не отвечает');
+  await s.timer.fn(); // плановая проверка раз в 5 минут: не определился
+  assert.equal(s.driver.count('close'), 0, 'задача закрыта по одному «не определился»');
+  assert.equal(s.notified.length, 1);
+  assert.match(s.notified[0], /не удалось определить/);
+  assert.match(s.notified[0], /идущая закроется, если/);
+  assert.equal((await s.act(CVS, { do: 'click', target: 1 }, task)).status, 200, 'идущая задача работает');
+
+  const calls = s.echo.calls;
+  s.echo.reply = KZ;
+  await s.clock.tick(20000); // перепроверка через 20 с
+  await until(() => s.echo.calls > calls, 'перепроверка выхода');
+  await until(() => s.notified.length === 2, 'сообщение о восстановлении');
+  assert.match(s.notified[1], /восстанов/);
+  assert.equal(s.driver.count('close'), 0, 'задача жива');
+  assert.equal((await s.act(CVS, { do: 'end' }, task)).status, 200);
+});
+
+test('выход не определяется упорно: после нескольких перепроверок идущая задача закрывается', async (t) => {
+  const s = await boot(t);
+  await s.egress.start();
+  const task = await s.begin(CVS);
+  s.echo.reply = new Error('сервис-эхо лежит');
+  await s.timer.fn();
+  for (let i = 0; i < 3; i++) {
+    assert.equal(s.driver.count('close'), 0, `закрыта на перепроверке ${i}`);
+    const calls = s.echo.calls;
+    await s.clock.tick(20000);
+    await until(() => s.echo.calls > calls, `перепроверка ${i + 1}`);
+  }
+  await until(() => s.driver.count('close') === 1, 'задача закрыта после упорного «не определился»');
+  assert.deepEqual(s.driver.calls.at(-1), ['close', 'd1']);
+  const r = await s.act(CVS, { do: 'click', target: 1 }, task);
+  assert.deepEqual([r.status, r.json.error, r.json.reason], [404, 'no_task', 'egress']);
+  assert.equal(s.notified.length, 1, 'одно сообщение на всю полосу «не определился»');
+});
+
 test('выход пропал, пока окно ещё открывалось: begin отвечает 503, окно закрыто, единицы лимита возвращены', async (t) => {
   const s = await boot(t);
   await s.egress.start();
@@ -548,6 +610,80 @@ test('begin не удался на открытии окна: 500, лимит в
   assert.equal(s.queue.snapshot().active, null);
   s.driver.onOpen = null;
   assert.ok(await s.begin(CVS, { cost: 2 }));
+});
+
+// ---------------------------------------------------------------- хозяин в зеркале и замок на браузер
+
+test('хозяин управляет в зеркале: begin — 503 owner_present, браузер не трогается, лимит не списан; ушёл — работаем', async (t) => {
+  const s = await boot(t);
+  s.owner.present = true;
+  const r = await s.act(CVS, { do: 'begin', task: 'x', site: 'hh.kz' });
+  assert.deepEqual([r.status, r.json.error], [503, 'owner_present']);
+  assert.equal(r.headers.get('retry-after'), '60');
+  assert.equal(s.driver.count('open'), 0);
+  assert.equal(s.limits.snapshot()['hh.kz'].usedDay, 0);
+  assert.equal(s.queue.snapshot().active, null);
+  assert.equal(s.lease.peek(), null, 'замок не взят');
+  s.owner.present = false;
+  assert.ok(await s.begin(CVS));
+  assert.deepEqual(s.journal.tail(50).filter((x) => x.event === 'owner').map((x) => x.result), ['present', 'gone']);
+});
+
+test('хозяин взялся за руль посреди задачи: действия 503 owner_present, окно остаётся и не закрывается по простою; ушёл — продолжаем', async (t) => {
+  const s = await boot(t);
+  const task = await s.begin(CVS);
+  assert.equal((await s.act(CVS, { do: 'click', target: 7 }, task)).status, 200);
+  s.owner.present = true;
+  const acts = s.driver.count('act');
+  const r = await s.act(CVS, { do: 'click', target: 7 }, task);
+  assert.deepEqual([r.status, r.json.error], [503, 'owner_present']);
+  assert.equal(s.driver.count('act'), acts, 'рука не тронула страницу');
+  assert.equal((await s.call('/view', { token: CVS, task })).status, 200, 'смотреть страницу можно');
+  await s.clock.tick(20 * MIN);
+  assert.equal(s.driver.count('close'), 0, 'пока хозяин у руля, окно не закрывается по обычному простою');
+  s.owner.present = false;
+  assert.equal((await s.act(CVS, { do: 'click', target: 7 }, task)).status, 200);
+  assert.deepEqual(s.journal.tail(50).filter((x) => x.event === 'owner').map((x) => x.result), ['present', 'gone']);
+  assert.match((await s.call('/')).text, /Хозяин в зеркале/);
+});
+
+test('Neko недоступен: присутствие не мешает работе, в журнале одна запись', async (t) => {
+  const s = await boot(t);
+  s.owner.error = 'fetch failed';
+  assert.ok(await s.begin(CVS));
+  assert.ok(await s.begin(TINDER, { task: 'y', site: 'tinder.com', wait: 0 }).catch(() => true));
+  assert.deepEqual(s.journal.tail(50).filter((x) => x.event === 'owner').map((x) => x.result), ['unknown']);
+});
+
+test('браузер занят прогревом: begin — 503 browser_busy с retry_at; замок снят — работаем; во время задачи замок держит сервис и снимает в конце', async (t) => {
+  const s = await boot(t);
+  s.life.acquire(4 * MIN);
+  const r = await s.act(CVS, { do: 'begin', task: 'x', site: 'hh.kz' });
+  assert.deepEqual([r.status, r.json.error, r.json.holder, r.json.retry_at], [503, 'browser_busy', 'life', new Date(s.clock.now() + 4 * MIN).toISOString()]);
+  assert.equal(r.headers.get('retry-after'), '240');
+  assert.equal(s.driver.count('open'), 0);
+  assert.equal(s.limits.snapshot()['hh.kz'].usedDay, 0, 'лимит возвращён');
+  assert.equal(s.queue.snapshot().active, null);
+  s.life.release();
+  const task = await s.begin(CVS);
+  assert.deepEqual([s.lease.peek().holder, s.life.acquire(MIN).ok], ['server', false], 'пока задача идёт, прогреву нельзя');
+  const until = s.lease.peek().until;
+  await s.clock.tick(3 * MIN);
+  await s.act(CVS, { do: 'click', target: 7 }, task);
+  assert.ok(s.lease.peek().until > until, 'действие продлевает замок');
+  await s.act(CVS, { do: 'end' }, task);
+  assert.equal(s.lease.peek(), null, 'после end замок снят');
+  assert.deepEqual(s.life.acquire(MIN), { ok: true });
+});
+
+test('замок снимается и при закрытии по простою, и когда окно не открылось', async (t) => {
+  const s = await boot(t);
+  await s.begin(CVS);
+  await s.clock.tick(6 * MIN);
+  assert.equal(s.lease.peek(), null, 'простой: замок снят');
+  s.driver.onOpen = async () => { throw new Error('CDP недоступен'); };
+  assert.equal((await s.act(CVS, { do: 'begin', task: 'x', site: 'hh.kz' })).status, 500);
+  assert.equal(s.lease.peek(), null, 'окно не открылось: замок снят');
 });
 
 // ---------------------------------------------------------------- ошибки Driver
@@ -635,6 +771,42 @@ test('guard: 409 needs_human, окно остаётся, мне сообщени
   assert.deepEqual([ok.status, ok.json], [200, { ok: true, guard: null }]);
   assert.equal((await s.act(CVS, { do: 'click', target: 7 }, task)).status, 200, 'после resume работа продолжается');
   assert.deepEqual(s.journal.tail(50).filter((x) => x.event === 'guard').map((x) => x.result), ['captcha']);
+});
+
+test('guard виден уже в view: сообщение и пауза площадки сразу, страница отдаётся, следующее действие — 409 без касания страницы', async (t) => {
+  const s = await boot(t);
+  const task = await s.begin(CVS);
+  s.driver.onView = () => ({ html: PAGE, url: 'https://hh.kz/checkpoint', title: 'Проверка', guard: 'captcha' });
+  const v = await s.call('/view', { token: CVS, task });
+  assert.equal(v.status, 200, 'страницу с капчей посмотреть можно');
+  assert.equal(v.headers.get('x-guard'), 'captcha');
+  assert.equal(s.notified.length, 1, 'сообщение ушло по view, не дожидаясь действия');
+  assert.ok(s.limits.status('hh.kz', s.clock.now()).frozenUntil, 'площадка замерла');
+  const acts = s.driver.count('act');
+  const r = await s.act(CVS, { do: 'click', target: 7 }, task);
+  assert.deepEqual([r.status, r.json.error, r.json.guard], [409, 'needs_human', 'captcha']);
+  assert.equal(s.driver.count('act'), acts, 'на странице капчи ничего не нажимается');
+  assert.equal((await s.call('/view', { token: CVS, task })).status, 200);
+  assert.equal(s.notified.length, 1, 'повторный view не повторяет сообщение');
+  assert.deepEqual(s.journal.tail(50).filter((x) => x.event === 'guard').map((x) => x.result), ['captcha']);
+  s.driver.onView = null;
+  assert.equal((await s.act(CVS, { do: 'resume' }, task)).status, 200);
+  assert.equal((await s.act(CVS, { do: 'click', target: 7 }, task)).status, 200);
+});
+
+test('hover: действие есть, цель нужна, потолок действий его не считает; paced из Driver доходит до клиента', async (t) => {
+  const s = await boot(t, { server: { actionsBase: 1, actionsPerCost: 0 } });
+  const task = await s.begin(CVS);
+  s.driver.onAct = (id, a) => ({ ok: true, url: 'https://hh.kz/', settled: true, guard: null, paced: a.do === 'hover' ? 0 : 1234 });
+  for (let i = 0; i < 3; i++) {
+    const h = await s.act(CVS, { do: 'hover', target: 'Меню' }, task);
+    assert.deepEqual([h.status, h.json.ok, h.json.paced], [200, true, 0]);
+  }
+  assert.deepEqual((await s.act(CVS, { do: 'hover' }, task)).status, 400);
+  const c = await s.act(CVS, { do: 'click', target: 7 }, task);
+  assert.deepEqual([c.status, c.json.paced], [200, 1234], 'paced доходит до клиента');
+  assert.equal((await s.act(CVS, { do: 'click', target: 7 }, task)).status, 429, 'потолок 1 действие: второй клик лишний');
+  assert.deepEqual(s.journal.tail(50).filter((x) => x.do === 'hover').map((x) => [x.result, x.target]), [['ok', 'Меню'], ['ok', 'Меню'], ['ok', 'Меню']]);
 });
 
 test('guard: Driver может и бросить 409 needs_human, это то же самое', async (t) => {

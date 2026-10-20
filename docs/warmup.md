@@ -44,9 +44,9 @@ Needs Node 20+. `plan` and `now --dry` need no browser. Real sessions also need 
 | `node life.js plan` | Current time in your zone, the saved "hand" traits, a **random example** of this week's working days, today's start times and one session | No |
 | `node life.js now --dry` | Prints the steps of one session as JSON; opens no sites | No |
 | `node life.js now` | One session right now. While a pause from a captcha or block is active it refuses (exit code 1) unless you pass `--force` | Yes |
-| `node life.js run` | Follows the schedule until stopped (Ctrl+C or SIGTERM: the tab is closed, exit code 0) | Yes |
+| `node life.js run` | Follows the schedule until stopped (Ctrl+C or SIGTERM: the window is closed, exit code 0) | Yes |
 
-Options: `--config profiles/life.json`, `--cdp http://127.0.0.1:9222` (or the `MEATSUIT_CDP` variable), `--data data`, `--egress profiles/egress.json`, `--force`, `--no-egress-check`. Via npm: `npm run life -- plan`.
+Options: `--config profiles/life.json`, `--cdp http://127.0.0.1:9222` (or the `MEATSUIT_CDP` variable), `--data data`, `--egress profiles/egress.json`, `--force`, `--no-egress-check`. Via npm: `npm run life -- plan`. With `MEATSUIT_NEKO_URL` and `NEKO_ADMIN_PASSWORD` set (the Docker stack sets them), warm-up asks Neko whether you are at the controls and steps aside; `data/browser.lock` in the shared `data` directory keeps it from overlapping with a task of the HTTP service.
 
 The example from `plan` is not what `run` will pick: each is chosen independently. `plan` lists the whole day's starts, including ones already past. Console output and journal `reason` strings are in Russian, and `plan` prints the current time as "Сейчас (<your tz>)" ("Now"), in your configured zone.
 
@@ -60,7 +60,7 @@ The example from `plan` is not what `run` will pick: each is chosen independentl
 
 ## A session
 
-A session visits `session.sites` sites (default 2 to 4) chosen from `sites` by weight, never the same one twice in a row (unless you list only one). The total time (default 5 to 14 minutes) is split unevenly between them. It opens a new tab and closes it at the end; the browser stays up and `life.js` only disconnects.
+A session visits `session.sites` sites (default 2 to 4) chosen from `sites` by weight, never the same one twice in a row (unless you list only one). The total time (default 5 to 14 minutes) is split unevenly between them. It opens a window of its own, sized like your window ([`window.js`](../window.js)), and closes it at the end; the browser stays up and `life.js` only disconnects.
 
 The session has a hard deadline: the sum of the site budgets times 1.25, plus pauses (1 to 12 s before each site). Whatever is in progress at the deadline is finished, then the session ends (`session-end` with `cut: true`).
 
@@ -78,7 +78,7 @@ The session has a hard deadline: the sum of the site budgets times 1.25, plus pa
 - **It never clicks:** subscribe, install the app, sign in, register, buy, "allow", anything advertising; anything inside an `iframe` (ads live there, and a scripted ad click is click fraud against the advertiser); a "Close" link that would navigate away. With nothing to click it presses `Esc` once; if that fails the site is skipped ("popup did not close"). It checks after opening a site, after each followed link and on every reading pass.
 - **Stray windows:** a tab that opens by itself (ads, `window.open`) is closed after about 1 to 6 s, `alert`/`confirm`/`prompt` are dismissed, and `beforeunload` is allowed to leave.
 - **Random small things** (`life/wander.js`, about 20% chance per reading pass): scroll up 1 to 4 notches (35%), stand still 3 to 30 s (30%), hover over a link without clicking (25%), "step away" for 15 to 90 s with no mouse movement at all (10%). Each is capped by the time left in the session.
-- **Which links may be followed:** same site (subdomains count as other sites), not in the footer, link text 12 to 140 characters, not opening a new tab, fully on screen across its width, not transparent and not covered by another element (sites plant such traps for bots, and clicking one would give the script away). Links or text with words about login, logout, sign-up, subscribe, cart, checkout, buy, download, account, settings, password, donate, ads, `mailto:`, `tel:` or `javascript:` (and Russian equivalents) are excluded. If no link is on screen it scrolls back up in steps (1000, 2500, then 6000 px) and looks again.
+- **Which links may be followed:** same site (subdomains count as other sites), not in the footer, link text 12 to 140 characters, not opening a new tab, fully on screen across its width, not transparent and not covered by another element (sites plant such traps for bots, and clicking one would give the script away). Links or text with words about login, logout, sign-up, subscribe, cart, checkout, buy, download, account, settings, password, donate, ads, `mailto:`, `tel:` or `javascript:` are excluded, and so are actions in an account you may be signed in to: delete, remove, report, complain, block, follow, unfollow, like, vote, share (and Russian equivalents). If no link is on screen it scrolls back up in steps (1000, 2500, then 6000 px) and looks again; that scrolling is a "seek" (longer bursts, short pauses, no step back), not reading.
 - **Hand traits** (speed, tremor, twitch rate, typing speed) are saved in `data/persona.json`, so after a restart it is the same "person". A damaged or incomplete file is replaced with sane traits.
 
 ## Stops
@@ -87,21 +87,23 @@ The session has a hard deadline: the sum of the site budgets times 1.25, plus pa
 |---|---|
 | Captcha or block (`guard` verdicts `captcha`, `blocked`) | The session stops and no more sites open. `pausedUntil` = now + `cooldownHours` is written to `data/life.json`. While paused `run` starts nothing and `now` refuses (exit 1) without `--force`. The pause survives a new day and a damaged state file |
 | Wrong egress (`egress-wrong`) | Before every session the exit is checked against `profiles/egress.json` ([egress.md](egress.md)). A mismatch, or an exit that cannot be determined, skips the session. No daily pause is set, and the start counts as done. **If the file does not exist, `now` and `run` refuse to start**, so warm-up cannot browse from the wrong address by accident. `--no-egress-check` turns the check off on purpose (a `warning` is journaled before each session). A malformed file also stops the program at startup |
+| You are at the controls in the mirror (Neko reports a connected host) | The session is not started (`owner-present` in the journal; `now` exits 1). If you take control during a session, it finishes the current site and ends quietly (`yield`, `session-end` with `yielded: true`). Without `MEATSUIT_NEKO_URL` this is not checked; if Neko cannot be reached, the session runs |
+| The HTTP service is running a task (`data/browser.lock` held by `server`) | The session is skipped (`busy` with `holder` and `until`; `now` exits 1). A warm-up session holds the same lock, so a bot's `begin` gets `503 browser_busy` meanwhile |
 | Redirect to a sign-in page (`login`) | That site is skipped, the session continues |
 | Site did not open (30 s timeout and the like) | Skipped, the session continues |
 | Popup cannot be closed or keeps returning | Skipped, the session continues |
 | No search field on a `search` site | Skipped, the session continues |
-| Browser unavailable (CDP down, container restarting) | `error` event, tab and connection closed, the process lives on. In `run` the start counts as done; `now` exits 1 |
-| SIGTERM or Ctrl+C | Tab and connection closed, exit 0. An interrupted start stays undone and runs after a restart unless it is too late |
+| Browser unavailable (CDP down, container restarting) | `error` event, window and connection closed, the process lives on. In `run` the start counts as done; `now` exits 1 |
+| SIGTERM or Ctrl+C | Window and connection closed, exit 0. An interrupted start stays undone and runs after a restart unless it is too late |
 | Deadline reached | The session ends with `cut: true` |
 | Bug in the code | `error` event. In `run` the start counts as done |
 
 What `guard` (`guard.js`) recognizes, judging by a snapshot of the page (URL, title, start of the text, whether a challenge frame is visible):
 
-- Always: a **visible** captcha frame: the reCAPTCHA "I'm not a robot" checkbox or its challenge popup, hCaptcha, Cloudflare, Arkose, DataDome, Yandex SmartCaptcha, or the `#px-captcha` block. The invisible reCAPTCHA badge that many sites keep on every page does not count (it is skipped by its `size=invisible` address and its `.grecaptcha-badge` container, and visibility, opacity and position are checked). The frame names of Arkose, DataDome, SmartCaptcha and PerimeterX come from general knowledge and are not verified on live sites; the reCAPTCHA ones are tested on a real Chromium with local stand-in pages, not on Google's own. A sign-in URL by its path (`/login`, `/signin`, Google sign-in): `?next=/login` and `/login-security-tips` are not a sign-in.
+- Always: a **visible** captcha frame: the reCAPTCHA "I'm not a robot" checkbox or its challenge popup, hCaptcha, Cloudflare, Arkose, DataDome, Yandex SmartCaptcha, or the `#px-captcha` block. The invisible reCAPTCHA badge that many sites keep on every page does not count (it is skipped by its `size=invisible` address and its `.grecaptcha-badge` container, and visibility, opacity and position are checked). The frame names of Arkose, DataDome, SmartCaptcha and PerimeterX come from general knowledge and are not verified on live sites; the reCAPTCHA ones are tested on a real Chromium with local stand-in pages, not on Google's own. A sign-in URL by its path (`/login`, `/signin`, `/sign_in`, Google sign-in): `?next=/login` and `/login-security-tips` are not a sign-in. A **visible** password field on a page of under 3000 characters is a sign-in too (a sign-in dialog over an ordinary address); on a long page (a sign-in box beside an article) it is not.
 - Only on short pages (under 2000 characters): titles like "Just a moment", error titles like "403", "Error 403", "429 Too Many Requests" (an article titled "403 - Wikipedia" or "429 AD" is not an error), URLs like `/captcha`, `/showcaptcha`, `/challenge`, `/sorry`, `/checkpoint`, `/blocked`, and phrases like "verify you are human", "Press & Hold", "unusual traffic" (and Russian ones). So an article about captchas does not stop warm-up, while a stub page does.
 
-Gaps: a captcha that is not in an iframe or has a name not listed above is caught only by its text and URL. A sign-in shown as a pop-up over the same address (as some single-page apps do) is **not** a sign-in to this check. Checks run after a site opens and after each followed link, **not** while reading, so a captcha that appears mid-page is noticed at the next check.
+Gaps: a captcha that is not in an iframe or has a name not listed above is caught only by its text and URL. A sign-in pop-up without a password field (phone number or one-time code first) is **not** a sign-in to this check. Checks run after a site opens and after each followed link, **not** while reading, so a captcha that appears mid-page is noticed at the next check.
 
 ## Configuration: `profiles/life.json`
 
@@ -169,11 +171,14 @@ Every line begins with `ts` (ISO, UTC). Events in `life.jsonl`:
 | `overlay` | `result` (`closed`, `stuck`), `reason` | A popup was closed, or could not be |
 | `dialog` | `reason` (type) | A system dialog was dismissed |
 | `popup-closed` | | A stray tab was closed |
+| `owner-present` | `reason` | You hold control in the mirror: the session was not started |
+| `busy` | `holder`, `until` | The browser lock is held by another process (the HTTP service): the session was skipped |
+| `yield` | `reason` | You took control during a session: it ends after the current site |
 | `wander` | `reason` (`scrollUp`, `idle`, `hover`, `away`) | A random small thing |
 | `search` | `reason` (the query) | A search step began |
 | `session-end` | `cut` (`true` if the deadline ended it) | The session finished |
 | `cooldown` | `reason`, `url`, `until` | Captcha or block; silent until `until` |
-| `error` | `reason` | A failure not on a site (browser unavailable, tab did not open, code bug) |
+| `error` | `reason` | A failure not on a site (browser unavailable, window did not open, code bug) |
 | `egress-wrong` | `reason`, `country`, `asn`, `org`, `detail` | Wrong or unknown exit; session skipped, no pause |
 | `warning` | `reason` | Started with `--no-egress-check` (exit not checked), or `now --force` during a pause |
 | `stopped` | `reason` | A session was interrupted by SIGTERM or Ctrl+C |
@@ -223,13 +228,15 @@ It stops growing there on purpose: the aim is to look like someone who reads a c
 | Solve a captcha or get around a block | The project stops on a captcha, then stays quiet for `cooldownHours` |
 | Visit sites outside `sites` or follow links to other hosts | Sites come only from the config, links only on the same host, only `http`/`https` |
 | Spoof fingerprints or geolocation | The browser is real and does not lie about itself |
-| Know that you are in the mirror or that your bots are working | There is no queue and no "I am in the mirror" check yet. The exit check exists and is mandatory: without `profiles/egress.json` warm-up does not start, unless you pass `--no-egress-check` |
+| Run while you are at the controls or while a bot task is running | It asks Neko whether someone holds control (needs `MEATSUIT_NEKO_URL` and `NEKO_ADMIN_PASSWORD`) and shares `data/browser.lock` with the HTTP service. It still does not queue behind a task: it skips the session and the start counts as done. The exit check is mandatory: without `profiles/egress.json` warm-up does not start, unless you pass `--no-egress-check` |
 
 ## What is verified and what is not
 
 **Verified:** unit tests with fake clocks and a fake page (`npm test`); end-to-end tests on real Chromium against local test sites (`npm run test:e2e`): sessions with link following, going back up to find links, a video page, a stop on a block page with the pause written to `data/life.json`; SIGTERM closes the tab; trap links and the hidden reCAPTCHA frame are ignored; closing a cookie banner and a modal by a real click (an ad overlay is not clicked); closing a tab opened by `window.open`; a search on a local Wikipedia stand-in with a Cyrillic query (typed by keys, then Enter). Patchright connecting to the Brave in the Docker stack over CDP, and reading its tabs and cookies, works (that is what `docker/verify.sh` does).
 
-**Not verified:** a full warm-up session in Brave (opening a tab, scrolling, clicking); detector sites; real sites (none of the sites in the shipped file); warm-up on a server; an exit node; a session watched through the mirror (risk 4); `run` live over several days (its logic is tested only with fake clocks).
+**Also verified** (20.10.2026): on a real Chromium, `life.connect()` opens the session page in a window of its own with the owner's window size, and closing it leaves the owner's window alone (`test/window.test.js`); the Neko API used for owner presence (`presence.js`) was exercised against a local Neko 3.1.6 with a real member session taking and releasing control; the lock and the skip paths are covered by unit tests.
+
+**Not verified:** a full warm-up session in Brave (opening a window, scrolling, clicking); detector sites; real sites (none of the sites in the shipped file); warm-up on a server; an exit node; a session watched through the mirror (risk 4); `run` live over several days (its logic is tested only with fake clocks).
 
 ## Risks
 
@@ -238,8 +245,8 @@ It stops growing there on purpose: the aim is to look like someone who reads a c
 | 1 | **Wrong IP.** Without an exit node, sessions on a server would leave from a datacenter address and the browser's first "history" would be from there. The check protects against this and is mandatory (no `egress.json`, no start) | Create `profiles/egress.json` and do not run until the exit is up ([egress.md](egress.md)). Check that `egress-wrong` shows in the journal when the exit is wrong |
 | 2 | **Brave and Patchright.** Only Chromium was exercised end to end. Whether Patchright's patches still apply when it attaches to a running Brave is unknown | Run `node life.js now` against Brave once, watching the screen |
 | 3 | **Real sites.** Everything was run on local pages. Cookie consent, popups, link markup and video behave differently on real sites | Run `now` once or twice while watching the mirror, then check `life.jsonl` for `skipped` |
-| 4 | **You and warm-up in one browser.** A session opens a tab in the first browser context, not a separate window. What you see in the mirror, whether you lose focus, and how a background tab behaves (does it freeze, what `document.visibilityState` says) are not verified | Run `now` while you watch the mirror |
-| 5 | **No queue.** Warm-up does not know about your bots' tasks and does not yield; it does not know you are in the mirror | Do not run `run` at the same time as bots, nor leave it on while you sit in the browser |
+| 4 | **You and warm-up in one browser.** A session opens its own window, sized like yours, on top of yours in the mirror. What you see, whether you lose focus, and what `document.visibilityState` says in the window underneath are not verified | Run `now` while you watch the mirror |
+| 5 | **No queue, only a lock.** Warm-up skips a session while a bot task runs and while you hold control in the mirror, but it does not wait its turn, and a session already running is cut only between sites. A person who only watches the mirror (without taking control) is not noticed | Check `busy`, `owner-present` and `yield` in the journal; keep `run` off while you plan to sit in the browser for long |
 | 6 | **Captcha is checked only at checkpoints.** A false positive (a short page with the wrong words) costs a whole pause | Watch `cooldown` in the journal |
 | 7 | **Behaviour tuned by eye.** The mouse and scroll rhythm looks human by the author's own measurements, but was never compared with real behavioural detectors | Detector sites are a separate spike, not done |
 | 8 | **No notifications.** A block is visible only in the journal and on screen. `notify.js` (Telegram) is written for the HTTP service and is not connected to `life.js` | Look at `life.jsonl` by hand |

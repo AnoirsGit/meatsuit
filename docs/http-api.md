@@ -14,7 +14,7 @@ node server.js [--host 127.0.0.1] [--port 8787] [--data data] [--cdp http://127.
                [--tz Asia/Almaty]
 ```
 
-Environment: `MEATSUIT_HOST`, `MEATSUIT_PORT`, `MEATSUIT_CDP`, `MEATSUIT_TZ`, and optionally `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` for alerts. The service refuses to start without three files: `profiles/clients.json` (who may call; git-ignored; see [authentication](#authentication)), `profiles/sites.json` (which sites exist and their pacing; see [limits](#limits)) and `profiles/egress.json` (the expected exit; see [egress](#egress-check)).
+Environment: `MEATSUIT_HOST`, `MEATSUIT_PORT`, `MEATSUIT_CDP`, `MEATSUIT_TZ`, optionally `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` for alerts, and optionally `MEATSUIT_NEKO_URL` with `NEKO_ADMIN_PASSWORD` so the service can tell when the owner is at the controls in the mirror (see [owner presence](#owner-presence-and-the-browser-lock)). The service refuses to start without three files: `profiles/clients.json` (who may call; git-ignored; see [authentication](#authentication)), `profiles/sites.json` (which sites exist and their pacing; see [limits](#limits)) and `profiles/egress.json` (the expected exit; see [egress](#egress-check)).
 
 ## Routes
 
@@ -60,11 +60,11 @@ A task goes `begin`, then any number of actions and `GET /view` calls, then `end
 | `wait` | Seconds to wait in the queue, default 60, capped at 300. |
 | `ticket` | The `ticket` from an earlier `202`, to keep your place. |
 
-Checks run in this order, and the first failure answers: token (401), request shape (400), site rights (403), queue, exit check (503), pacing limit (429), opening the window.
+Checks run in this order, and the first failure answers: token (401), request shape (400), site rights (403), queue, exit check (503), owner presence (503), pacing limit (429), browser lock (503), opening the window.
 
 - **Queue.** One task runs at a time. If the browser is busy, `begin` waits up to `wait` seconds. If the turn does not come, it answers `202 {"ticket":"k1","position":1}`. Send `begin` again with the same body plus `"ticket":"k1"` to keep your place. A ticket without a live request expires after about a minute. A waiter that disconnects is not given the slot.
 - **Cost.** A task that can never fit (`cost` above the daily or hourly budget) gets `429` with `reason: "too_big"`. If the window fails to open, the cost is refunded.
-- **Window.** The task gets a **new browser window**, so the owner's tabs are untouched. A link with `target=_blank` opens a tab inside the task window, and the task follows it.
+- **Window.** The task gets a **new browser window**, so the owner's tabs are untouched, and it is given the size of the owner's window (the first window in the browser), so a site sees one window size for "one person". A link with `target=_blank` opens a tab inside the task window, and the task follows it.
 
 ### Idle timeout, end, resume
 
@@ -96,10 +96,11 @@ The page is a **copy** of what is visible, built in Patchright's isolated JavaSc
 |---|---|---|
 | `goto` | `url` | Absolute `http` or `https` address, inside the task's site or `allow` hosts (subdomains count). Navigation does not use human timing. A site that does not load gives `502 nav_failed`. |
 | `click` | `target` | Scrolls to the element with the wheel (not a jump), moves the mouse along a slightly curved path, may overshoot and correct, clicks near the center, holds the button 45 to 200 ms. |
+| `hover` | `target` | Same approach as `click`, but the mouse only stops over the element (menus that open on hover, tooltips, "looking" at something before deciding). No click. Not counted by the actions ceiling. |
 | `fill` | `target`, `text` | Clicks the field, clears it if it has text, then types. For a `<select>`, moves the mouse over it, focuses it and picks the option with the arrow keys (real key events, so `change` is trusted); if the arrows do not land on the option, it is set directly, which sends synthetic events. The list is not opened. Checked on headless Chromium only, not on a headed Brave. Not a field: 400. |
 | `type` | `text` | Types into the focused element, key by key. |
 | `key` | `key` | One key such as `Enter`, `Escape` or `Tab`. |
-| `scroll` | `px` (not 0, at most 20000 in size, negative scrolls up) or `to` (`"top"` or `"bottom"`) | Wheel notches of 100 with reading pauses. |
+| `scroll` | `px` (not 0, at most 20000 in size, negative scrolls up) or `to` (`"top"` or `"bottom"`) | Wheel notches of 53 px with reading pauses. 53 px is what Chromium on X11 delivers for one physical notch (the mirror runs Brave under Xvfb), so a bot's wheel and the owner's wheel look the same to a page. Taken from Chromium's source, not measured in the mirror. |
 | `back` | none | History back. Stays put if there is no history. |
 | `pause` | `from`, `to` (ms, default 300 to 1200, at most 60000) | Random pause. |
 | `begin`, `end`, `resume` | see above | Lifecycle. |
@@ -116,7 +117,11 @@ The page is a **copy** of what is visible, built in Patchright's isolated JavaSc
 
 No match is `404 not_found`. More than one match is `422 ambiguous` with up to 20 candidates (`[{"ref":3,"text":"Buy"}, ...]`), and each `ref` can be used right away as a number.
 
-**Response:** `{"ok":true,"url":"https://...","settled":true,"guard":null}`. After an action the service waits for the page to go quiet (no navigation or requests for about 500 ms, at most 10 s). If it never goes quiet, `settled` is `false`, which is not an error.
+**Response:** `{"ok":true,"url":"https://...","settled":true,"guard":null,"paced":1250}`. After an action the service waits for the page to go quiet (no navigation or requests for about 500 ms, at most 10 s). If it never goes quiet, `settled` is `false`, which is not an error.
+
+**Pacing between actions.** A script that receives a page and clicks half a second later gives itself away by rhythm alone. Before `goto`, `back`, `click`, `fill`, `hover`, `type` and `key` the service therefore waits for a human reaction time, counted from the end of the previous action: median about 1.8 s (0.7 to 6 s) when the page changed since the previous action, about 0.65 s (0.25 to 2.5 s) for another action on the same page, about 0.3 s before `type` and `key` (typing already starts with its own reaction pause). Only the missing part is waited: a client that spent ten seconds thinking is not slowed at all. `scroll` and `pause` are not paced. `paced` in the response is how many milliseconds the service added, so you can see when you are being slowed. The numbers are the author's guesses ([`human/pace.js`](../human/pace.js)), not measurements.
+
+**Guard before and after.** The page is checked for a captcha, block or sign-in page **before** every action as well as after it. A challenge that appeared between actions (a delayed check, a lost session) therefore answers `409` without the hands touching the page. `GET /view` also reports what it sees: a guard verdict in `view` marks the task at once (journal, site pause, Telegram message), the page is still returned, and the next action is refused with `409` before it reaches the browser.
 
 ## Status codes
 
@@ -129,13 +134,15 @@ No match is `404 not_found`. More than one match is `422 ambiguous` with up to 2
 | 403 | `forbidden` | `reason`: `site_not_allowed`, `site_unknown` (not in `sites.json`), `allow_not_allowed`, or for `goto` `scheme` and `outside_task`. |
 | 404 | `no_task` | Task ended, expired, or is another client's (`reason`: `end`, `idle`, `egress`, `actions`). |
 | 404 | `not_found` | Target not found among visible elements, the window is gone, or unknown path. |
-| 409 | `needs_human` | `guard`: `captcha`, `blocked` or `login`. The window stays open. All actions are refused until `resume` succeeds. |
+| 409 | `needs_human` | `guard`: `captcha`, `blocked` or `login`. The window stays open. All actions are refused until `resume` succeeds. `login` also fires on a visible password field on a short page (a sign-in dialog over an ordinary address), and on `/sign_in`-style paths. |
 | 410 | `stale_ref` | The number is outdated. Read `GET /view` again. |
 | 422 | `ambiguous` | Several elements match. `candidates` lists them. |
 | 429 | `limit` | `reason` below, plus `retry_at` (ISO time or `null`) and a `Retry-After` header when a time is known. |
 | 500 | `internal` | Unexpected error. No details are returned. They are in the journal. |
 | 502 | `nav_failed` | The site did not open (30 s timeout or network error). |
 | 503 | `egress_wrong` or `egress_unknown` | Exit is not where it should be, or could not be determined. The response may include `country`. |
+| 503 | `owner_present` | The owner is at the controls in the mirror. `Retry-After: 60`. On `begin` nothing is used up; during a task the window stays and the task waits (its idle timeout is extended to 30 minutes). |
+| 503 | `browser_busy` | The browser is held by the warm-up (`holder`, `retry_at`, `Retry-After`). Nothing is used up. |
 | 503 | `browser_gone` | The browser disconnected. |
 
 ## Limits
@@ -165,7 +172,7 @@ Limits live in `profiles/sites.json`, one entry per site. Each fires at `begin`,
 
 A refusal is `429` with `reason`: `closed`, `too_big`, `hour`, `day`, `hours`, `rest_day` or `challenge_pause` (on `begin`), or `actions` (during a task, see below). `retry_at` is the first moment a `begin` would really pass every rule, or `null` if it never will at this cost.
 
-**Actions per task.** The limits above count tasks, and `cost` is whatever the client declares, so a script stuck in a loop could click without end inside one task. Each task therefore has a ceiling on `goto`, `click`, `fill`, `type` and `key` actions (scrolling, `back` and `pause` are free): `100 + 30 × cost` by default. Past it the service answers `429` with `reason: "actions"`, closes the window, frees the queue and sends the Telegram alert. If a task really needs more, declare a larger `cost` in `begin`. The defaults are the author's guesses, not measured.
+**Actions per task.** The limits above count tasks, and `cost` is whatever the client declares, so a script stuck in a loop could click without end inside one task. Each task therefore has a ceiling on `goto`, `click`, `fill`, `type` and `key` actions (scrolling, `hover`, `back` and `pause` are free): `100 + 30 × cost` by default. Past it the service answers `429` with `reason: "actions"`, closes the window, frees the queue and sends the Telegram alert. If a task really needs more, declare a larger `cost` in `begin`. The defaults are the author's guesses, not measured.
 
 **The numbers are the author's untested starting values.** Platforms do not publish thresholds for account behavior. Tune them for yourself and treat them as a way to behave moderately, not as a guarantee.
 
@@ -177,13 +184,22 @@ A refusal is `429` with `reason`: `closed`, `too_big`, `hour`, `day`, `hours`, `
 
 The service asks an echo service (`ipinfo.io`, with `ipwho.is` as a fallback) from the same network as the browser, so run it where the browser's traffic runs. The check runs at startup, on every `begin`, and every 5 minutes. A good or wrong result is cached for a minute, and an undetermined one is not cached.
 
-It fails closed. A wrong country or provider gives `503 egress_wrong`. A failed lookup gives `503 egress_unknown`. If the exit is lost during a task, the window is closed, the task ends, and a request still in flight gets `503` with the code of the failed check (`egress_wrong` or `egress_unknown`); later requests get `404 no_task` with `reason: "egress"`. Changes of state send one Telegram message. A brief outage closes the running task too, because there is no retry window yet. See [egress](egress.md) for how to set up the exit node itself.
+It fails closed. A wrong country or provider gives `503 egress_wrong`. A failed lookup gives `503 egress_unknown`. If the exit turns out **wrong** during a task, the window is closed at once, the task ends, and a request still in flight gets `503 egress_wrong`; later requests get `404 no_task` with `reason: "egress"`. If the exit merely **cannot be determined** during a task (the echo services did not answer), the running task is allowed to continue while the service re-checks every 20 s; after three failed re-checks (about a minute) the task is closed the same way. New tasks are refused with `503` the whole time. The reasoning: with the kill switch in place a lost tunnel means no network at all, so an undetermined exit is far more often a dead echo service than a leak, while a wrong exit is a leak and is stopped immediately. Changes of state send one Telegram message. See [egress](egress.md) for how to set up the exit node itself.
+
+## Owner presence and the browser lock
+
+Two people on one set of hands would look wrong to a site and would annoy the owner. So:
+
+- **Owner presence.** When `MEATSUIT_NEKO_URL` and `NEKO_ADMIN_PASSWORD` are set (the Docker stack sets both; Neko is on the same network), the service asks Neko before `begin` and before every action whether someone holds control of the mirror (`GET /api/room/control`; in Neko control is taken implicitly by moving the mouse over the video, so a person who only watches does not count). If the holder's session is no longer connected (the owner closed the tab without releasing control), it does not count either. While the owner is at the controls, `begin` and actions answer `503 owner_present`; `GET /view` still works. If Neko cannot be reached, the service carries on (one `owner` journal line with `unknown`): presence is a courtesy, not a safety rail. Transitions are journaled as `owner` with `present` or `gone`, and the status page shows them. Verified against a local Neko 3.1.6 on 20.10.2026 with a real member session taking and releasing control.
+- **Browser lock.** The service and the warm-up (`life.js`) share `data/browser.lock` (the same `data` directory, one Docker volume). A task holds the lock from `begin` to `end` (renewed by every request, 10 minutes at a time, longer while a human solves a `409`); a warm-up session holds it for its planned length. `begin` while warm-up holds it answers `503 browser_busy` with `holder` and `retry_at`; warm-up skips a session while a task holds it. A stale lock from a crashed process expires on its own.
+
+A caller should treat both `503`s like the egress ones: defer and try later.
 
 ## Status page and journal
 
-`GET /` needs no token and refreshes every 15 seconds. It shows the queue (client, task label, site), per-site usage against the effective limit with a state of open, closed, rest day or paused, the latest exit check, and the last 30 journal lines. The text is currently in Russian. It never shows page content, typed text, tokens, page URLs or your IP address.
+`GET /` needs no token and refreshes every 15 seconds. It shows the queue (client, task label, site), per-site usage against the effective limit with a state of open, closed, rest day or paused, the latest exit check, whether the owner is at the controls (and whether warm-up holds the browser), and the last 30 journal lines. The text is currently in Russian. It never shows page content, typed text, tokens, page URLs or your IP address.
 
-`data/journal.jsonl` gets one JSON line per event: `begin`, `act`, `end`, `guard`, `limit`, `challenge`, `egress`, `auth`, `notify`, `error`, each with time, client, task, site and result. A failed `GET /view` is logged as `view`. For a `goto` it records only host and path, with no query or fragment. For `click` and `fill` it records the target text (first 60 characters). For `key` it records names such as `Enter`. **Typed text is never written**, and error details are scrubbed of it.
+`data/journal.jsonl` gets one JSON line per event: `begin`, `act`, `end`, `guard`, `limit`, `challenge`, `egress`, `owner`, `auth`, `notify`, `error`, each with time, client, task, site and result. A failed `GET /view` is logged as `view`. For a `goto` it records only host and path, with no query or fragment. For `click`, `fill` and `hover` it records the target text (first 60 characters). For `key` it records names such as `Enter`. **Typed text is never written**, and error details are scrubbed of it.
 
 ## Security notes
 
@@ -203,7 +219,7 @@ Examples assume `MS=http://127.0.0.1:8787`, `H="Authorization: Bearer $TOKEN"`, 
 curl -s -H "$H" -d '{"do":"begin","task":"my-bot:apply","site":"jobs.example.com","cost":1}' $MS/act
 # {"task":"t1"}
 curl -s -H "$H" -H "X-Task: t1" -d '{"do":"goto","url":"https://jobs.example.com/vacancy/1"}' $MS/act
-# {"ok":true,"url":"https://jobs.example.com/vacancy/1","settled":true,"guard":null}
+# {"ok":true,"url":"https://jobs.example.com/vacancy/1","settled":true,"guard":null,"paced":0}
 curl -s -H "$H" -H "X-Task: t1" $MS/view
 curl -s -H "$H" -H "X-Task: t1" -d '{"do":"fill","target":"Cover letter","text":"Hello, ..."}' $MS/act
 curl -s -H "$H" -H "X-Task: t1" -d '{"do":"click","target":3}' $MS/act

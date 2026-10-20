@@ -7,7 +7,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { seeded } = require('../human/random.js');
-const { glide, planMove, clampPlan, pickPoint, planScroll, planTwitch } = require('../human/mouse.js');
+const { glide, planMove, clampPlan, pickPoint, planScroll, planTwitch, NOTCH } = require('../human/mouse.js');
 
 const A = { x: 100, y: 100 }, B = { x: 900, y: 500 }; // длина ≈ 894
 const D = Math.hypot(B.x - A.x, B.y - A.y);
@@ -174,11 +174,15 @@ test('крошечный элемент: точка остаётся внутр�
   }
 });
 
-test('прокрутка: рывки по 100, не меньше заказанного, с паузами на чтение', () => {
+test('деление колеса как у Chromium на X11: 53 px, чтобы совпадать с колесом хозяина в зеркале', () => {
+  assert.equal(NOTCH, 53);
+});
+
+test('прокрутка: рывки по делению колеса, не меньше заказанного, с паузами на чтение', () => {
   for (const ev of runs(50, (r) => planScroll(2200, {}, r))) {
     const sum = ev.reduce((s, e) => s + e.dy, 0);
-    assert.ok(sum >= 2200 && sum < 2300, `итог ${sum}`);
-    assert.ok(ev.every((e) => Math.abs(e.dy) === 100), 'рывок не равен делению колеса');
+    assert.ok(sum >= 2200 && sum < 2200 + NOTCH, `итог ${sum}`);
+    assert.ok(ev.every((e) => Math.abs(e.dy) === NOTCH), 'рывок не равен делению колеса');
     ev.forEach((e, i) => i && assert.ok(e.t >= ev[i - 1].t, 'время назад'));
     const gaps = ev.slice(1).map((e, i) => e.t - ev[i].t);
     assert.ok(Math.max(...gaps) >= 300, 'нет паузы «прочитать»');
@@ -186,10 +190,23 @@ test('прокрутка: рывки по 100, не меньше заказан�
   }
 });
 
+test('прокрутка-поиск (seek): тот же итог делениями, но заметно быстрее чтения и без шагов назад', () => {
+  const reading = runs(50, (r) => planScroll(6000, {}, r)), seeking = runs(50, (r) => planScroll(6000, { seek: true }, r));
+  const last = (ev) => ev[ev.length - 1].t;
+  assert.ok(median(seeking.map(last)) < 0.5 * median(reading.map(last)), `поиск ${median(seeking.map(last))} мс, чтение ${median(reading.map(last))} мс`);
+  for (const ev of seeking) {
+    const sum = ev.reduce((s, e) => s + e.dy, 0);
+    assert.ok(sum >= 6000 && sum < 6000 + NOTCH, `итог ${sum}`);
+    assert.ok(ev.every((e) => e.dy === NOTCH), 'при поиске шагов назад нет');
+    const gaps = ev.slice(1).map((e, i) => e.t - ev[i].t);
+    assert.ok(Math.min(...gaps) >= 15, 'рывки быстрее, чем крутит палец');
+  }
+});
+
 test('прокрутка вверх: отрицательная дельта, итог не меньше заказанного', () => {
   for (const ev of runs(50, (r) => planScroll(-1500, {}, r))) {
     const sum = ev.reduce((s, e) => s + e.dy, 0);
-    assert.ok(sum <= -1500 && sum > -1600, `итог ${sum}`);
+    assert.ok(sum <= -1500 && sum > -1500 - NOTCH, `итог ${sum}`);
   }
 });
 

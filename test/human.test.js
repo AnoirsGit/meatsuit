@@ -71,13 +71,13 @@ test('type занимает человеческое время', async () => {
   assert.ok(clock.t > 2000 && clock.t < 12000, `15 знаков за ${clock.t} мс`);
 });
 
-test('scroll: рывки колеса по 100 с паузами, итог не меньше заказанного', async () => {
+test('scroll: рывки колеса по делению X11 с паузами, итог не меньше заказанного', async () => {
   const { page, env, log, clock } = fakePage();
   await human.scroll(page, 1500, env);
   const wheels = log.filter((e) => e.op === 'wheel');
-  assert.ok(wheels.every((w) => Math.abs(w.dy) === 100));
+  assert.ok(wheels.every((w) => Math.abs(w.dy) === 53), 'деление колеса как у X11 (см. NOTCH в human/mouse.js)');
   const net = wheels.reduce((s, w) => s + w.dy, 0);
-  assert.ok(net >= 1500 && net < 1600, `итог ${net}`);
+  assert.ok(net >= 1500 && net < 1553, `итог ${net}`);
   assert.ok(clock.t > 1000, `прокрутка за ${clock.t} мс: без пауз на чтение`);
 });
 

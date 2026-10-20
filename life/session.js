@@ -81,7 +81,7 @@ const BACK_UP = [0, 1000, 2500, 6000];
 async function follow(page, env, probe, log, options) {
   for (let attempt = 0; attempt < BACK_UP.length; attempt++) {
     if (env.late()) return false;
-    if (attempt) await human.scroll(page, -BACK_UP[attempt] * between(env.rnd, 0.8, 1.2), env);
+    if (attempt) await human.scroll(page, -BACK_UP[attempt] * between(env.rnd, 0.8, 1.2), { ...env, seek: true }); // ищет, не читает: крутит быстрее
     const links = await probe.links(page);
     // Четверть переходов идёт через меню или шапку, остальные из содержимого; нет нужной зоны — любая.
     const zone = chance(env.rnd, 0.25) ? 'nav' : 'content';
@@ -154,18 +154,21 @@ async function visit(page, step, env, probe, log) {
  * и возвратов вверх нет, сессия тихо кончается; то, что шло в момент срока, доделывается.
  * env: { sleep, now, rnd }; probe — чтение страницы; log — журнал событий;
  * consent — что делать с баннером cookies: 'reject' (по умолчанию) или 'accept';
- * wander — вероятность случайной мелочи (листнуть вверх, навести на меню, постоять, отойти) за проход чтения.
- * Возвращает { cut }: true, если сессию оборвал срок.
+ * wander — вероятность случайной мелочи (листнуть вверх, навести на меню, постоять, отойти) за проход чтения;
+ * yieldTo — async () => boolean: спрашивается перед каждым сайтом; true (хозяин взялся за руль) — сессия
+ * тихо кончается, не открывая новых сайтов (событие yield). Возвращает { cut, yielded }: cut — оборвал срок.
  */
-async function runSession(page, steps, { env = {}, probe = require('./probe.js'), log = () => {}, deadlineMs, consent = 'reject', wander: wanderChance = 0.2 } = {}) {
+async function runSession(page, steps, { env = {}, probe = require('./probe.js'), log = () => {}, deadlineMs, consent = 'reject', wander: wanderChance = 0.2, yieldTo = null } = {}) {
   const e = { sleep: env.sleep || human.sleep, now: env.now || Date.now, rnd: env.rnd || Math.random, consent, wander: wanderChance };
   watchPage(page, e, log); // лишние вкладки и системные диалоги закрываются сами
   const deadline = e.now() + (deadlineMs ?? deadlineOf(steps));
   let cut = false;
   e.room = () => deadline - e.now();
   e.late = () => { if (e.room() > 0) return false; cut = true; return true; };
+  let yielded = false;
   for (const step of steps) {
     if (e.late()) break;
+    if (yieldTo && await yieldTo().catch(() => false)) { yielded = true; log({ event: 'yield', reason: 'хозяин взялся за руль' }); break; }
     await e.sleep(clamp(lognormal(e.rnd, 3000, 0.4), 1000, PAUSE_MAX)); // глянуть на экран, собраться с мыслью
     if (e.late()) break;
     const t0 = e.now();
@@ -179,7 +182,7 @@ async function runSession(page, steps, { env = {}, probe = require('./probe.js')
       done('skipped', err.message);
     }
   }
-  return { cut };
+  return { cut, yielded };
 }
 
 module.exports = { runSession, Blocked, cssString, linkLocator };

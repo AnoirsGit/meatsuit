@@ -62,7 +62,7 @@ test('«/login» в строке запроса или в якоре — не в
   for (const url of ['https://site.test/news?utm=/login', 'https://site.test/news?next=/signin&x=1', 'https://site.test/#/login', 'https://site.test/blog/how-login-works', 'https://site.test/login-security-tips', 'https://site.test/help/signin-problems']) {
     assert.equal(classify({ url, title: 'Новости', text: article }), null, url);
   }
-  for (const url of ['https://site.test/login', 'https://site.test/user/sign-in?next=/', 'https://accounts.google.com/v3/signin/identifier', 'https://site.test/login/', 'https://site.test/account/login.php', 'https://site.test/Login']) {
+  for (const url of ['https://site.test/login', 'https://site.test/user/sign-in?next=/', 'https://accounts.google.com/v3/signin/identifier', 'https://site.test/login/', 'https://site.test/account/login.php', 'https://site.test/Login', 'https://gitlab.test/users/sign_in', 'https://site.test/log_in']) {
     assert.equal(classify({ url, title: 'Вход', text: 'Войти' }), 'login', url);
   }
 });
@@ -83,4 +83,17 @@ test('длинная статья про Яндекс-капчу и PerimeterX �
   const text = 'Вы не робот? Press & Hold to confirm you are a human. '.repeat(100);
   assert.equal(classify({ url: 'https://habr.com/ru/articles/2/', title: 'Как обойти защиту', text }), null);
   assert.equal(classify({ url: 'https://habr.com/ru/articles/showcaptcha-history', title: 'История', text }), null);
+});
+
+test('видимое поле пароля на недлинной странице — вход, даже если адрес обычный (модальное окно входа на главной)', () => {
+  assert.equal(classify({ url: 'https://tinder.test/', title: 'Tinder', text: 'Log in with phone number. Password', passwordField: true }), 'login');
+  assert.equal(classify({ url: 'https://site.test/', title: 'Главная', text: 'Войти. Пароль', passwordField: true }), 'login');
+  assert.equal(classify({ url: 'https://site.test/', title: 'Главная', text: 'Войти', passwordField: false }), null);
+  assert.equal(classify({ url: 'https://site.test/blocked', title: '403 Forbidden', text: 'Access denied', passwordField: true }), 'blocked', 'блок важнее формы входа');
+});
+
+test('поле пароля на длинной странице (форма входа в колонке статьи) — не вход: цена ложной тревоги — пауза площадки', () => {
+  const long = 'Длинная статья с колонкой, где форма входа. '.repeat(80); // 3000+ знаков: столько отдаёт снимок
+  assert.ok(long.length >= 3000);
+  assert.equal(classify({ url: 'https://forum.test/topic/1', title: 'Тема', text: long.slice(0, 3000), passwordField: true }), null);
 });

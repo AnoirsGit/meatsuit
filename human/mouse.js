@@ -168,23 +168,34 @@ function pickPoint(box, from, rnd = Math.random) {
 }
 
 /**
+ * Деление колеса в пикселях. Chromium на X11 (а в зеркале Neko Brave живёт под Xvfb) переводит один
+ * щелчок колеса в 53 px (kWheelScrollAmount в ui/events/x, то же число у GTK). Хозяин, крутя колесо
+ * в зеркале, даёт странице deltaY 53; раньше руки слали 100, как на Windows, и в одном браузере
+ * жили два разных колеса. Число взято из исходников Chromium, в самом зеркале не измерено:
+ * проверить можно, повесив на странице addEventListener('wheel', e => console.log(e.deltaY)).
+ */
+const NOTCH = 53;
+
+/**
  * Прокрутка колесом: пачки рывков по делению колеса, между пачками пауза
  * «прочитать», изредка шаг назад. Знак total — направление.
+ * seek — не читает, а ищет (вернуться вверх за ссылкой, домотать до места): пачки длиннее,
+ * паузы короче, без шагов назад; на 53-пиксельном колесе длинный путь иначе занял бы минуту.
  */
-function planScroll(total, { notch = 100 } = {}, rnd = Math.random) {
+function planScroll(total, { notch = NOTCH, seek = false } = {}, rnd = Math.random) {
   const dir = total < 0 ? -1 : 1;
   let left = Math.abs(total), t = 0;
   const events = [];
-  while (left > 0 && events.length < 500) {
-    const burst = clamp(Math.round(lognormal(rnd, 3, 0.5)), 1, 8);
+  while (left > 0 && events.length < 1000) {
+    const burst = seek ? clamp(Math.round(lognormal(rnd, 6, 0.4)), 2, 14) : clamp(Math.round(lognormal(rnd, 3, 0.5)), 1, 8);
     for (let i = 0; i < burst && left > 0; i++) {
       events.push({ t: Math.round(t), dy: dir * notch });
       left -= notch;
-      t += clamp(lognormal(rnd, 55, 0.4), 20, 200);
+      t += seek ? clamp(lognormal(rnd, 40, 0.35), 18, 120) : clamp(lognormal(rnd, 55, 0.4), 20, 200);
     }
     if (left <= 0) break;
-    t += clamp(lognormal(rnd, 700, 0.6), 300, 5000);
-    if (left > 2 * notch && chance(rnd, 0.07)) {
+    t += seek ? clamp(lognormal(rnd, 250, 0.5), 120, 1200) : clamp(lognormal(rnd, 700, 0.6), 300, 5000);
+    if (!seek && left > 2 * notch && chance(rnd, 0.07)) {
       events.push({ t: Math.round(t), dy: -dir * notch });
       left += notch;
       t += clamp(lognormal(rnd, 400, 0.4), 150, 2000);
@@ -193,4 +204,4 @@ function planScroll(total, { notch = 100 } = {}, rnd = Math.random) {
   return events;
 }
 
-module.exports = { glide, planMove, clampPlan, pickPoint, planScroll, planTwitch };
+module.exports = { glide, planMove, clampPlan, pickPoint, planScroll, planTwitch, NOTCH };
