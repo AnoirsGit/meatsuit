@@ -48,7 +48,7 @@ Needs Node 20+. `plan` and `now --dry` need no browser. Real sessions also need 
 | `node extras/life.js now` | One session right now. While a pause from a captcha or block is active it refuses (exit code 1) unless you pass `--force` | Yes |
 | `node extras/life.js run` | Follows the schedule until stopped (Ctrl+C or SIGTERM: the tab is closed, exit code 0) | Yes |
 
-Options: `--config profiles/life.json`, `--cdp http://127.0.0.1:9222` (or the `MEATSUIT_CDP` variable), `--data data`, `--egress profiles/egress.json`, `--force`, `--no-egress-check`. Via npm: `npm run life -- plan`.
+Options: `--config profiles/life.json`, `--cdp http://127.0.0.1:9222` (or the `MEATSUIT_CDP` variable), `--data data`, `--egress profiles/egress.json`, `--force`, `--no-egress-check`. Via npm from the repository root: `npm --prefix extras run life -- plan`.
 
 The example from `plan` is not what `run` will pick: each is chosen independently. `plan` lists the whole day's starts, including ones already past. Console output and journal `reason` strings are in Russian, and `plan` prints the current time as "Сейчас (<your tz>)" ("Now"), in your configured zone.
 
