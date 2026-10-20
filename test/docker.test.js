@@ -141,6 +141,9 @@ test('Tailscale — необязательный профиль: MEATSUIT_EGRESS
   const listed = model(envFile(t, {}, 'MEATSUIT_EGRESS=tailscale\nMEATSUIT_EXIT_NODES=home-phone,anoir-pc\nMEATSUIT_EXIT_COUNTRY=KZ\nMEATSUIT_EXIT_ASN=64500\n'));
   const env = listed.services.tailscale.environment;
   assert.deepEqual([env.MEATSUIT_EXIT_NODES, env.MEATSUIT_EXIT_COUNTRY, env.MEATSUIT_EXIT_ASN], ['home-phone,anoir-pc', 'KZ', '64500']);
+  // тонкая настройка, описанная в egress.md, тоже доходит; без неё — пусто, и скрипт берёт свои значения
+  const tuned = model(envFile(t, {}, 'MEATSUIT_EGRESS=tailscale\nMEATSUIT_EXIT_RETURN_AFTER=6\nMEATSUIT_EXIT_PROBE_EVERY=20\n')).services.tailscale.environment;
+  assert.deepEqual([tuned.MEATSUIT_EXIT_RETURN_AFTER, tuned.MEATSUIT_EXIT_PROBE_EVERY, tuned.MEATSUIT_EXIT_INTERVAL, tuned.MEATSUIT_EXIT_DOWN_AFTER], ['6', '20', '', '']);
 });
 
 test('up.sh: без файла и с непонятным MEATSUIT_EGRESS — отказ с подсказкой, docker не зовётся', (t) => {

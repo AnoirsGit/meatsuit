@@ -58,8 +58,8 @@ gate_close() {
 }
 gate_open() {
   for tool in $(gate_tools); do
-    n=0
-    while gate_rule "$tool" -C 2>/dev/null && [ $n -lt 5 ]; do gate_rule "$tool" -D; n=$((n + 1)); done
+    k=0 # не n: n — число узлов в tick
+    while gate_rule "$tool" -C 2>/dev/null && [ $k -lt 5 ]; do gate_rule "$tool" -D; k=$((k + 1)); done
   done
   [ "$(get gate)" = open ] || log "ворота открыты"
   put gate open
