@@ -95,11 +95,11 @@ As of 8 October 2026.
 
 | | |
 |---|---|
-| **Running on a server** | this compose file with Google Chrome, the profile in `meatsuit_profile`, traffic leaving through a home Tailscale exit node (the `egress` profile); `docker/verify.sh` green; cookies and `localStorage` survive a restart and a re-create of the container (`verify.sh persistence`). One caller project is attached with `container:meatsuit-browser`, signed in by hand once, and the sign-in holds; it has run `dryRun` tasks only |
+| **Running on a server** | this compose file with Google Chrome, the profile in `meatsuit_profile`, traffic leaving through a home Tailscale exit node (the `egress` profile), and with the exit node unset the browser has no network instead of falling back to the server's address (checked 8 October); `docker/verify.sh` green; cookies and `localStorage` survive a restart and a re-create of the container (`verify.sh persistence`). One caller project is attached with `container:meatsuit-browser`, signed in by hand once, and the sign-in holds; it has run `dryRun` tasks only |
 | **Tested** | the library in real Chromium on local pages (`npm test`); the deploy file, `npm run init`, `npm run config` and the secret scan; `docker compose config` for both browsers, with and without Tailscale |
-| **Not run yet** | this compose file with Brave; the kill switch with the exit node switched off (does the browser really lose the network instead of falling back to the server); Enter and shortcuts from a real keyboard; a recorded row of [the acceptance](docs/acceptance.md) on the server |
+| **Not run yet** | this compose file with Brave; Enter and shortcuts from a real keyboard; a recorded row of [the acceptance](docs/acceptance.md) on the server |
 
-The git history still contains personal data from earlier work and is going to be rewritten; `main` on GitHub is older than the working branch. Open items, by priority: [docs/ROADMAP.md](docs/ROADMAP.md).
+The git history still contains personal data from earlier work and is going to be rewritten. Open items, by priority: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 meatsuit is for automating **your own** accounts at low volume. It does not solve captchas, does not spoof fingerprints and promises nothing about how sites react. Platforms' terms apply, and you are responsible for following them.
 

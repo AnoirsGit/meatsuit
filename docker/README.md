@@ -107,7 +107,7 @@ Without it the browser's traffic leaves from the server's own address. With `MEA
 3. `docker/up.sh`. The browser waits until Tailscale is logged in and the exit node is online.
 4. Open `https://ipinfo.io` in the mirror: it must show your home connection.
 
-**Do not set the exit node on the host itself over an SSH session on its public address**: the session hangs ([egress.md](../docs/egress.md#ssh-safety-warning)). Runs on the owner's server since 8 October 2026 (see below); the kill switch with the exit node switched off has not been checked.
+**Do not set the exit node on the host itself over an SSH session on its public address**: the session hangs ([egress.md](../docs/egress.md#ssh-safety-warning)). Runs on the owner's server since 8 October 2026 (see below), including the kill switch with the exit node switched off.
 
 ## Deploying on a server
 
@@ -142,11 +142,12 @@ Since 8 October 2026 this compose file runs on the owner's server with **Google 
 | Control over Neko's protocol | `verify.sh` | Ctrl+L, Ctrl+A, typing, Enter and wheel worked: the article loaded and scrolled |
 | Profile survives a stop and a re-create | Cookie over CDP, `stop`/`start`, `down`/`up` | Kept, including one set a second before the stop |
 | The mirror on a rented server (an OpenVZ container, 4 old CPU cores, no GPU), opened from a laptop over Tailscale | Mirror only, bound to the server's loopback and reached through the host's Tailscale; a headless Chromium logged in and sampled one video pixel every second for 45 s | Healthy; the video is live over the tailnet with the default UDP ports; about 3.6% CPU and 310 MB at idle (one run) |
+| The kill switch on the owner's server, 8 October 2026 | The exit node unset (`tailscale set --exit-node=`), then set back; a connection attempt as the browser's user (uid 1000) | Unset: no connection anywhere (`curl: (7) Could not connect`), no fallback to the server's address. Set back: leaves from the home address again |
 | A throwaway container on that server | `/dev/net/tun`, `iptables -m owner`, `-m conntrack`, `ip6tables` | Accepted, so the kill switch rules can be installed there (Tailscale itself was **not** started) |
 
 Separately, the library ran for one caller project against a Neko mirror with Google Chrome using the same `chrome.conf` and `chrome-policies.json`, started from that project's own compose file.
 
-**Not verified:** this compose file with Brave; a recorded acceptance row on the server; moving a profile in; Enter and shortcuts from a real keyboard; sound, and video on a phone; the kill switch with the exit node switched off; load while someone uses the mirror on a weak server.
+**Not verified:** this compose file with Brave; a recorded acceptance row on the server; moving a profile in; Enter and shortcuts from a real keyboard; sound, and video on a phone; load while someone uses the mirror on a weak server.
 
 ## Brave: six fixes that are not obvious
 
