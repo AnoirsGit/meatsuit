@@ -1,6 +1,6 @@
 # How meatsuit works
 
-meatsuit is **launching a browser, remembering its session, and eyes and hands** for someone else's code. It decides nothing: the caller (a bot project with its own model and its own credentials) looks at the page and chooses the next command. This page explains the parts and the reasons behind them. The API itself is in [04-contract.md](04-contract.md) (Russian); running the mirror is in [docker/README.md](../docker/README.md).
+meatsuit is **launching a browser, remembering its session, and eyes and hands** for someone else's code. It decides nothing: the caller (a bot project with its own model and its own credentials) looks at the page and chooses the next command. This page explains the parts and the reasons behind them. The API itself is in [contract.md](contract.md); running the mirror is in [docker/README.md](../docker/README.md).
 
 ## The parts
 
