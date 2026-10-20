@@ -17,9 +17,10 @@ const SCRIPT = path.join(__dirname, '..', 'docker', 'egress', 'exit-picker.sh');
 const NODE = process.execPath;
 const TOOLS = ['cat', 'tr', 'awk', 'sed', 'head', 'cut', 'mkdir', 'rm', 'sleep'];
 
-const PHONE = { ip: '100.64.0.2', dns: 'home-phone.example-tailnet.ts.net.', host: 'OPPO-A57', online: true, opt: true };
-const PC = { ip: '100.64.0.3', dns: 'anoir-pc.example-tailnet.ts.net.', host: 'anoir-pc', online: true, opt: true };
-const LAPTOP = { ip: '100.64.0.4', dns: 'laptop.example-tailnet.ts.net.', host: 'laptop', online: true, opt: false };
+// Адреса узлов — TEST-NET-1 (RFC 5737): разбору всё равно, а настоящие 100.x тут были бы похожи на утечку.
+const PHONE = { ip: '192.0.2.2', dns: 'home-phone.tailnet.example.', host: 'OPPO-A57', online: true, opt: true };
+const PC = { ip: '192.0.2.3', dns: 'anoir-pc.tailnet.example.', host: 'anoir-pc', online: true, opt: true };
+const LAPTOP = { ip: '192.0.2.4', dns: 'laptop.tailnet.example.', host: 'laptop', online: true, opt: false };
 // Документационные номера (RFC 5398): домашний провайдер и мобильный оператор
 const HOME = { ipinfo: { ip: '203.0.113.7', country: 'KZ', org: 'AS64500 Home ISP' }, ipwho: { success: true, country_code: 'KZ', connection: { asn: 64500 } } };
 const MOBILE = { ipinfo: { ip: '198.51.100.9', country: 'KZ', org: 'AS64501 Mobile' }, ipwho: { success: true, country_code: 'KZ', connection: { asn: 64501 } } };
@@ -33,7 +34,7 @@ function statusJson(w) {
   });
   const st = {
     Version: '1.102.5', BackendState: w.running === false ? 'Starting' : 'Running',
-    Self: { ID: 'self', HostName: 'meatsuit', DNSName: 'meatsuit.example-tailnet.ts.net.', TailscaleIPs: ['100.64.0.1'], Online: true, ExitNode: false, ExitNodeOption: true },
+    Self: { ID: 'self', HostName: 'meatsuit', DNSName: 'meatsuit.tailnet.example.', TailscaleIPs: ['192.0.2.1'], Online: true, ExitNode: false, ExitNodeOption: true },
     Peer: Object.fromEntries(w.peers.map((p) => ['nodekey:' + p.ip, peer(p)])),
     User: { 1: { ID: 1, LoginName: 'owner@example.com' } },
   };
@@ -113,7 +114,7 @@ const GATE4 = '-o tailscale0 ! -d 100.64.0.0/10 -m owner ! --uid-owner 0 -m conn
 test('без проверки: берёт первый узел из списка в сети, по IP, с доступом к LAN; iptables не трогает', (t) => {
   const sb = sandbox(t, { peers: [PHONE, PC] });
   once(sb);
-  assert.deepEqual(sb.sets(), ['tailscale set --exit-node=100.64.0.2 --exit-node-allow-lan-access=true']);
+  assert.deepEqual(sb.sets(), ['tailscale set --exit-node=192.0.2.2 --exit-node-allow-lan-access=true']);
   assert.equal(sb.world().selected, PHONE.ip);
   assert.ok(!sb.log().some((l) => l.startsWith('iptables')), 'ворот без проверки нет');
   sb.clearLog();
@@ -122,7 +123,7 @@ test('без проверки: берёт первый узел из списк�
 });
 
 test('имена: первая часть MagicDNS, полное имя, HostName и 100.x без учёта регистра; узел без exit node и Self не берутся', (t) => {
-  for (const name of ['HOME-PHONE', 'home-phone.example-tailnet.ts.net', 'oppo-a57', '100.64.0.2']) {
+  for (const name of ['HOME-PHONE', 'home-phone.tailnet.example', 'oppo-a57', '192.0.2.2']) {
     const sb = sandbox(t, { peers: [PC, PHONE] });
     once(sb, { MEATSUIT_EXIT_NODES: `${name},anoir-pc` });
     assert.equal(sb.world().selected, PHONE.ip, name);
@@ -263,8 +264,8 @@ test('status: таблица узлов, выбранный и ворота', (t
   const r = sb.run(['status'], PROBE);
   assert.equal(r.status, 0, r.stderr);
   const lines = r.stdout.trim().split('\n');
-  assert.match(lines[1], /^1\s+home-phone\s+100\.64\.0\.2\s+yes\s+-\s+wrong KZ 64501 ipinfo/);
-  assert.match(lines[2], /^2\s+anoir-pc\s+100\.64\.0\.3\s+yes\s+yes\s+ok KZ 64500 ipinfo/);
+  assert.match(lines[1], /^1\s+home-phone\s+192\.0\.2\.2\s+yes\s+-\s+wrong KZ 64501 ipinfo/);
+  assert.match(lines[2], /^2\s+anoir-pc\s+192\.0\.2\.3\s+yes\s+yes\s+ok KZ 64500 ipinfo/);
   assert.equal(lines[3], 'gate: open');
   assert.match(sb.run(['status'], { MEATSUIT_EXIT_NODES: '' }).stdout, /TS_EXTRA_ARGS/);
 });
