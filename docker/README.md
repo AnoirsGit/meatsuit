@@ -106,6 +106,7 @@ Without it the browser's traffic leaves from the server's own address. With `MEA
 2. In the deploy file add `MEATSUIT_EGRESS=tailscale` and `TS_EXTRA_ARGS="--exit-node=<home node> --exit-node-allow-lan-access=true"`, in double quotes because of the space; without LAN access the mirror does not open. `TS_AUTHKEY` (a one-time key) is optional: without it the sign-in link is in `docker/up.sh logs tailscale`.
 3. `docker/up.sh`. The browser waits until Tailscale is logged in and the exit node is online.
 4. Open `https://ipinfo.io` in the mirror: it must show your home connection.
+5. Optionally, more than one exit node: `MEATSUIT_EXIT_NODES=home-phone,anoir-pc` makes the Tailscale container switch to the next one when the first is offline, and `MEATSUIT_EXIT_COUNTRY` / `MEATSUIT_EXIT_ASN` make it check the exit before the browser may use it ([egress.md](../docs/egress.md#fallback-order)).
 
 **Do not set the exit node on the host itself over an SSH session on its public address**: the session hangs ([egress.md](../docs/egress.md#ssh-safety-warning)). Runs on the owner's server since 8 October 2026 (see below), including the kill switch with the exit node switched off.
 
