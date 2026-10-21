@@ -255,4 +255,3 @@ It stops growing there on purpose: the aim is to look like someone who reads a c
 | 7 | **Behaviour tuned by eye.** The mouse and scroll rhythm looks human by the author's own measurements, but was never compared with real behavioural detectors | Detector sites are a separate spike, not done |
 | 8 | **No notifications.** A block is visible only in the journal and on screen. `notify.js` (Telegram) is written for the HTTP service and is not connected to `life.js` | Look at `life.jsonl` by hand |
 
-Russian original: [ru/06-warmup.md](ru/06-warmup.md).

@@ -4,7 +4,7 @@
 
 meatsuit exposes one browser to your own scripts through a small HTTP service. A script asks for a task, looks at a page with `GET /view`, does things with `POST /act`, and ends the task. The service queues tasks, paces them, checks the network exit, and moves the mouse and keyboard like a person. For the idea behind this, see [architecture](architecture.md).
 
-Everything below follows the code in [`server.js`](../extras/server.js), [`driver.js`](../extras/driver.js) and [`view.js`](../extras/view.js). Where a Russian note disagrees with the code, the code wins. The `message` field in error bodies is a human-readable hint that is currently in Russian. Match on `error` and the other fields, never on `message`.
+Everything below follows the code in [`server.js`](../extras/server.js), [`driver.js`](../extras/driver.js) and [`view.js`](../extras/view.js). The `message` field in error bodies is a human-readable hint that is currently in Russian. Match on `error` and the other fields, never on `message`.
 
 ## Running the service
 
