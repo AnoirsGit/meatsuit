@@ -18,7 +18,7 @@ meatsuit — запуск браузера, запоминание и глаза
 
 ## Подключение
 
-CommonJS, Node 20+, зависимость `playwright-core`. `package.json`: `"main": "index.js"`, поля `exports` нет,
+CommonJS, Node 20+, зависимость `playwright-core`. В npm не опубликован: вызывающие ставят его из клона (`npm install ../meatsuit`, зависимость `file:`). `package.json`: `"main": "index.js"`, поля `exports` нет,
 поэтому доступны и вложенные модули (`require('meatsuit/hands.js')`, `require('meatsuit/telegram.js')`).
 Экспорт — литерал `module.exports = { … }`: проекты на ESM берут имена из него напрямую.
 

@@ -37,10 +37,10 @@ docker/verify.sh    # drives the mirror and checks over CDP that the browser rea
 
 Open `http://127.0.0.1:8080`, enter any name and the member password from the deploy file (`grep NEKO_PASSWORD docker/.env`). Sign in to your sites there, once.
 
-**The library**, from your own project. The CDP port is reachable only inside the mirror's network, so run your code in a container with `network_mode: "container:meatsuit-browser"` (to just try it, start a local Chromium with `--remote-debugging-port=9222`):
+**The library**, from your own project. It is not published to npm: add it from a checkout (`npm install ../meatsuit`, which writes a `file:` dependency). The CDP port is reachable only inside the mirror's network, so run your code in a container with `network_mode: "container:meatsuit-browser"` (to just try it, start a local Chromium with `--remote-debugging-port=9222`):
 
 ```js
-const { connect } = require('meatsuit');
+const { connect } = require('meatsuit');   // CommonJS: run the lines below inside an async function
 
 const ms = await connect({
   cdpUrl: 'http://127.0.0.1:9222',
@@ -55,7 +55,7 @@ const title = await ms.task('read-title', async ({ see, act }) => {
 await ms.close();
 ```
 
-`peek(site, { sitesFile, dir })` tells how much of a site's limits is left without spending a slot. The full API — `see()` snapshots, the closed command set, `sites.json`, errors, the journal and recordings — is in [docs/contract.md](docs/contract.md).
+`goto` takes `https` addresses on the task's `site` only. The limits in `sites.example.json` let `example.com` run only from 10 to 23 o'clock in the process's time zone (other sites 9 to 21): outside those hours the task throws `LimitReached` before it touches the browser. `peek(site, { sitesFile, dir })` tells how much of a site's limits is left without spending a slot. The full API — `see()` snapshots, the closed command set, `sites.json`, errors, the journal and recordings — is in [docs/contract.md](docs/contract.md).
 
 ## Configuration
 

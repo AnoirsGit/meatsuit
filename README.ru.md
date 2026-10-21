@@ -37,10 +37,10 @@ docker/verify.sh    # управляет зеркалом и проверяет 
 
 Откройте `http://127.0.0.1:8080`, имя любое, пароль участника — из файла деплоя (`grep NEKO_PASSWORD docker/.env`). Войдите на свои сайты там, один раз.
 
-**Библиотека** — из вашего проекта. Порт CDP доступен только в сети зеркала: запускайте код в контейнере с `network_mode: "container:meatsuit-browser"` (чтобы просто попробовать — локальный Chromium с `--remote-debugging-port=9222`):
+**Библиотека** — из вашего проекта. В npm её нет: ставьте из клона (`npm install ../meatsuit`, в `package.json` запишется зависимость `file:`). Порт CDP доступен только в сети зеркала: запускайте код в контейнере с `network_mode: "container:meatsuit-browser"` (чтобы просто попробовать — локальный Chromium с `--remote-debugging-port=9222`):
 
 ```js
-const { connect } = require('meatsuit');
+const { connect } = require('meatsuit');   // CommonJS: строки ниже — внутри async-функции
 
 const ms = await connect({
   cdpUrl: 'http://127.0.0.1:9222',
@@ -55,7 +55,7 @@ const title = await ms.task('read-title', async ({ see, act }) => {
 await ms.close();
 ```
 
-`peek(site, { sitesFile, dir })` показывает остаток лимитов площадки, не тратя слот. Весь интерфейс — снимки `see()`, закрытый набор команд, `sites.json`, ошибки, журнал и запись — в [docs/04-contract.md](docs/04-contract.md).
+`goto` принимает только `https` на хосте `site` задачи. Лимиты из `sites.example.json` пускают `example.com` только с 10 до 23 часов по поясу процесса (остальные площадки — с 9 до 21): в другое время задача бросает `LimitReached`, не трогая браузер. `peek(site, { sitesFile, dir })` показывает остаток лимитов площадки, не тратя слот. Весь интерфейс — снимки `see()`, закрытый набор команд, `sites.json`, ошибки, журнал и запись — в [docs/04-contract.md](docs/04-contract.md).
 
 ## Настройки
 
