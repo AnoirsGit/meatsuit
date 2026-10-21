@@ -16,7 +16,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require('playwright-core');
 const { hands, replay, BadCommand, StaleElement } = require('./hands.js');
-const { NeedsHuman, check: guardCheck } = require('./guard.js');
+const { NeedsHuman, check: guardCheck, codeLoginRule } = require('./guard.js');
 const eyes = require('./eyes.js');
 const { telegramNotifier, createTelegram, findChats, TelegramError } = require('./telegram.js');
 const { openWindow } = require('./window.js');
@@ -54,6 +54,19 @@ function peek(site, { sitesFile, sites, dir = DEFAULT_DIR, now = new Date(), rea
   return { site, rule: rule || null, ...limitStatus(site, rule, path.join(dir, 'limits.json'), now, { readOnly }) };
 }
 
+/**
+ * Вход по одноразовому коду: нужны оба согласия — опция задачи и правило в своей записи площадки
+ * в sites.json вызывающего (не в "*"). Без опции → null (правило площадки ни на что не влияет).
+ * С опцией, но без правила или с неверным правилом — ошибка до очереди и браузера.
+ */
+function codeLoginFor(sites, site, optIn) {
+  if (optIn === false || optIn === undefined) return null;
+  if (optIn !== true) throw new Error('task: codeLogin — true или false');
+  const own = Object.hasOwn(sites, site) ? sites[site] : null;
+  if (!own || own.codeLogin === undefined) throw new Error(`task: codeLogin — у площадки ${site} в sites.json нет своего "codeLogin": { "path": "^/…" } (из "*" не берётся)`);
+  return codeLoginRule(own.codeLogin);
+}
+
 const isHost = (h) => typeof h === 'string' && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i.test(h);
 
 async function connect({
@@ -86,14 +99,14 @@ async function connect({
   const hostOn = (u, site) => { try { const h = new URL(u).hostname; return h === site || h.endsWith('.' + site); } catch { return false; } };
 
   // singleTab: ищем уже открытую вкладку площадки (по хосту); нет её — undefined, окно откроет task() после reserve.
-  async function siteTab(site) {
+  async function siteTab(site, codeLogin) {
     const onSite = (u) => hostOn(u, site);
     const found = browser.contexts()[0].pages().find((p) => onSite(p.url()));
     if (found) {
       // Снимок без команд: на вкладке может быть капча, которую решает человек (оставлена прошлой задачей,
       // в том числе другим процессом), её не трогаем.
       const snap = await eyes.see(found);
-      const reason = guardCheck(snap);
+      const reason = guardCheck(snap, codeLogin ? { codeLogin: { site, path: codeLogin.path } } : {});
       if (reason) throw new NeedsHuman(reason, snap.url);
       return found;
     }
@@ -105,14 +118,16 @@ async function connect({
     } finally { await session.detach().catch(() => {}); }
   }
 
-  async function task(name, fn, { site, extraHosts = [], uploadDirs = [], maxCommands = 60, maxMinutes = 10, dryRun = false, dryRunNavigation = false, readOnly = false, capture } = {}) {
+  async function task(name, fn, { site, extraHosts = [], uploadDirs = [], maxCommands = 60, maxMinutes = 10, dryRun = false, dryRunNavigation = false, readOnly = false, capture, codeLogin: codeLoginOpt = false } = {}) {
     if (!site) throw new Error('task: нужен site');
     // Хосты, где страница может оказаться без стопа (страница «спасибо» на сайте компании после формы ATS).
     // goto туда нельзя, лимиты и счётчики — по site.
     if (!Array.isArray(extraHosts) || !extraHosts.every(isHost)) throw new Error('task: extraHosts — массив хостов вида company.com (без схемы, пути и «*»)');
     // Каталоги вызывающего, откуда upload может брать файлы (резюме); без них upload выключен.
     if (!Array.isArray(uploadDirs) || !uploadDirs.every((d) => typeof d === 'string' && path.isAbsolute(d))) throw new Error('task: uploadDirs — массив абсолютных путей к каталогам');
-    const rule = ruleFor(loadSites(), site); // своя запись или "*"
+    const sitesNow = loadSites();
+    const rule = ruleFor(sitesNow, site); // своя запись или "*"
+    const codeLogin = codeLoginFor(sitesNow, site, codeLoginOpt); // вход по коду: опция задачи + своя запись площадки
     // Потолок бюджета задаёт площадка, а не вызывающий проект.
     if (rule && rule.maxCommands) maxCommands = Math.min(maxCommands, rule.maxCommands);
     if (rule && rule.maxMinutes) maxMinutes = Math.min(maxMinutes, rule.maxMinutes);
@@ -124,7 +139,7 @@ async function connect({
     let run; // присмотр за задачей: стоп, бюджет, конец
     const started = Date.now();
     try {
-      const found = rule && rule.singleTab ? await siteTab(site) : null; // до reserve: сбой поиска не тратит слот
+      const found = rule && rule.singleTab ? await siteTab(site, codeLogin) : null; // до reserve: сбой поиска не тратит слот
       const limitsFile = path.join(dir, 'limits.json');
       const slot = new Date();
       try { (dryRun ? peekLimit : reserve)(site, rule, limitsFile, slot, { readOnly }); } // репетиция квоту не тратит
@@ -138,7 +153,7 @@ async function connect({
       onPopup = (p) => { botPages.add(p); p.close().catch(() => {}); }; // новые вкладки бот не ведёт
       page.on('popup', onPopup);
       const h = hands(page, { dryRun, dryRunNavigation, logFile: path.join(dir, 'journal.jsonl'), allowedHosts: [site], uploadDirs, capture });
-      run = supervise(h, { name, site, extraHosts, notify: (t) => emit('needsHuman', t), maxCommands, maxMinutes,
+      run = supervise(h, { name, site, extraHosts, notify: (t) => emit('needsHuman', t), maxCommands, maxMinutes, codeLogin,
         onWrite: readOnly && !dryRun ? () => charge(site, rule, limitsFile, slot) : null }); // read-only задача записала: полный слот задним числом
       await emit('start', `meatsuit: «${name}» на ${site} запущена${dryRun ? ' (dryRun)' : ''}`);
       const result = await fn(run.api);
