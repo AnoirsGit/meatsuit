@@ -38,6 +38,8 @@ The settings of the mirror live in one git-ignored file: `docker/.env`, or the f
 | `MEATSUIT_API_PORT` | `8787` | Host port of the HTTP service from `extras/` (profile `api`) |
 | `MEATSUIT_EGRESS` | empty | `tailscale`: route the browser through a Tailscale exit node (below). Not in `.env.example`'s fields; add it by hand |
 | `TS_AUTHKEY`, `TS_EXTRA_ARGS`, `TS_HOSTNAME`, `TS_TAG` | empty, empty, `meatsuit`, `stable` | The Tailscale container (add by hand) |
+| `MEATSUIT_EXIT_NODES`, `MEATSUIT_EXIT_COUNTRY`, `MEATSUIT_EXIT_ASN` | empty | The exit-node list with a fallback and the exit check ([egress.md](../docs/egress.md#fallback-order)). Empty: one exit node from `TS_EXTRA_ARGS`, no check |
+| `MEATSUIT_EXIT_INTERVAL`, `MEATSUIT_EXIT_DOWN_AFTER`, `MEATSUIT_EXIT_RETURN_AFTER`, `MEATSUIT_EXIT_PROBE_EVERY` | `30`, `2`, `4`, `10` | The picker's step in seconds and its thresholds in steps |
 | `BRAVE_EXTRA_FLAGS` | empty | Extra Brave flags (no spaces inside values) |
 | `LIFE_CPUS`, `SERVER_CPUS`, `LIFE_CONFIG`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | | Settings of the `extras/` services (below) |
 
@@ -108,7 +110,7 @@ Without it the browser's traffic leaves from the server's own address. With `MEA
 4. Open `https://ipinfo.io` in the mirror: it must show your home connection.
 5. Optionally, more than one exit node: `MEATSUIT_EXIT_NODES=home-phone,anoir-pc` makes the Tailscale container switch to the next one when the first is offline, and `MEATSUIT_EXIT_COUNTRY` / `MEATSUIT_EXIT_ASN` make it check the exit before the browser may use it ([egress.md](../docs/egress.md#fallback-order)).
 
-**Do not set the exit node on the host itself over an SSH session on its public address**: the session hangs ([egress.md](../docs/egress.md#ssh-safety-warning)). Runs on the owner's server since 8 October 2026 (see below), including the kill switch with the exit node switched off.
+**Do not set the exit node on the host itself over an SSH session on its public address**: the session hangs ([egress.md](../docs/egress.md#ssh-safety-warning)). Runs on the owner's server since 8 October 2026 in the `ms-trunk` version (one exit node, no picker; see below), including the kill switch with the exit node switched off.
 
 ## Deploying on a server
 
@@ -130,7 +132,7 @@ It does not prove that a real keyboard in a real web client works, that video an
 
 ## What was verified, and what was not
 
-Since 8 October 2026 this compose file runs on the owner's server with **Google Chrome** and the Tailscale exit (the first row). Most other runs below were made with **Brave**, before the browser became a choice; this compose file has not been started with Brave yet. What is tested now: `docker compose config` for both browsers, with and without the Tailscale overlay, and `docker/up.sh` (`test/docker.test.js`, `test/config.test.js`). `profile-init` was run for real with the Brave image on fresh volumes: `meatsuit_profile` and its `state/` came out owned by 1000:1000.
+Since 8 October 2026 the owner's server runs this compose file as it was on the `ms-trunk` branch (before `exit-picker.sh`) with **Google Chrome** and the Tailscale exit (the first row); switching it to `main` is step 5 of [ru/09-phone-exit-node.md](../docs/ru/09-phone-exit-node.md). Most other runs below were made with **Brave**, before the browser became a choice; this compose file has not been started with Brave yet. What is tested now: `docker compose config` for both browsers, with and without the Tailscale overlay, and `docker/up.sh` (`test/docker.test.js`, `test/config.test.js`). `profile-init` was run for real with the Brave image on fresh volumes: `meatsuit_profile` and its `state/` came out owned by 1000:1000.
 
 | What | How | Result |
 |---|---|---|
@@ -171,7 +173,7 @@ Other deliberate differences from the stock Neko Brave: no `--bwsi` (guest mode 
 | `browser-chrome.yml`, `browser-brave.yml` | Per-browser image, profile volume and config files, chosen by `MEATSUIT_BROWSER` |
 | `chrome.conf`, `chrome-policies.json` | Google Chrome under Neko: supervisord program and policies |
 | `neko/brave.conf`, `neko/brave-start.sh`, `neko/policies.json` | Brave under Neko |
-| `docker-compose.egress.yml`, `egress/killswitch.sh` | The optional Tailscale exit and its kill switch |
+| `docker-compose.egress.yml`, `egress/killswitch.sh`, `egress/exit-picker.sh` | The optional Tailscale exit, its kill switch, and the exit-node list with the exit check |
 | `up.sh` | `docker compose` with the deploy file, and the Tailscale overlay when asked |
 | `verify.sh`, `verify/` | The checks described above |
 | `life/Dockerfile` | The image of the `extras/` services (Node and Patchright; the repository is mounted at `/app`) |
@@ -214,5 +216,6 @@ It opens a window in the browser, prints red and yellow marks (automation tells,
 | Choppy video, high CPU | Lower `NEKO_SCREEN` and `NEKO_CPUS` |
 | The container exits with code 137 | A memory ceiling was hit. Raise `NEKO_MEM` if a heavy page needs it |
 | With the Tailscale exit nothing starts | The browser waits for `tailscale` to be healthy: it needs to be signed in (a valid `TS_AUTHKEY` or the link from the log) and an approved, online exit node. `docker/up.sh logs tailscale` |
+| The mirror opens but sites do not load (with `MEATSUIT_EXIT_COUNTRY`/`_ASN`) | No exit node passed the check and the gate is closed: `docker/up.sh exec tailscale sh /exit-picker.sh status` (the probe column), `docker/up.sh logs tailscale \| grep exit-picker` |
 
 Russian version: [README.ru.md](README.ru.md).

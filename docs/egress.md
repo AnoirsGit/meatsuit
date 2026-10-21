@@ -91,11 +91,11 @@ docker/up.sh logs --tail 50 tailscale | grep exit-picker
 
 ## A phone as the exit node
 
-The always-on home device can be a cheap Android phone on its charger and the home Wi-Fi: the Tailscale app has "Run as exit node". The setup steps for the owner are in Russian in [ru/09-phone-exit-node.md](ru/09-phone-exit-node.md). What is different from a Linux box (from Android and vendor documentation and common reports, **not measured on the phone**):
+The always-on home device can be a cheap Android phone on its charger and the home Wi-Fi: the Tailscale app has "Run as exit node". The owner's helper phone (model not chosen yet) uses Wi-Fi only, has no Google account and gets Tailscale from F-Droid. The setup steps for the owner are in Russian in [ru/09-phone-exit-node.md](ru/09-phone-exit-node.md). What is different from a Linux box (from Android and vendor documentation and common reports, **not measured on the phone**):
 
-- **Background killers.** Android and especially vendor skins (OPPO ColorOS, Samsung One UI) stop background apps to save battery. A stopped Tailscale is a dead exit. Battery usage "Unrestricted", auto-launch allowed, the app locked in recents, and Tailscale as the **Always-on VPN** (Android restarts it after a reboot or a kill) are all needed; the runbook lists where each switch is.
+- **Background killers.** Android and especially vendor skins (ColorOS, One UI, MIUI and the like) stop background apps to save battery. A stopped Tailscale is a dead exit. Battery usage "Unrestricted", auto-launch allowed, the app locked in recents, and Tailscale as the **Always-on VPN** (Android restarts it after a reboot or a kill) are all needed; the runbook lists where each switch is.
 - **Wi-Fi in sleep and the SIM.** With the screen off Android may drop or throttle Wi-Fi, and "switch to mobile data when Wi-Fi is poor" features move traffic to the SIM. Turn mobile data off on that phone (SMS still work), and set the expected ASN so the check above catches it if it happens anyway.
-- **Speed.** An Android exit node forwards traffic in the app's userspace network stack on a slow CPU (Helio G35 class). Expect less than a PC gives; measure with step 4 of [Verify](#verify) before relying on it for video.
+- **Speed.** An Android exit node forwards traffic in the app's userspace network stack on a budget phone's slow CPU. Expect less than a PC gives; measure with step 4 of [Verify](#verify) before relying on it for video.
 - **IPv6.** Not used: the container switches IPv6 off, so the browser leaves over IPv4 whatever the home network offers.
 - **MTU.** Tailscale's interface MTU is 1280, over Wi-Fi to the router. Nothing to set; if large pages stall while small ones load, suspect path MTU first (not observed, a known class of problem with tunnels).
 - **Key expiry.** Disable it for the phone in the admin console, or the exit disappears after the key's lifetime.
