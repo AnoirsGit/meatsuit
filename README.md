@@ -57,51 +57,62 @@ await ms.close();
 
 `peek(site, { sitesFile, dir })` tells how much of a site's limits is left without spending a slot. The full API — `see()` snapshots, the closed command set, `sites.json`, errors, the journal and recordings — is in [docs/contract.md](docs/contract.md).
 
-## The deploy file
+## Configuration
 
-One git-ignored file holds what belongs to the mirror server and nothing else: mirror passwords, the address and ports to bind, the browser and its image tag, the profile folder, the time zone, CPU and memory ceilings. It is `docker/.env`, or the file `MEATSUIT_CONFIG` points to (it may live outside the repository).
+meatsuit has two kinds of settings, and they never mix.
 
-- `npm run init` creates it from [`docker/.env.example`](docker/.env.example) with mode 0600 and random hex passwords. If the file exists, it changes nothing.
-- `npm run config` is a temporary process on the host, not in a container and not in the browser's network: a page on `127.0.0.1` with a one-time token in the link, no cookies, an `Origin` check, passwords never sent to the page, atomic writes with mode 0600, `409` if the file changed meanwhile, exit after 15 idle minutes.
+**The deploy file** holds what belongs to the mirror server and nothing else: mirror passwords, the address and ports to bind, the browser and its image tag, the profile folder, the time zone, CPU and memory ceilings, and the optional Tailscale exit. It is `docker/.env`, or the file `MEATSUIT_CONFIG` points to (it may live outside the repository). Every variable with its default is in the table in [docker/README.md](docker/README.md#the-deploy-file-and-dockerupsh); the template with comments is [`docker/.env.example`](docker/.env.example).
+
+- `npm run init` creates it from the template with mode 0600 and random hex passwords. If the file exists, it changes nothing (it only lists what is wrong).
+- `npm run config` is a temporary process on the host, not in a container and not in the browser's network: a page on `127.0.0.1` with a one-time token in the link, no cookies, an `Origin` check, passwords never sent to the page, atomic writes with mode 0600, `409` if the file changed meanwhile, exit after 15 idle minutes. `npm run config -- --tailnet` serves it on the server's tailnet address instead.
 - `docker/up.sh` hands the file to `docker compose --env-file`. Compose reads it only on `up`, so run `docker/up.sh` again after a change.
 
-Callers' settings are not in this file: limits, upload folders and the state directory are arguments of `connect()` and `task()`.
+**The caller's settings** are arguments, not files of meatsuit: `connect({ cdpUrl, sitesFile, dir, notify })` and `task(name, fn, { site, uploadDirs, dryRun, … })`. The library reads no environment variables. The limits file `sites.json` belongs to each caller ([contract.md](docs/contract.md#connect-and-task)).
 
-## Choosing the browser
+**The browser.** `MEATSUIT_BROWSER=chrome` (the default) or `brave`. Each browser keeps its own profile volume, `meatsuit_profile` for Chrome and `meatsuit_brave_profile` for Brave, so switching means signing in again. The container is always named `meatsuit-browser`: other stacks attach to it with `network_mode: "container:meatsuit-browser"` and reach CDP at `http://127.0.0.1:9222`. CDP is never published on the host. Callers mount the volume `meatsuit_profile` (external) and keep their shared `dir` in its `state/` folder.
 
-`MEATSUIT_BROWSER=chrome` (the default) or `brave` in the deploy file. Each browser keeps its own profile volume, `meatsuit_profile` for Chrome and `meatsuit_brave_profile` for Brave, so switching means signing in again. The container is always named `meatsuit-browser`: other stacks attach to it with `network_mode: "container:meatsuit-browser"` and reach CDP at `http://127.0.0.1:9222`. CDP is never published on the host. Callers mount the volume `meatsuit_profile` (external) and keep their shared `dir` in its `state/` folder. Details: [docker/README.md](docker/README.md).
+**The exit.** Optionally the browser's traffic leaves through a Tailscale exit node at home (`MEATSUIT_EGRESS=tailscale`), with a kill switch: no tunnel means no network. An ordered list of exit nodes with a fallback and a country and ASN check is `MEATSUIT_EXIT_NODES` ([docs/egress.md](docs/egress.md)).
 
-Optional: send the browser's traffic out through a Tailscale exit node (`MEATSUIT_EGRESS=tailscale`, see [docs/egress.md](docs/egress.md)).
+## Deploy
+
+On a server: Docker with Compose 2.24+, Tailscale on the host, the mirror bound to the server's tailnet address, never to `0.0.0.0`. The steps are in [docker/README.md](docker/README.md#deploying-on-a-server), then the live check in [docs/acceptance.md](docs/acceptance.md) and, optionally, the home exit ([docs/egress.md](docs/egress.md#recommended-setup)). Always start the stack through `docker/up.sh`: a plain `docker compose up` does not know about the Tailscale overlay.
+
+The owner's server runs the `ms-trunk` version (see Status). Switching it to `main` and to the exit-node list is a runbook in Russian: [docs/ru/09-phone-exit-node.md](docs/ru/09-phone-exit-node.md).
 
 ## How the repository is laid out
 
 | Path | What it is |
 |---|---|
-| `index.js` | `connect()` and `task()`: queue, limits, budget, a window per task, supervision |
+| `index.js` | `connect()` and `task()`: queue, limits, budget, a window per task, supervision, `peek()` |
 | `eyes.js`, `dom.js` | `see()`: the page as text and numbered elements, diffs between snapshots |
-| `hands.js`, `human.js` | `act()`: the closed command set, human-paced mouse and keyboard |
-| `guard.js`, `supervise.js` | captcha, login and block pages turn into `NeedsHuman` |
+| `hands.js`, `human.js`, `human/` | `act()`: the closed command set, human-paced mouse, wheel and keyboard |
+| `guard.js`, `supervise.js` | captcha, sign-in and block pages turn into `NeedsHuman`; the optional code sign-in path |
 | `limits.js`, `window.js`, `capture.js` | per-site limits from the caller's `sites.json`, task windows, an optional screen archive |
 | `telegram.js` | a helper a caller may use for `notify`: the token and chat are passed in, never read from the environment |
 | `sites.example.json` | an example limits file; the real one belongs to each caller |
-| `config.js`, `tools/` | the deploy file (`npm run init`, `npm run config`), the secret scan, small tools for people |
-| `docker/` | the mirror: Neko with Chrome or Brave, `up.sh`, `verify.sh`, the optional Tailscale exit |
-| `extras/` | maintained services around the core library: the HTTP service, warm-up, egress check, queue, notifications, owner presence, the browser lock and the self-check, with their own copies of hands and limits. Developed and tested (`npm run test:extras`); the owner's stealth review of 20.10.2026 landed there (a think pause and a guard check before every action, owner presence, a browser lock shared with warm-up, `extras/selfcheck.js`), see [docs/stealth.md](docs/stealth.md). The core loads nothing from `extras/` (`test/api.test.js` enforces it) |
-| `test/` | tests of the core, the deploy file, the secret scan and the Docker files |
+| `config.js`, `tools/` | the deploy file (`init.js`, `config-ui.js`), `live-check.js` for the acceptance, `secret-scan.sh` and its hook, `save-tab.js`, `telegram-chats.js` |
+| `docker/` | the mirror: Neko with Chrome or Brave, `up.sh`, `verify.sh`, the optional Tailscale exit (`egress/killswitch.sh`, `egress/exit-picker.sh`) |
+| `extras/` | maintained services around the core library, with their own copies of hands and limits: the HTTP service, warm-up, egress check, queue, notifications, owner presence, the browser lock and `selfcheck.js` ([docs/README.md](docs/README.md#extras-services-around-the-core)). The core loads nothing from `extras/` (`test/api.test.js` enforces it) |
+| `profiles/` | examples for the `extras/` services (`*.example.json`); the real files are git-ignored |
+| `test/` | tests of the core, the deploy file, the secret scan, the Docker files and `exit-picker.sh` |
 
 ## Status
 
-As of 8 October 2026.
+As of 21 October 2026.
 
 | | |
 |---|---|
-| **Running on a server** | this compose file with Google Chrome, the profile in `meatsuit_profile`, traffic leaving through a home Tailscale exit node (the `egress` profile), and with the exit node unset the browser has no network instead of falling back to the server's address (checked 8 October); `docker/verify.sh` green; cookies and `localStorage` survive a restart and a re-create of the container (`verify.sh persistence`). One caller project is attached with `container:meatsuit-browser`, signed in by hand once, and the sign-in holds; it has run `dryRun` tasks only |
-| **Tested** | the library in real Chromium on local pages (`npm test`); the deploy file, `npm run init`, `npm run config` and the secret scan; `docker compose config` for both browsers, with and without Tailscale |
-| **Not run yet** | this compose file with Brave; Enter and shortcuts from a real keyboard; a recorded row of [the acceptance](docs/acceptance.md) on the server |
+| **Verified** | The library in real headless Chromium on local pages (`npm test`); the deploy file, `npm run init`, `npm run config`, the secret scan; `docker compose config` for both browsers, with and without Tailscale. On the owner's server since 8 October (the `ms-trunk` version, reported by the owner, not re-checked since): Google Chrome, the profile in `meatsuit_profile`, traffic through a home Tailscale exit node, and with the exit node unset the browser has no network; `docker/verify.sh` and `verify.sh persistence` green; callers attached with `container:meatsuit-browser`, a sign-in made by hand holds |
+| **Built, not verified live** | The exit-node list with a fallback and the exit check (`docker/egress/exit-picker.sh`, tested on stand-ins only); code sign-in (`codeLogin`); the stealth changes in `extras/` with Google Chrome (measured with Brave only, [docs/stealth.md](docs/stealth.md)); this compose file with Brave; Enter and shortcuts from a real keyboard in the mirror |
+| **Not done** | An always-on exit node: today it is a PC that is not always on, and the helper phone has not arrived; a recorded row of [the acceptance](docs/acceptance.md) on the server; a license |
 
 The git history still contains personal data from earlier work and is going to be rewritten. Open items, by priority: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 meatsuit is for automating **your own** accounts at low volume. It does not solve captchas, does not spoof fingerprints and promises nothing about how sites react. Platforms' terms apply, and you are responsible for following them.
+
+## Troubleshooting
+
+The mirror's symptoms (no deploy file, never healthy, no video, signed out after a restart, "profile in use", nothing starts with Tailscale, the exit gate closed) are in [docker/README.md](docker/README.md#troubleshooting). For the library: `connect` fails before touching the browser when `sitesFile` is missing or both `sitesFile` and `sites` are given; a task that stops with `NeedsHuman` leaves its window open for you in the mirror; errors and their fields are in [contract.md](docs/contract.md#errors).
 
 ## Tests
 
