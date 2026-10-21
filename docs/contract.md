@@ -43,7 +43,7 @@ The export list is pinned by a test (`test/api.test.js`) and changes only togeth
 const ms = await connect({ cdpUrl, sitesFile /* or sites */, dir?, notify?, notifyOn? });
 const result = await ms.task(name, async ({ see, act }) => { ...; return value; },
   { site, extraHosts = [], uploadDirs = [], maxCommands = 60, maxMinutes = 10, dryRun = false,
-    dryRunNavigation = false, readOnly = false, capture? });
+    dryRunNavigation = false, readOnly = false, capture?, codeLogin = false });
 await ms.close();
 ```
 
@@ -61,6 +61,7 @@ await ms.close();
 | `dryRun`, `dryRunNavigation` | a rehearsal, see "Hands" |
 | `readOnly` | the task only reads: it spends `perHour` but not `perDay`, and `perDay` does not stop it. The first writing command (`fill`, `type`, `select`, `upload`, `press Enter`, a `click` not on a `tab`) counts a full day slot before it runs; if the day is used up, that is `LimitReached` and the command does not run |
 | `capture` | the screen archive `{ dir, htmlPerSignature = 5, maxMB = 500 }`; nothing is written without it |
+| `codeLogin` | `true` means the task signs in with a one-time code (see "Code sign-in" below). The site also needs its own `sites.json` entry with `codeLogin`; without it, with a malformed rule, or with a value other than `true`/`false` it is an error before the queue and the browser |
 
 `task` in order: joins the queue (one bot at a time; the lock file works across processes) → checks the site's limit
 and records the task (`dryRun` spends no slots) → opens a separate window → calls the function under guard and the
@@ -84,6 +85,28 @@ the page opens are closed. Returns what the function returned.
   not close it; guard checks the tab before a slot is spent (a captcha left to the human is not touched).
   `singleTab` is read **only from the `sites.json` rule** (the site's own entry or `"*"`); `task` has no option of
   that name, and passing `task(..., { singleTab })` changes nothing.
+- `codeLogin: { "path": "^/account/login", "maxMinutes"?: 6 }` is the path where a task with
+  `task(..., { codeLogin: true })` may go through a one-time-code sign-in. It is read **only from the site's own
+  entry**, never from `"*"`.
+
+### Code sign-in (codeLogin)
+
+A sign-in page is normally a stop. There is one narrow exception for signing in with an SMS code (the caller gets
+the code from the human, for example through remora `/ask`, and fills it in itself). The "sign-in page" stop is
+lifted only when all of these hold:
+
+1. the task asked for it: `task(name, fn, { site, codeLogin: true })`;
+2. the site has its own entry in the caller's `sites.json` with `codeLogin.path`, a path regex anchored with `^/`
+   (one path, for example `"^/account/login"`; `"^/"` or an unanchored path is an error);
+3. the address is `https` on the `site` host or its subdomain (not on `extraHosts`), and its `pathname` matches
+   `path` (the query is not considered);
+4. the page has no password field (`inputType: 'password'` or a field named "password"/«пароль»).
+
+The guard order is unchanged: captcha → block or "suspicious activity" → sign-in. A captcha, a block, a page off the
+site, a password field, another path or another site are `NeedsHuman`, as without `codeLogin`. The task's budget is
+cut: at most 20 commands and no longer than `codeLogin.maxMinutes` (if set; the site's `maxMinutes` ceiling still
+applies). The typed code does not get into the journal (`fill` is logged as a length, addresses without query and
+hash). meatsuit never types a password: the caller passes only the identifier (a phone or an email) and the code.
 
 ### peek: what is left of a limit, without spending a slot
 
@@ -106,7 +129,7 @@ are how many more are allowed (`null` means no limit, `0` means no such site). `
 | Error | When | What the caller should do |
 |---|---|---|
 | `LimitReached` | the site is not in `sites.json` (and there is no `"*"`), `perDay: 0`, outside hours, day or hour limit | do not start the task, retry later |
-| `NeedsHuman` (`.reason`, `.url`) | a captcha, a sign-in page, a block, leaving the site's host (and not to `extraHosts`) | stop; the window is open for the human. The state is not cleared until the task ends |
+| `NeedsHuman` (`.reason`, `.url`) | a captcha, a sign-in page (except the declared path of a `codeLogin` task), a block, leaving the site's host (and not to `extraHosts`) | stop; the window is open for the human. The state is not cleared until the task ends |
 | `BudgetExceeded` | more than `maxCommands` commands or `maxMinutes` minutes | treat the task as failed |
 | `StaleElement` | `gen` is out of date, the element is gone, something other than the target is under the cursor before the press, focus moved | take a fresh snapshot |
 | `BadCommand` | a command outside the set or with bad fields | a bug in the caller's code or the model |
@@ -148,7 +171,7 @@ Fields by kind of element:
 | file field `<input type=file>` | `button` | `inputType: 'file'`; `value` is the attached file names joined with commas (`''` while nothing is attached), which shows that the CV went in. A hidden field (`display:none`, `hidden`, `opacity:0`) or one covered by its own label is in the snapshot if its label (`label for` or a wrapping label) or a button in the same parent is visible: `inView` comes from that, `name` is its own or the label's |
 
 The result of `see()`/`act()` goes through guard: a captcha (iframes included, except an invisible reCAPTCHA), a
-sign-in page or a block → `NeedsHuman` instead of the result.
+sign-in page (except a code sign-in, see "Code sign-in") or a block → `NeedsHuman` instead of the result.
 
 ## Hands: `act(command)`
 
@@ -276,7 +299,9 @@ the bot has seen. For a human: `TELEGRAM_BOT_TOKEN=… node tools/telegram-chats
 
 - it does not decide what to click and does not write texts;
 - it does not run arbitrary JS and does not go to other hosts;
-- it does not get past captchas and does not sign in to accounts: those are a stop and a message to the human;
+- it does not get past captchas and does not sign in to accounts on its own: those are a stop and a message to the
+  human. The exception is a one-time-code sign-in (`codeLogin`) with a code the caller got from the human; a password
+  is always a stop;
 - it does not spoof the browser's fingerprint;
 - it does not keep tokens, keys or site passwords, and does not read the environment.
 
