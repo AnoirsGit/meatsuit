@@ -18,7 +18,7 @@ Russian version: [04-contract.md](04-contract.md); the two change together.
 
 ## Using it
 
-CommonJS, Node 20+, depends on `playwright-core`. `package.json` has `"main": "index.js"` and no `exports` field,
+CommonJS, Node 20+, depends on `playwright-core`. Not on npm: callers install it from a checkout (`npm install ../meatsuit`, a `file:` dependency). `package.json` has `"main": "index.js"` and no `exports` field,
 so nested modules are reachable too (`require('meatsuit/hands.js')`, `require('meatsuit/telegram.js')`).
 The export is a literal `module.exports = { … }`, so ESM projects can import the names from it directly.
 

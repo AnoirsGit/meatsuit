@@ -21,7 +21,7 @@ flowchart LR
   lib -. "notify(text) — the caller's own channel" .-> code
 ```
 
-- **The library** runs inside the caller's process (a container next to the mirror, or a laptop). It connects to the browser over CDP and gives the caller `task(site, fn)`; inside, `see()` returns the page as text plus numbered elements and `act(command)` performs one command from a closed set with human-paced mouse and keyboard.
+- **The library** runs inside the caller's process (a container next to the mirror, or a laptop). It connects to the browser over CDP and gives the caller `task(name, fn, { site })`; inside, `see()` returns the page as text plus numbered elements and `act(command)` performs one command from a closed set with human-paced mouse and keyboard.
 - **The mirror** is Neko with one browser and one persistent profile. A person opens it from an ordinary web page, signs in to sites once, and solves whatever the bot stops on.
 - **The profile** lives in a Docker volume (or a host folder), so sign-ins survive restarts and re-creates of the container.
 
