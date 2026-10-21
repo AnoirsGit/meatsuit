@@ -1,6 +1,6 @@
 # Warm-up
 
-> **Frozen.** This page describes `extras/`: code from an earlier line of meatsuit that works and is tested (`npm --prefix extras ci`, then `npm run test:extras`) but is not developed. The modules named here live in `extras/` (`extras/server.js`, `extras/life.js`, `extras/limits.js` and so on) and run from the repository root as `node extras/<file>`. The maintained product is the library and the mirror: [README](../README.md), [contract.md](contract.md).
+> **Where the code is.** This page describes `extras/`: the maintained services around the core library, started on an earlier line of meatsuit and now developed and tested (`npm --prefix extras ci`, then `npm run test:extras`). The modules named here live in `extras/` (`extras/server.js`, `extras/life.js`, `extras/limits.js` and so on) and run from the repository root as `node extras/<file>`. The core library loads nothing from `extras/` (`test/api.test.js` enforces it); the core is the library and the mirror: [README](../README.md), [contract.md](contract.md).
 
 `life.js` is a small command that visits ordinary public websites in the long-lived browser, at random times, and behaves like a reader: it scrolls, pauses over text, sometimes follows a link, sometimes watches a video. It never signs in and never clicks anything that touches an account. The only thing it types is a search query on sites you mark as `search`.
 

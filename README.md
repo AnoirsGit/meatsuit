@@ -86,7 +86,7 @@ Optional: send the browser's traffic out through a Tailscale exit node (`MEATSUI
 | `sites.example.json` | an example limits file; the real one belongs to each caller |
 | `config.js`, `tools/` | the deploy file (`npm run init`, `npm run config`), the secret scan, small tools for people |
 | `docker/` | the mirror: Neko with Chrome or Brave, `up.sh`, `verify.sh`, the optional Tailscale exit |
-| `extras/` | **frozen**: the HTTP service, warm-up, egress check and their own copies of hands and limits from an earlier line of work. They work and are tested (`npm run test:extras`) but are not developed, nothing new goes there, and the core loads nothing from them. One exception landed there on 20.10.2026: the stealth review (a think pause and a guard check before every action, owner presence, a browser lock shared with warm-up, `extras/selfcheck.js`), see [docs/stealth.md](docs/stealth.md) |
+| `extras/` | maintained services around the core library: the HTTP service, warm-up, egress check, queue, notifications, owner presence, the browser lock and the self-check, with their own copies of hands and limits. Developed and tested (`npm run test:extras`); the owner's stealth review of 20.10.2026 landed there (a think pause and a guard check before every action, owner presence, a browser lock shared with warm-up, `extras/selfcheck.js`), see [docs/stealth.md](docs/stealth.md). The core loads nothing from `extras/` (`test/api.test.js` enforces it) |
 | `test/` | tests of the core, the deploy file, the secret scan and the Docker files |
 
 ## Status
@@ -107,7 +107,7 @@ meatsuit is for automating **your own** accounts at low volume. It does not solv
 
 ```sh
 npm test                                          # core: the secret scan first, then every suite
-npm --prefix extras ci && npm run test:extras     # the frozen extras/
+npm --prefix extras ci && npm run test:extras     # the services in extras/
 ```
 
 The core tests need a Chromium for `playwright-core`; see [CONTRIBUTING.md](CONTRIBUTING.md).

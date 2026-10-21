@@ -15,9 +15,9 @@ Start with the [project README](../README.md). meatsuit is just this: launch a b
 
 [../CONTRIBUTING.md](../CONTRIBUTING.md) explains how to run the tests and what changes are in scope.
 
-## Frozen: `extras/`
+## `extras/`: services around the core
 
-The HTTP service, warm-up, egress check, queue and notifications from an earlier line of work live in [`../extras/`](../extras/). They work and are tested (`npm --prefix extras ci`, then `npm run test:extras`) but are not developed, and the core does not depend on them. Their documents are kept as they were, with paths updated:
+The HTTP service, warm-up, egress check, queue, notifications, owner presence, browser lock and self-check live in [`../extras/`](../extras/). They are maintained: the owner develops them, and they are tested (`npm --prefix extras ci`, then `npm run test:extras`). The core library loads nothing from them (`test/api.test.js` enforces it). Their documents:
 
 | Document | About |
 |---|---|

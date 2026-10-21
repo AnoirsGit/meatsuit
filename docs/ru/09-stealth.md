@@ -5,7 +5,7 @@
 Измерить, а не гадать, теперь можно: `node extras/selfcheck.js` (ниже). Английская версия: [../stealth.md](../stealth.md).
 
 > **Где код.** Ревью делалось на линии HTTP-сервиса и прогрева, которая теперь лежит в [`extras/`](../../extras/)
-> (заморожено, см. [../architecture.md](../architecture.md#frozen-extras)). Пути модулей и тестов ниже (`driver.js`,
+> (поддерживаемые сервисы вокруг ядра, см. [../architecture.md](../architecture.md#extras-services-around-the-core)). Пути модулей и тестов ниже (`driver.js`,
 > `server.js`, `life.js`, `human/pace.js`, `window.js`, `test/…`) — относительно `extras/`. Деление колеса 53 px и
 > прокрутка-поиск действуют и в `human/mouse.js` ядра.
 

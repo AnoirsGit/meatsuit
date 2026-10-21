@@ -3,7 +3,7 @@
 #
 #   docker/up.sh                        поднять зеркало: up -d
 #   docker/up.sh <команда compose …>    то же окружение для любой команды: ps, logs -f neko, stop, down, config
-#   docker/up.sh --profile warmup up -d замороженные extras/ (warmup, api) — профилями compose, как обычно
+#   docker/up.sh --profile warmup up -d сервисы extras/ (warmup, api) — профилями compose, как обычно
 #
 # Файл деплоя: MEATSUIT_CONFIG (можно ~/…) или docker/.env рядом с этим скриптом; создаёт его npm run init.
 # Браузер выбирает MEATSUIT_BROWSER из файла (chrome по умолчанию, brave) — это читает сам compose.

@@ -11,7 +11,7 @@
 # папка state/ — общий dir вызывающих: connect({ dir: '<том>/state' }).
 #
 # Необязательно: выход через Tailscale (MEATSUIT_EGRESS=tailscale в файле: up.sh добавит docker-compose.egress.yml
-# и профиль egress). Замороженные extras/: автопрогрев (профиль warmup) и HTTP-сервис (профиль api).
+# и профиль egress). Сервисы из extras/ (ядро их не грузит): автопрогрев (профиль warmup) и HTTP-сервис (профиль api).
 name: meatsuit
 
 services:
@@ -79,7 +79,7 @@ services:
     network_mode: none
     restart: "no"
 
-  # Заморожено (extras/): автопрогрев, node extras/life.js run. Сеть общая с Neko (и в egress-варианте с Tailscale):
+  # extras/: автопрогрев, node extras/life.js run. Сеть общая с Neko (и в egress-варианте с Tailscale):
   # тогда CDP браузера доступен как http://127.0.0.1:9222, а своего выхода наружу у life нет.
   life:
     profiles: ["warmup"]
@@ -107,7 +107,7 @@ services:
       - life_data:/data # состояние, журнал data/life.jsonl, повадки persona.json, замок data/browser.lock (общий с сервисом)
     command: ["node", "extras/life.js", "run", "--config", "${LIFE_CONFIG:-/app/profiles/life.json}", "--data", "/data"]
 
-  # Заморожено (extras/): HTTP-сервис GET /view и POST /act (docs/http-api.md). Профиль api. Сеть общая с Neko
+  # extras/: HTTP-сервис GET /view и POST /act (docs/http-api.md). Профиль api. Сеть общая с Neko
   # (в egress-варианте с Tailscale), поэтому CDP браузера это http://127.0.0.1:9222, а порт 8787 публикуется
   # у neko на NEKO_BIND_IP. Внутри общей сети сервис слушает все адреса, наружу его пускает только эта публикация.
   # Нужны в ../profiles: clients.json (токены, в git не лежит), sites.json, egress.json; без любого из них сервис не стартует.

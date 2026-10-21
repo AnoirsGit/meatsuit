@@ -4,7 +4,7 @@
 #   docker/verify.sh persistence  дополнительно: cookie и localStorage переживают остановку и пересоздание
 # Нужны: поднятое зеркало (docker/up.sh) и файл деплоя (MEATSUIT_CONFIG или docker/.env, npm run init).
 # Все команды compose идут через up.sh: тот же файл, тот же браузер, при MEATSUIT_EGRESS=tailscale — с Tailscale.
-# Проверки работают в контейнере замороженного прогрева (extras/, образ life): он собирается при первом запуске.
+# Проверки работают в контейнере прогрева (extras/, образ life): он собирается при первом запуске.
 set -eu
 here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 file=${MEATSUIT_CONFIG:-$here/.env}

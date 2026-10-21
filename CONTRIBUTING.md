@@ -7,7 +7,7 @@ Thanks for looking at meatsuit. It is a small project with a narrow purpose, so 
 meatsuit is three things: launching one browser, remembering its session, and eyes and hands for a caller's code. Concretely, the library in the repository root (`connect` / `task` / `see` / `act`), the mirror in `docker/`, and the deploy file with `npm run init` and `npm run config`.
 
 - Credentials belong to the caller. The library must not read the environment, must not send anything anywhere by itself, and must not keep site passwords, model keys or bot tokens (`test/api.test.js` checks the first two).
-- `extras/` is **frozen**: the HTTP service, warm-up, egress check, queue and notifications from an earlier line of work. Bug fixes that keep its tests green are fine; new features are not. The core must not load anything from `extras/`.
+- `extras/` holds the maintained services around the core library: the HTTP service, warm-up, egress check, queue, notifications, owner presence, the browser lock and the self-check. New features there are welcome, with tests (`npm run test:extras`). One rule stays: the core must not load anything from `extras/` (`test/api.test.js` checks it).
 - Changes that push meatsuit toward account farms, captcha solving, fingerprint spoofing or "undetectable" claims are out of scope. Making it stop earlier and more reliably (a captcha, a block, an unexpected page) is always in scope.
 
 ## Never commit
@@ -33,7 +33,7 @@ npm test                                            # the secret scan, then each
 
 `npm test` is an explicit list of files in `package.json`: add a new suite there. The suites start a real headless Chromium through `playwright-core`; set `PLAYWRIGHT_BROWSERS_PATH` if your browsers live elsewhere. The Docker tests run `docker compose config` only (nothing is started) and skip themselves without Docker Compose.
 
-The frozen `extras/` has its own dependencies (Patchright) and tests:
+`extras/` has its own dependencies (Patchright) and tests:
 
 ```sh
 npm --prefix extras ci

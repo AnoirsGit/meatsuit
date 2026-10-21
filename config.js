@@ -39,7 +39,7 @@ const FIELDS = [
   { key: 'NEKO_WEBRTC_IP', group: 'Сеть', label: 'Адрес для видео (WebRTC)', type: 'ipv4', default: '127.0.0.1', noAny: true,
     hint: 'Тот же адрес, под которым вы открываете зеркало: по нему ваш браузер забирает видео (порты 59000–59019/udp).' },
   { key: 'MEATSUIT_API_PORT', group: 'Сеть', label: 'Порт HTTP-сервиса', type: 'port', default: '8787',
-    hint: 'Только для замороженного HTTP-сервиса (профиль api). Библиотеке connect() не нужен.' },
+    hint: 'Только для HTTP-сервиса из extras/ (профиль api). Библиотеке connect() не нужен.' },
   { key: 'MEATSUIT_BROWSER', group: 'Браузер', label: 'Браузер в зеркале', type: 'enum', options: ['chrome', 'brave'], default: 'chrome',
     hint: 'chrome (Google Chrome, по умолчанию) или brave. Профиль у каждого свой (тома meatsuit_profile и meatsuit_brave_profile): после смены входить на сайты придётся заново.' },
   { key: 'NEKO_TAG', group: 'Браузер', label: 'Версия образа Neko', type: 'tag', default: '3.1.6',
