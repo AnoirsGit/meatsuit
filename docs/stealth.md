@@ -6,7 +6,7 @@ or real platforms.** You can now measure instead of guessing: `node extras/selfc
 more detail: [ru/09-stealth.md](ru/09-stealth.md).
 
 > **Where the code is.** The review was done on the HTTP service and warm-up line, which now lives in
-> [`extras/`](../extras/) (frozen, see [architecture.md](architecture.md#frozen-extras)). Module and test paths
+> [`extras/`](../extras/) (the maintained services around the core, see [architecture.md](architecture.md#extras-services-around-the-core)). Module and test paths
 > below (`driver.js`, `server.js`, `life.js`, `human/pace.js`, `window.js`, `test/…`) are relative to `extras/`.
 > The 53 px wheel notch and seek scrolling also apply to the core library's `human/mouse.js`.
 

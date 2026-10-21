@@ -22,7 +22,7 @@ docker/verify.sh      # открыть статью через зеркало, �
 
 `docker/up.sh [команда compose…]` — это `docker compose --env-file <файл> -f docker-compose.yml …`, по умолчанию `up -d`. При `MEATSUIT_EGRESS=tailscale` в файле он добавляет `docker-compose.egress.yml` и профиль `egress`. Запускайте стек всегда через `up.sh`: голый `docker compose up` про Tailscale не знает. Compose читает файл только при `up`: после правки снова `docker/up.sh`.
 
-Главные поля: `NEKO_PASSWORD` и `NEKO_ADMIN_PASSWORD` (обязательны), `NEKO_BIND_IP` и `NEKO_PORT` (по умолчанию `127.0.0.1:8080`, никогда `0.0.0.0`), `NEKO_WEBRTC_IP` (адрес, под которым вы открываете зеркало), `MEATSUIT_BROWSER` (`chrome` или `brave`), `NEKO_TAG` (`3.1.6`), `MEATSUIT_PROFILE_DIR` (папка на хосте вместо тома), `MEATSUIT_TZ` (`UTC`; ставьте пояс страны выхода), `NEKO_SCREEN`, `NEKO_MEM`, `NEKO_CPUS` (`0` — без потолка процессора: на части хостингов квота не принимается). Необязательные, руками: `MEATSUIT_EGRESS`, `TS_AUTHKEY`, `TS_EXTRA_ARGS`, `TS_HOSTNAME`, `TS_TAG`, `BRAVE_EXTRA_FLAGS`, настройки замороженных сервисов. Значения полей схемы — без пробелов, кавычек и `$`; `TS_EXTRA_ARGS` — в двойных кавычках.
+Главные поля: `NEKO_PASSWORD` и `NEKO_ADMIN_PASSWORD` (обязательны), `NEKO_BIND_IP` и `NEKO_PORT` (по умолчанию `127.0.0.1:8080`, никогда `0.0.0.0`), `NEKO_WEBRTC_IP` (адрес, под которым вы открываете зеркало), `MEATSUIT_BROWSER` (`chrome` или `brave`), `NEKO_TAG` (`3.1.6`), `MEATSUIT_PROFILE_DIR` (папка на хосте вместо тома), `MEATSUIT_TZ` (`UTC`; ставьте пояс страны выхода), `NEKO_SCREEN`, `NEKO_MEM`, `NEKO_CPUS` (`0` — без потолка процессора: на части хостингов квота не принимается). Необязательные, руками: `MEATSUIT_EGRESS`, `TS_AUTHKEY`, `TS_EXTRA_ARGS`, `TS_HOSTNAME`, `TS_TAG`, `BRAVE_EXTRA_FLAGS`, настройки сервисов из `extras/`. Значения полей схемы — без пробелов, кавычек и `$`; `TS_EXTRA_ARGS` — в двойных кавычках.
 
 ## Выбор браузера
 
@@ -79,7 +79,7 @@ docker/up.sh
 
 ## Выход через дом: Tailscale (по желанию)
 
-Без него трафик браузера уходит с адреса сервера. С `MEATSUIT_EGRESS=tailscale` `docker/up.sh` добавляет [`docker-compose.egress.yml`](docker-compose.egress.yml) и профиль `egress`: контейнер Tailscale выходит через домашний exit node, браузер (и замороженные сервисы) живут в его сетевом пространстве, а [`egress/killswitch.sh`](egress/killswitch.sh) отклоняет любое соединение не от root мимо туннеля.
+Без него трафик браузера уходит с адреса сервера. С `MEATSUIT_EGRESS=tailscale` `docker/up.sh` добавляет [`docker-compose.egress.yml`](docker-compose.egress.yml) и профиль `egress`: контейнер Tailscale выходит через домашний exit node, браузер (и сервисы из `extras/`) живут в его сетевом пространстве, а [`egress/killswitch.sh`](egress/killswitch.sh) отклоняет любое соединение не от root мимо туннеля.
 
 1. Поднять exit node дома ([egress.md](../docs/egress.md#recommended-setup)).
 2. В файл деплоя: `MEATSUIT_EGRESS=tailscale` и `TS_EXTRA_ARGS="--exit-node=<домашний узел> --exit-node-allow-lan-access=true"` — в двойных кавычках (там пробел); без доступа к LAN зеркало не открывается. `TS_AUTHKEY` (одноразовый ключ) можно не задавать: ссылка для входа будет в `docker/up.sh logs tailscale`.
@@ -99,7 +99,7 @@ docker/up.sh
 
 ## Что доказывает `verify.sh`
 
-Нужны файл деплоя и поднятый стек; все команды compose идут через `up.sh`. Проверки работают в образе замороженного прогрева (`life`), он собирается при первом запуске.
+Нужны файл деплоя и поднятый стек; все команды compose идут через `up.sh`. Проверки работают в образе прогрева (`life`), он собирается при первом запуске.
 
 1. **Зеркало поднято**: до двух минут ждёт healthy — отвечают и веб-часть Neko, и порт CDP браузера.
 2. **Управление работает**: входит паролем участника и управляет зеркалом по протоколу Neko, теми же событиями, что шлёт веб-клиент (Ctrl+L, Ctrl+A, набор адреса со свежей меткой прогона `#verify<время>`, Enter, колесо), затем спрашивает сам браузер по CDP: вкладка с меткой этого прогона — статья, `scrollY` больше 500. Считается только она: Chrome восстанавливает вкладки вместе с прокруткой, и вкладка статьи от прошлого прогона (приёмка запускает `verify.sh` дважды) иначе прошла бы без единой команды из зеркала.
@@ -129,9 +129,9 @@ docker/up.sh
 
 Почему у Brave свой скрипт запуска (`neko/brave-start.sh`) и что в нём неочевидного (cookie стирались при остановке, сигнал остановки не доходил через обёртку, «Brave quit unexpectedly», размер окна, потолки памяти), — в английской версии: [Brave: six fixes](README.md#brave-six-fixes-that-are-not-obvious).
 
-## Замороженные сервисы: прогрев и HTTP-сервис
+## Прогрев и HTTP-сервис
 
-`extras/` хранит планировщик прогрева и HTTP-сервис прежней линии проекта: работают и тестируются, не развиваются. В compose это профили `warmup` (`life`) и `api` (`server`), оба в сети браузера, CDP на `127.0.0.1:9222`.
+`extras/` хранит планировщик прогрева и HTTP-сервис — поддерживаемые сервисы вокруг ядра: развиваются и тестируются (`npm run test:extras`), а сама библиотека из них ничего не берёт. В compose это профили `warmup` (`life`) и `api` (`server`), оба в сети браузера, CDP на `127.0.0.1:9222`.
 
 ```sh
 cp profiles/life.example.json profiles/life.json      # прогрев: свои сайты и часы, вне git

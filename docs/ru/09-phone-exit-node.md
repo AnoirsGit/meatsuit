@@ -83,7 +83,7 @@ cd /opt/cvs && docker compose --profile apply up -d --force-recreate apply   # �
 Бот tinder-matcher (`deploy/run.sh` → `docker compose run --rm matcher`) — новый контейнер на каждый запуск cron, сам
 берёт новое сетевое окружение; его `pult` и `ui` живут в своей сети, их пересоздавать не нужно.
 
-Если в `profiles/egress.json` (замороженный прогрев и HTTP-сервис) записаны номера провайдеров — там должен быть только
+Если в `profiles/egress.json` (прогрев и HTTP-сервис из `extras/`) записаны номера провайдеров — там должен быть только
 домашний, не мобильный.
 
 ## 6. Проверка

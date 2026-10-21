@@ -2,7 +2,7 @@
   "name": "meatsuit-extras",
   "version": "0.1.0",
   "private": true,
-  "description": "Заморожено: HTTP-сервис, прогрев и проверка выхода из ветки main. Работает и тестируется, не развивается. Ядро meatsuit (корень репозитория) отсюда ничего не берёт.",
+  "description": "Сервисы вокруг ядра meatsuit: HTTP-сервис, прогрев, проверка выхода, очередь, уведомления, хозяин у руля, замок браузера, самопроверка. Развиваются и тестируются. Ядро meatsuit (корень репозитория) отсюда ничего не берёт.",
   "scripts": {
     "pretest": "node -e \"require.resolve('patchright')\" 2>/dev/null || { echo 'extras: нет patchright, сначала: npm --prefix extras ci' >&2; exit 1; }",
     "test": "node --test --test-concurrency=1",

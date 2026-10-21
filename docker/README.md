@@ -35,11 +35,11 @@ The settings of the mirror live in one git-ignored file: `docker/.env`, or the f
 | `MEATSUIT_TZ` | `UTC` | Time zone (IANA name) of the browser. Set the zone of the country your traffic exits from: a site can compare the two |
 | `NEKO_SCREEN` | `1280x720@30` | Resolution and frame rate. Video is encoded on the CPU: go lower on a weak server |
 | `NEKO_MEM`, `NEKO_CPUS` | `3g`, `2` | Ceilings for the browser container. `NEKO_CPUS=0` removes the CPU ceiling: some hosts (an OpenVZ container, for example) refuse the CPU quota (`cpu.cfs_quota_us: invalid argument`) |
-| `MEATSUIT_API_PORT` | `8787` | Host port of the frozen HTTP service (profile `api`) |
+| `MEATSUIT_API_PORT` | `8787` | Host port of the HTTP service from `extras/` (profile `api`) |
 | `MEATSUIT_EGRESS` | empty | `tailscale`: route the browser through a Tailscale exit node (below). Not in `.env.example`'s fields; add it by hand |
 | `TS_AUTHKEY`, `TS_EXTRA_ARGS`, `TS_HOSTNAME`, `TS_TAG` | empty, empty, `meatsuit`, `stable` | The Tailscale container (add by hand) |
 | `BRAVE_EXTRA_FLAGS` | empty | Extra Brave flags (no spaces inside values) |
-| `LIFE_CPUS`, `SERVER_CPUS`, `LIFE_CONFIG`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | | Settings of the frozen `extras/` services (below) |
+| `LIFE_CPUS`, `SERVER_CPUS`, `LIFE_CONFIG`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | | Settings of the `extras/` services (below) |
 
 Values contain no spaces, quotes or `$`: the file is read by Compose and by `sh` (`verify.sh` sources it).
 
@@ -100,7 +100,7 @@ Then check the sign-ins in the mirror. Keep the old volume until you have. Not v
 
 ## Exit through home: Tailscale (optional)
 
-Without it the browser's traffic leaves from the server's own address. With `MEATSUIT_EGRESS=tailscale`, `docker/up.sh` adds [`docker-compose.egress.yml`](docker-compose.egress.yml) and the `egress` profile: a Tailscale container uses an exit node at home, and the browser (and the frozen services) share its network namespace, so everything they send goes through the tunnel; [`egress/killswitch.sh`](egress/killswitch.sh) rejects any non-root connection that would leave another way.
+Without it the browser's traffic leaves from the server's own address. With `MEATSUIT_EGRESS=tailscale`, `docker/up.sh` adds [`docker-compose.egress.yml`](docker-compose.egress.yml) and the `egress` profile: a Tailscale container uses an exit node at home, and the browser (and the `extras/` services) share its network namespace, so everything they send goes through the tunnel; [`egress/killswitch.sh`](egress/killswitch.sh) rejects any non-root connection that would leave another way.
 
 1. Set up the exit node on the home device ([egress.md](../docs/egress.md#recommended-setup)).
 2. In the deploy file add `MEATSUIT_EGRESS=tailscale` and `TS_EXTRA_ARGS="--exit-node=<home node> --exit-node-allow-lan-access=true"`, in double quotes because of the space; without LAN access the mirror does not open. `TS_AUTHKEY` (a one-time key) is optional: without it the sign-in link is in `docker/up.sh logs tailscale`.
@@ -120,7 +120,7 @@ Without it the browser's traffic leaves from the server's own address. With `MEA
 
 ## What `verify.sh` proves
 
-It needs the deploy file and a running stack, and runs every Compose command through `up.sh`. Its checks run inside the image of the frozen warm-up service (`life`), which it builds on first use.
+It needs the deploy file and a running stack, and runs every Compose command through `up.sh`. Its checks run inside the image of the warm-up service (`life`), which it builds on first use.
 
 1. **The mirror is up.** It waits up to two minutes for the browser container to be healthy: both Neko's web part and the browser's CDP port answer.
 2. **The control channel works.** It logs in with the member password and drives the mirror over Neko's own protocol, the same events the web client sends: take control, Ctrl+L, Ctrl+A, type an article address key by key with a fresh mark of this run (`#verify<time>`), Enter, then the mouse wheel. Then it asks the browser itself over CDP: the tab with this run's mark must be the article, with `scrollY` above 500. Only that tab counts: Chrome restores tabs with their scroll position, so an article tab left from an earlier run (the acceptance runs `verify.sh` twice) would otherwise pass without a single command from the mirror.
@@ -167,19 +167,19 @@ Other deliberate differences from the stock Neko Brave: no `--bwsi` (guest mode 
 
 | File | Purpose |
 |---|---|
-| `docker-compose.yml` | The browser (`neko`, container `meatsuit-browser`), `profile-init` (owner of the profile and of `meatsuit_profile/state`), the frozen `life` (profile `warmup`) and `server` (profile `api`), Tailscale (profile `egress`) |
+| `docker-compose.yml` | The browser (`neko`, container `meatsuit-browser`), `profile-init` (owner of the profile and of `meatsuit_profile/state`), the `extras/` services `life` (profile `warmup`) and `server` (profile `api`), Tailscale (profile `egress`) |
 | `browser-chrome.yml`, `browser-brave.yml` | Per-browser image, profile volume and config files, chosen by `MEATSUIT_BROWSER` |
 | `chrome.conf`, `chrome-policies.json` | Google Chrome under Neko: supervisord program and policies |
 | `neko/brave.conf`, `neko/brave-start.sh`, `neko/policies.json` | Brave under Neko |
 | `docker-compose.egress.yml`, `egress/killswitch.sh` | The optional Tailscale exit and its kill switch |
 | `up.sh` | `docker compose` with the deploy file, and the Tailscale overlay when asked |
 | `verify.sh`, `verify/` | The checks described above |
-| `life/Dockerfile` | The image of the frozen `extras/` services (Node and Patchright; the repository is mounted at `/app`) |
+| `life/Dockerfile` | The image of the `extras/` services (Node and Patchright; the repository is mounted at `/app`) |
 | `.env.example` | The deploy file's template, with comments |
 
-## Frozen services: warm-up and the HTTP service
+## Warm-up and the HTTP service
 
-`extras/` keeps the warm-up scheduler and the HTTP service from an earlier line of the project. They are frozen: they work and are tested, but are not developed. In Compose they are the profiles `warmup` (`life`) and `api` (`server`); both share the browser's network and reach CDP at `127.0.0.1:9222`.
+`extras/` holds the warm-up scheduler and the HTTP service, maintained services around the core library: they are developed and tested (`npm run test:extras`), and the library itself loads nothing from them. In Compose they are the profiles `warmup` (`life`) and `api` (`server`); both share the browser's network and reach CDP at `127.0.0.1:9222`.
 
 ```sh
 cp profiles/life.example.json profiles/life.json      # warm-up: your sites and hours, git-ignored
