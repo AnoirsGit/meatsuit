@@ -22,7 +22,7 @@ docker/verify.sh      # открыть статью через зеркало, �
 
 `docker/up.sh [команда compose…]` — это `docker compose --env-file <файл> -f docker-compose.yml …`, по умолчанию `up -d`. При `MEATSUIT_EGRESS=tailscale` в файле он добавляет `docker-compose.egress.yml` и профиль `egress`. Запускайте стек всегда через `up.sh`: голый `docker compose up` про Tailscale не знает. Compose читает файл только при `up`: после правки снова `docker/up.sh`.
 
-Главные поля: `NEKO_PASSWORD` и `NEKO_ADMIN_PASSWORD` (обязательны), `NEKO_BIND_IP` и `NEKO_PORT` (по умолчанию `127.0.0.1:8080`, никогда `0.0.0.0`), `NEKO_WEBRTC_IP` (адрес, под которым вы открываете зеркало), `MEATSUIT_BROWSER` (`chrome` или `brave`), `NEKO_TAG` (`3.1.6`), `MEATSUIT_PROFILE_DIR` (папка на хосте вместо тома), `MEATSUIT_TZ` (`UTC`; ставьте пояс страны выхода), `NEKO_SCREEN`, `NEKO_MEM`, `NEKO_CPUS` (`0` — без потолка процессора: на части хостингов квота не принимается). Необязательные, руками: `MEATSUIT_EGRESS`, `TS_AUTHKEY`, `TS_EXTRA_ARGS`, `TS_HOSTNAME`, `TS_TAG`, `BRAVE_EXTRA_FLAGS`, настройки сервисов из `extras/`. Значения полей схемы — без пробелов, кавычек и `$`; `TS_EXTRA_ARGS` — в двойных кавычках.
+Главные поля: `NEKO_PASSWORD` и `NEKO_ADMIN_PASSWORD` (обязательны), `NEKO_BIND_IP` и `NEKO_PORT` (по умолчанию `127.0.0.1:8080`, никогда `0.0.0.0`), `NEKO_WEBRTC_IP` (адрес, под которым вы открываете зеркало), `MEATSUIT_BROWSER` (`chrome` или `brave`), `NEKO_TAG` (`3.1.6`), `MEATSUIT_PROFILE_DIR` (папка на хосте вместо тома), `MEATSUIT_TZ` (`UTC`; ставьте пояс страны выхода), `NEKO_SCREEN`, `NEKO_MEM`, `NEKO_CPUS` (`0` — без потолка процессора: на части хостингов квота не принимается). Необязательные, руками: `MEATSUIT_EGRESS`, `TS_AUTHKEY`, `TS_EXTRA_ARGS`, `TS_HOSTNAME`, `TS_TAG`, список exit node и проверка выхода (`MEATSUIT_EXIT_NODES`, `MEATSUIT_EXIT_COUNTRY`, `MEATSUIT_EXIT_ASN` и пороги `MEATSUIT_EXIT_INTERVAL`, `_DOWN_AFTER`, `_RETURN_AFTER`, `_PROBE_EVERY`), `BRAVE_EXTRA_FLAGS`, настройки сервисов из `extras/`. Полная таблица с умолчаниями — в [README.md](README.md#the-deploy-file-and-dockerupsh). Значения полей схемы — без пробелов, кавычек и `$`; `TS_EXTRA_ARGS` — в двойных кавычках.
 
 ## Выбор браузера
 
@@ -87,7 +87,7 @@ docker/up.sh
 4. В зеркале открыть `https://ipinfo.io`: должно быть ваше домашнее подключение.
 5. По желанию — несколько exit node: с `MEATSUIT_EXIT_NODES=home-phone,anoir-pc` контейнер Tailscale сам переходит на следующий, когда первый не в сети, а `MEATSUIT_EXIT_COUNTRY` / `MEATSUIT_EXIT_ASN` заставляют его проверить выход, прежде чем браузер получит сеть ([egress.md](../docs/egress.md#fallback-order), шаги для телефона — [ru/09-phone-exit-node.md](../docs/ru/09-phone-exit-node.md)).
 
-**Не включайте exit node на самом хосте через SSH по его публичному адресу**: сессия повиснет ([egress.md](../docs/egress.md#ssh-safety-warning)). С 8 октября 2026 работает на сервере владельца (см. ниже), выключатель при выключенном exit node проверен там же.
+**Не включайте exit node на самом хосте через SSH по его публичному адресу**: сессия повиснет ([egress.md](../docs/egress.md#ssh-safety-warning)). С 8 октября 2026 работает на сервере владельца в версии ветки `ms-trunk` (один exit node, без выбора по списку; см. ниже), выключатель при выключенном exit node проверен там же.
 
 ## Развёртывание на сервере
 
@@ -109,7 +109,7 @@ docker/up.sh
 
 ## Что проверено, а что нет
 
-С 8 октября 2026 этот compose работает на сервере владельца с **Google Chrome** и выходом через Tailscale (первая строка). Почти все остальные прогоны ниже делались с **Brave**, до выбора браузера; с Brave этот compose ещё не запускался. Сейчас тестами проверено: `docker compose config` для обоих браузеров, с Tailscale и без, `docker/up.sh` (`test/docker.test.js`, `test/config.test.js`), `profile-init` вживую на образе Brave (том `meatsuit_profile` и `state/` — 1000:1000).
+С 8 октября 2026 на сервере владельца работает этот compose в версии ветки `ms-trunk` (до `exit-picker.sh`) с **Google Chrome** и выходом через Tailscale (первая строка); перевод на `main` — шаг 5 [ru/09-phone-exit-node.md](../docs/ru/09-phone-exit-node.md). Почти все остальные прогоны ниже делались с **Brave**, до выбора браузера; с Brave этот compose ещё не запускался. Сейчас тестами проверено: `docker compose config` для обоих браузеров, с Tailscale и без, `docker/up.sh` (`test/docker.test.js`, `test/config.test.js`), `profile-init` вживую на образе Brave (том `meatsuit_profile` и `state/` — 1000:1000).
 
 | Что | Как | Результат |
 |---|---|---|
@@ -166,3 +166,4 @@ docker/up.sh --profile api run --rm server node extras/selfcheck.js --tz "<по�
 | Видео рывками, процессор занят | уменьшить `NEKO_SCREEN` и `NEKO_CPUS` |
 | Контейнер выходит с кодом 137 | упёрся в потолок памяти: поднять `NEKO_MEM` |
 | С Tailscale ничего не стартует | браузер ждёт healthy у `tailscale`: нужен вход (рабочий `TS_AUTHKEY` или ссылка из лога) и одобренный exit node в сети; `docker/up.sh logs tailscale` |
+| Зеркало открывается, сайты не грузятся (задана проверка выхода) | ни один узел не прошёл проверку, ворота закрыты: `docker/up.sh exec tailscale sh /exit-picker.sh status` (колонка probe), `docker/up.sh logs tailscale \| grep exit-picker` |
