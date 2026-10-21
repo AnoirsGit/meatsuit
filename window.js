@@ -1,70 +1,32 @@
 /**
- * Своё окно браузера для задачи или прогрева, а не вкладка в окне хозяина.
- *
- * context.newPage() через CDP зовёт Target.createTarget без newWindow: проверено на настоящем
- * Chromium, страница получает тот же windowId, то есть открывается вкладкой в чужом окне
- * (хозяина). Поэтому окно создаётся браузерным сеансом CDP, Target.createTarget {newWindow: true},
- * и страница находится по targetId.
- *
- * Новое окно Chromium открывает со своим размером по умолчанию, не таким, как у окна хозяина.
- * Сайт видит два разных размера окна у «одного человека» в одном браузере, поэтому новому окну
- * ставятся размеры окна хозяина: первого окна браузера (в зеркале Neko оно одно, на весь экран).
- * Другого окна нет — остаётся как есть. Не получилось подогнать — не беда, окно остаётся как есть.
- *
- *   const open = windowOpener(browser, context);   // browser и context из patchright connectOverCDP
- *   const page = await open();                     // страница в новом окне
+ * Отдельное окно браузера для задачи: мои вкладки бот не трогает.
+ * Своё окно находим по targetId, а не «первая появившаяся страница»: если я в этот момент
+ * открою вкладку, бот не должен начать водить по ней.
  */
-
-/** Страница → targetId: так среди страниц контекста находится именно та, что создана нами. */
-async function targetIdOf(context, page) {
-  const s = await context.newCDPSession(page);
-  try { return (await s.send('Target.getTargetInfo')).targetInfo.targetId; } finally { await s.detach().catch(() => {}); }
-}
-
-/**
- * Новому окну — размеры окна хозяина: первой страницы контекста, которая лежит в другом окне.
- * Развёрнутое окно копируется состоянием (с ним CDP размеры не принимает). Любой сбой — false, работе не мешает.
- */
-async function fitToOwner(bcdp, context, page, targetId) {
+async function openWindow(browser) {
+  const ctx = browser.contexts()[0];
+  const session = await browser.newBrowserCDPSession();
   try {
-    const { windowId } = await bcdp.send('Browser.getWindowForTarget', { targetId });
-    for (const other of context.pages()) {
-      if (other === page || other.isClosed()) continue;
-      const otherTarget = await targetIdOf(context, other).catch(() => null);
-      if (!otherTarget) continue;
-      const { windowId: ownerId } = await bcdp.send('Browser.getWindowForTarget', { targetId: otherTarget });
-      if (ownerId === windowId) continue; // вкладка нашего же окна
-      const { bounds } = await bcdp.send('Browser.getWindowBounds', { windowId: ownerId });
-      const want = bounds.windowState === 'normal' || !bounds.windowState
-        ? { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height, windowState: 'normal' }
-        : { windowState: bounds.windowState };
-      await bcdp.send('Browser.setWindowBounds', { windowId, bounds: want });
-      return true;
-    }
-    return false;
-  } catch { return false; }
+    return await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('окно задачи не открылось')), 10000);
+      let targetId = null;
+      const early = []; // страницы, появившиеся раньше, чем пришёл targetId
+      const tryMatch = async (p) => {
+        if (!targetId) return early.push(p);
+        const s = await ctx.newCDPSession(p);
+        const { targetInfo } = await s.send('Target.getTargetInfo');
+        await s.detach().catch(() => {});
+        if (targetInfo.targetId === targetId) { clearTimeout(timer); ctx.off('page', tryMatch); resolve(p); }
+      };
+      ctx.on('page', tryMatch);
+      session.send('Target.createTarget', { url: 'about:blank', newWindow: true }).then(async (r) => {
+        targetId = r.targetId;
+        for (const p of early.splice(0)) await tryMatch(p);
+      }, reject);
+    });
+  } finally {
+    await session.detach().catch(() => {});
+  }
 }
 
-function windowOpener(browser, context, { timeoutMs = 15000 } = {}) {
-  let bcdp = null;
-  return async function open() {
-    bcdp = bcdp || await browser.newBrowserCDPSession();
-    let made;
-    const known = new Promise((resolve) => { made = resolve; });
-    const waiting = context.waitForEvent('page', { timeout: timeoutMs, predicate: async (p) => (await targetIdOf(context, p).catch(() => null)) === await known });
-    waiting.catch(() => {}); // если Target.createTarget упадёт, висящее ожидание не должно давать необработанную ошибку
-    let targetId;
-    try {
-      ({ targetId } = await bcdp.send('Target.createTarget', { url: 'about:blank', newWindow: true }));
-    } catch (err) {
-      made(null);
-      throw err;
-    }
-    made(targetId);
-    const page = await waiting;
-    await fitToOwner(bcdp, context, page, targetId);
-    return page;
-  };
-}
-
-module.exports = { windowOpener, fitToOwner, targetIdOf };
+module.exports = { openWindow };

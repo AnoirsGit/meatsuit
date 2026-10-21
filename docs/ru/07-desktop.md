@@ -1,5 +1,7 @@
 # Как всё работает на десктопе
 
+> **Заморожено.** Рабочая записка прежней линии meatsuit (HTTP-сервис, прогрев, проверка выхода, зеркало на Brave). Этот код теперь в `extras/`: запуск из корня репозитория — `node extras/<файл>`, зависимости — `npm --prefix extras ci`, тесты — `npm run test:extras`. Он работает, но не развивается. Продукт сейчас — библиотека и зеркало: [README.ru.md](../../README.ru.md), [04-contract.md](../04-contract.md), [docker/README.ru.md](../../docker/README.ru.md).
+
 Это про запуск meatsuit на вашем компьютере (не на сервере). Рабочая записка на русском. Что проверено, а что нет,
 написано рядом с каждым пунктом. Общая картина проекта: [03-design.md](03-design.md), HTTP-интерфейс:
 [04-http-api.md](04-http-api.md), прогрев: [06-warmup.md](06-warmup.md), Docker: [../../docker/README.ru.md](../../docker/README.ru.md).
@@ -43,8 +45,8 @@
 ## Запуск зеркала
 
 ```sh
+npm run init                # docker/.env: случайные пароли зеркала, права 0600; повторно ничего не трогает
 cd docker
-cp .env.example .env        # задать NEKO_PASSWORD и NEKO_ADMIN_PASSWORD: длинные, разные, без пробелов и знака $
 docker compose up -d        # первый раз качает образ Neko с Brave (на диске около 2,3 ГБ)
 ./verify.sh                 # сам открывает статью в зеркале, прокручивает и проверяет по CDP
 ```
@@ -79,10 +81,10 @@ docker compose up -d        # первый раз качает образ Neko �
 | Файл | Что в нём | В git |
 |---|---|---|
 | `clients.json` | кто может звать: `[{"name":"my-bot","token":"<длинная случайная строка>","sites":["example.com"]}]`, токен из `openssl rand -hex 24` | нет |
-| `sites.json` | лимиты площадок (образец уже лежит): `perDay`, `perHour`, `hours`, рост, выходные. `tinder.com` и `linkedin.com` стоят с `perDay: 0`, то есть закрыты, пока вы сами не откроете. Площадку, которой нет в файле, сервис не откроет никому (`403`, `reason: site_unknown`), поэтому для пробы ниже допишите `"example.com": { "perDay": 50 }` | да |
-| `egress.json` | выход, который вы ожидаете: `{"country":"KZ","asn":[<номер провайдера>]}`; страна и номер из `curl -s https://ipinfo.io/json` | нет |
+| `sites.json` | лимиты площадок: `perDay`, `perHour`, `hours`, рост, выходные. Скопируйте образец `sites.example.json` (в нём `example.com`, `jobs.example.com` и закрытая `closed.example` с `perDay: 0`) и впишите свои площадки. Площадку, которой нет в файле, сервис не откроет никому (`403`, `reason: site_unknown`) | нет |
+| `egress.json` | выход, который вы ожидаете: `{"country":"DE","asn":[<номер провайдера>]}`; страна и номер из `curl -s https://ipinfo.io/json` | нет |
 
-`profiles/egress.json` и `profiles/clients.json` содержат ваши данные и в репозиторий не попадают.
+`profiles/sites.json`, `profiles/egress.json` и `profiles/clients.json` содержат ваши данные и в репозиторий не попадают; в git лежат только образцы `*.example.json`.
 
 Запуск сервиса в контейнере, рядом с браузером (CDP наружу не публикуется, поэтому с хоста до него не достать):
 

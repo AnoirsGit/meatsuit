@@ -1,0 +1,4 @@
+#!/bin/sh
+# meatsuit: проверка секретов перед коммитом. Ставит `npm run hooks` (tools/hooks/install.sh).
+# Смотрит индекс, то есть ровно то, что уйдёт в коммит.
+exec sh "$(git rev-parse --show-toplevel)/tools/secret-scan.sh" --staged

@@ -1,5 +1,7 @@
 # Warm-up
 
+> **Frozen.** This page describes `extras/`: code from an earlier line of meatsuit that works and is tested (`npm --prefix extras ci`, then `npm run test:extras`) but is not developed. The modules named here live in `extras/` (`extras/server.js`, `extras/life.js`, `extras/limits.js` and so on) and run from the repository root as `node extras/<file>`. The maintained product is the library and the mirror: [README](../README.md), [contract.md](contract.md).
+
 `life.js` is a small command that visits ordinary public websites in the long-lived browser, at random times, and behaves like a reader: it scrolls, pauses over text, sometimes follows a link, sometimes watches a video. It never signs in and never clicks anything that touches an account. The only thing it types is a search query on sites you mark as `search`.
 
 This page covers why it exists, what it does and does not do, how to configure it, and what is still unverified. For the big picture see the [project README](../README.md) and [architecture](architecture.md). The Docker setup is in [docker/README.md](../docker/README.md). Warm-up depends on the home-IP setup in [egress.md](egress.md); the HTTP service your own scripts use is in [http-api.md](http-api.md).
@@ -37,16 +39,16 @@ Our inference, not a measurement: what warm-up can realistically build is state 
 
 ## Commands
 
-Needs Node 20+. `plan` and `now --dry` need no browser. Real sessions also need `npm install` (Patchright) and a browser started with `--remote-debugging-port`; the Docker stack does this for you ([docker/README.md](../docker/README.md)).
+Needs Node 20+. `plan` and `now --dry` need no browser. Real sessions also need `npm --prefix extras ci` (Patchright) and a browser started with `--remote-debugging-port`; the Docker stack does this for you ([docker/README.md](../docker/README.md)).
 
 | Command | What it does | Browser needed |
 |---|---|---|
-| `node life.js plan` | Current time in your zone, the saved "hand" traits, a **random example** of this week's working days, today's start times and one session | No |
-| `node life.js now --dry` | Prints the steps of one session as JSON; opens no sites | No |
-| `node life.js now` | One session right now. While a pause from a captcha or block is active it refuses (exit code 1) unless you pass `--force` | Yes |
-| `node life.js run` | Follows the schedule until stopped (Ctrl+C or SIGTERM: the window is closed, exit code 0) | Yes |
+| `node extras/life.js plan` | Current time in your zone, the saved "hand" traits, a **random example** of this week's working days, today's start times and one session | No |
+| `node extras/life.js now --dry` | Prints the steps of one session as JSON; opens no sites | No |
+| `node extras/life.js now` | One session right now. While a pause from a captcha or block is active it refuses (exit code 1) unless you pass `--force` | Yes |
+| `node extras/life.js run` | Follows the schedule until stopped (Ctrl+C or SIGTERM: the window is closed, exit code 0) | Yes |
 
-Options: `--config profiles/life.json`, `--cdp http://127.0.0.1:9222` (or the `MEATSUIT_CDP` variable), `--data data`, `--egress profiles/egress.json`, `--force`, `--no-egress-check`. Via npm: `npm run life -- plan`. With `MEATSUIT_NEKO_URL` and `NEKO_ADMIN_PASSWORD` set (the Docker stack sets them), warm-up asks Neko whether you are at the controls and steps aside; `data/browser.lock` in the shared `data` directory keeps it from overlapping with a task of the HTTP service.
+Options: `--config profiles/life.json`, `--cdp http://127.0.0.1:9222` (or the `MEATSUIT_CDP` variable), `--data data`, `--egress profiles/egress.json`, `--force`, `--no-egress-check`. Via npm from the repository root: `npm --prefix extras run life -- plan`. With `MEATSUIT_NEKO_URL` and `NEKO_ADMIN_PASSWORD` set (the Docker stack sets them), warm-up asks Neko whether you are at the controls and steps aside; `data/browser.lock` in the shared `data` directory keeps it from overlapping with a task of the HTTP service.
 
 The example from `plan` is not what `run` will pick: each is chosen independently. `plan` lists the whole day's starts, including ones already past. Console output and journal `reason` strings are in Russian, and `plan` prints the current time as "Сейчас (<your tz>)" ("Now"), in your configured zone.
 
@@ -60,7 +62,7 @@ The example from `plan` is not what `run` will pick: each is chosen independentl
 
 ## A session
 
-A session visits `session.sites` sites (default 2 to 4) chosen from `sites` by weight, never the same one twice in a row (unless you list only one). The total time (default 5 to 14 minutes) is split unevenly between them. It opens a window of its own, sized like your window ([`window.js`](../window.js)), and closes it at the end; the browser stays up and `life.js` only disconnects.
+A session visits `session.sites` sites (default 2 to 4) chosen from `sites` by weight, never the same one twice in a row (unless you list only one). The total time (default 5 to 14 minutes) is split unevenly between them. It opens a window of its own, sized like your window ([`extras/window.js`](../extras/window.js)), and closes it at the end; the browser stays up and `life.js` only disconnects.
 
 The session has a hard deadline: the sum of the site budgets times 1.25, plus pauses (1 to 12 s before each site). Whatever is in progress at the deadline is finished, then the session ends (`session-end` with `cut: true`).
 
@@ -107,9 +109,11 @@ Gaps: a captcha that is not in an iframe or has a name not listed above is caugh
 
 ## Configuration: `profiles/life.json`
 
-| Field | Meaning | Default | Shipped file |
+Your `profiles/life.json` is git-ignored: start from `cp profiles/life.example.json profiles/life.json`. The "Example file" column below is that example.
+
+| Field | Meaning | Default | Example file |
 |---|---|---|---|
-| `tz` | Time zone for days and weeks (IANA name). The default is the author's zone; set yours | `Asia/Almaty` | same |
+| `tz` | Time zone for days and weeks (IANA name) | `UTC`: set yours | `UTC` |
 | `hours` | `[from, to]`, the window in which sessions may start | `[9, 23]` | same |
 | `daysPerWeek` | `[min, max]` working days per week, the rest are days off | `[7, 7]` | `[3, 4]` |
 | `sessionsPerDay` | `[min, max]` sessions on a working day | `[2, 5]` | `[1, 2]` |
@@ -119,7 +123,7 @@ Gaps: a captcha that is not in an iframe or has a name not listed above is caugh
 | `cooldownHours` | Pause after a captcha or block | 24 | 72 |
 | `session.minutes` | `[min, max]` total session time | `[5, 14]` | `[5, 12]` |
 | `session.sites` | `[min, max]` sites per session | `[2, 4]` | same |
-| `sites` | List of `{url, kind, weight, queries}`. `kind` is `read` (default), `video` or `search`; `weight` is above zero (default 1); `queries` is a non-empty list of strings up to 60 characters, required for `search` | at least one | six sites |
+| `sites` | List of `{url, kind, weight, queries}`. `kind` is `read` (default), `video` or `search`; `weight` is above zero (default 1); `queries` is a non-empty list of strings up to 60 characters, required for `search` | at least one | three sites |
 
 The config is loaded once at startup, so restart `run` after editing it. It is validated at startup and the program refuses to start when:
 
@@ -146,9 +150,9 @@ The config is loaded once at startup, so restart `run` after editing it. It is v
 
 What to put in `sites`:
 
-- Ordinary sites without sign-in that you read yourself: news, reference, blogs. The shipped file is the author's own taste (Russian- and Kazakh-language news sites and Russian Wikipedia for searches). Replace it. None of those sites has been run against for real.
+- Ordinary sites without sign-in that you read yourself: news, reference, blogs. The example file is only a starting point: replace its sites with your own. None of them has been run against for real.
 - Do not list sites where the browser is signed in. Reading there also leaves a trace in the account, and the code cannot tell account links from any others beyond the word list above. This is a rule of caution; the code does not enforce it.
-- Run `node life.js plan` and `now --dry` first to see what you would get.
+- Run `node extras/life.js plan` and `now --dry` first to see what you would get.
 
 ## Reading `data/`
 
@@ -232,9 +236,9 @@ It stops growing there on purpose: the aim is to look like someone who reads a c
 
 ## What is verified and what is not
 
-**Verified:** unit tests with fake clocks and a fake page (`npm test`); end-to-end tests on real Chromium against local test sites (`npm run test:e2e`): sessions with link following, going back up to find links, a video page, a stop on a block page with the pause written to `data/life.json`; SIGTERM closes the tab; trap links and the hidden reCAPTCHA frame are ignored; closing a cookie banner and a modal by a real click (an ad overlay is not clicked); closing a tab opened by `window.open`; a search on a local Wikipedia stand-in with a Cyrillic query (typed by keys, then Enter). Patchright connecting to the Brave in the Docker stack over CDP, and reading its tabs and cookies, works (that is what `docker/verify.sh` does).
+**Verified:** unit tests with fake clocks and a fake page (`npm run test:extras`); end-to-end tests on real Chromium against local test sites (`npm --prefix extras run test:e2e`): sessions with link following, going back up to find links, a video page, a stop on a block page with the pause written to `data/life.json`; SIGTERM closes the tab; trap links and the hidden reCAPTCHA frame are ignored; closing a cookie banner and a modal by a real click (an ad overlay is not clicked); closing a tab opened by `window.open`; a search on a local Wikipedia stand-in with a Cyrillic query (typed by keys, then Enter). Patchright connecting to the Brave in the Docker stack over CDP, and reading its tabs and cookies, works (that is what `docker/verify.sh` does).
 
-**Also verified** (20.10.2026): on a real Chromium, `life.connect()` opens the session page in a window of its own with the owner's window size, and closing it leaves the owner's window alone (`test/window.test.js`); the Neko API used for owner presence (`presence.js`) was exercised against a local Neko 3.1.6 with a real member session taking and releasing control; the lock and the skip paths are covered by unit tests.
+**Also verified** (20.10.2026): on a real Chromium, `life.connect()` opens the session page in a window of its own with the owner's window size, and closing it leaves the owner's window alone (`extras/test/window.test.js`); the Neko API used for owner presence (`extras/presence.js`) was exercised against a local Neko 3.1.6 with a real member session taking and releasing control; the lock and the skip paths are covered by unit tests.
 
 **Not verified:** a full warm-up session in Brave (opening a window, scrolling, clicking); detector sites; real sites (none of the sites in the shipped file); warm-up on a server; an exit node; a session watched through the mirror (risk 4); `run` live over several days (its logic is tested only with fake clocks).
 
@@ -243,7 +247,7 @@ It stops growing there on purpose: the aim is to look like someone who reads a c
 | # | Risk | What to do |
 |---|---|---|
 | 1 | **Wrong IP.** Without an exit node, sessions on a server would leave from a datacenter address and the browser's first "history" would be from there. The check protects against this and is mandatory (no `egress.json`, no start) | Create `profiles/egress.json` and do not run until the exit is up ([egress.md](egress.md)). Check that `egress-wrong` shows in the journal when the exit is wrong |
-| 2 | **Brave and Patchright.** Only Chromium was exercised end to end. Whether Patchright's patches still apply when it attaches to a running Brave is unknown | Run `node life.js now` against Brave once, watching the screen |
+| 2 | **Brave and Patchright.** Only Chromium was exercised end to end. Whether Patchright's patches still apply when it attaches to a running Brave is unknown | Run `node extras/life.js now` against Brave once, watching the screen |
 | 3 | **Real sites.** Everything was run on local pages. Cookie consent, popups, link markup and video behave differently on real sites | Run `now` once or twice while watching the mirror, then check `life.jsonl` for `skipped` |
 | 4 | **You and warm-up in one browser.** A session opens its own window, sized like yours, on top of yours in the mirror. What you see, whether you lose focus, and what `document.visibilityState` says in the window underneath are not verified | Run `now` while you watch the mirror |
 | 5 | **No queue, only a lock.** Warm-up skips a session while a bot task runs and while you hold control in the mirror, but it does not wait its turn, and a session already running is cut only between sites. A person who only watches the mirror (without taking control) is not noticed | Check `busy`, `owner-present` and `yield` in the journal; keep `run` off while you plan to sit in the browser for long |
