@@ -18,8 +18,8 @@ review were not the hands but the rhythm between actions and the container:
 
 | Layer | Before | Now (20.10) | Still open |
 |---|---|---|---|
-| Network | home exit, fail closed, ASN check | unchanged | the exit node is not up yet; until it is, the server mirror must not be used for sign-ins or tasks |
-| Browser fingerprint | real Brave, Patchright, task window of its own default size | task and warm-up windows **sized like the owner's window**; `selfcheck.js` measures the tells | WebGL off by flags, notifications denied by policy, container fonts |
+| Network | home exit, fail closed, ASN check | the server can switch between exit nodes by a list, with the exit checked in the Tailscale container | the exit node today is `anoir-pc`, which is not on around the clock (while it is off the browser has no network); the always-on helper phone has not arrived ([ru/09-phone-exit-node.md](ru/09-phone-exit-node.md)) |
+| Browser fingerprint | real Brave, Patchright, task window of its own default size | task and warm-up windows **sized like the owner's window**; `selfcheck.js` measures the tells | on the server's Chrome WebGL is still off (`chrome.conf` keeps `--disable-software-rasterizer`), notifications denied by policy, container fonts |
 | Behaviour | Fitts mouse, typing with typos, wheel notches of 100 px, actions back to back | **think pause** before every action, **53 px notches** like the owner's wheel under X11, **guard before an action**, `hover` | deep `goto` without referrer; owner and bot at the same time; warm-up unaware of bots |
 
 ## The three layers
@@ -28,8 +28,8 @@ review were not the hands but the rhythm between actions and the container:
 
 A site sees the IP and its type (datacenter or residential), the country, and whether that agrees with the
 browser's time zone and languages. Done: all browser traffic through a home exit node with a kill switch, country
-and provider checked before every task and warm-up session ([egress.md](egress.md)). Not done: the exit node
-itself is not running yet.
+and provider checked before every task and warm-up session ([egress.md](egress.md)). Open: the exit node is a PC
+that is not always on; the always-on phone and the fallback list are described in [egress.md](egress.md#fallback-order).
 
 ### Browser fingerprint
 
@@ -42,11 +42,12 @@ and **no `Runtime.enable` trace was found under `connectOverCDP`**: the `Error.s
 The docs used to say "not verified"; it is now measured on Chromium, still not on the Brave in Neko. New windows
 copy the owner's window bounds ([`window.js`](../extras/window.js)). `GET /view` is built in an isolated world.
 
-Expected yellow marks in the container (not measured yet): **no WebGL** (`--disable-gpu --disable-software-rasterizer`
-in `brave-start.sh`; dropping the second flag leaves software WebGL, which is still a yellow but better than none),
-**notifications denied everywhere** (`DefaultNotificationsSetting: 2` in `policies.json`), **few fonts** (install
-`fonts-liberation`, `fonts-dejavu`, `fonts-noto-core`, `fonts-roboto` in the image and re-check). Linux + Brave +
-2 cores + 1280×720 is rare but self-consistent, and the owner lives in the same browser.
+Yellow marks of the container: **WebGL** — fixed for Brave (`--enable-unsafe-swiftshader`, measured below); Google
+Chrome, which the server runs, still starts with `--disable-gpu --disable-software-rasterizer` in `docker/chrome.conf`,
+so expect no WebGL there until the same change is made and measured. **Notifications denied everywhere**
+(`DefaultNotificationsSetting: 2` in both policy files). **Few fonts** (install `fonts-liberation`, `fonts-dejavu`,
+`fonts-noto-core`, `fonts-roboto` in the image and re-check). Linux + 2 cores + 1280×720 is rare but self-consistent,
+and the owner lives in the same browser.
 
 Deliberately not done: spoofing the UA, platform, WebGL strings, canvas or audio. Spoofing creates mismatches that
 are caught more reliably than an honest but rare fingerprint.
@@ -115,26 +116,14 @@ Also done the same day: the service and the warm-up step aside while the owner h
 | Menu opens on hover | `hover` | |
 | Long text in a field | typed key by key, minutes | no paste |
 
-## What to check on the server once the exit node is up
+## What to check on the server
 
 1. `docker/up.sh --profile api run --rm server node extras/selfcheck.js --tz "<your exit zone>"`: on the author's machine this
-   gave no red marks and one yellow (notifications); the server image is the same, so expect the same. Any red: stop
-   and investigate before the first sign-in on a platform.
+   gave no red marks and one yellow (notifications) with Brave; the server runs Chrome, so expect WebGL to be yellow
+   too (see above). Any red: stop and investigate before the first sign-in on a platform.
 2. In the mirror's DevTools console: `addEventListener('wheel', e => console.log(e.deltaY))`, then scroll by hand.
    Expect 53 (or a multiple). Otherwise adjust `NOTCH` in `human/mouse.js`.
 3. Detector sites by hand in the mirror, through the home exit: creepjs, browserleaks.com/webrtc (WebRTC leaks past
    the tunnel), bot.sannysoft.com, pixelscan.net. Record the results here.
 4. A task through the service against a local page with an event log (like `testkit/e2e-site.js`): every event
    `isTrusted`, `paced` values in the journal.
-
-## Code changes of 20.10.2026
-
-`human/pace.js` and `window.js` (new); `selfcheck.js` (new); `driver.js` (think pause, guard before an action,
-`hover`, `paced`); `human/mouse.js` (`NOTCH = 53`, seek scrolling); `guard.js` and `life/probe.js` (password field, `/sign_in`);
-`life/plan.js` (account actions excluded); `life.js` (own window, presence, lock); `server.js` (`hover`, `paced`, guard
-from `view`, softer handling of an undetermined exit, owner presence, browser lock); `presence.js` and `lease.js` (new);
-`docker/neko/brave-start.sh` (`--enable-unsafe-swiftshader`, `--disable-software-rasterizer` dropped);
-`docker/docker-compose.yml` (Neko address and admin password for the service and warm-up); `docs/05-egress.md`
-(personal details moved out of the repository). Tests: `test/pace.test.js`, `test/window.test.js`,
-`test/selfcheck.test.js`, `test/presence.test.js`, `test/lease.test.js` new; driver, server, runner, session, guard,
-probe, plan, mouse and human tests extended.
