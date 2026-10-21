@@ -390,12 +390,20 @@ function hands(page, opts = {}) {
       if (!set) throw new StaleElement(`поле файла ${c.id} исчезло, пока выбирался файл`);
       return;
     }
-    // Окно выбора перехватывается, только пока ждём его: слушатель ставится до клика.
-    const chooser = page.waitForEvent('filechooser', { timeout: CHOOSER_MS });
-    chooser.catch(() => {}); // клик мог не состояться (verifyAt): ожидание само истечёт
-    await human.click(page, el, { verifyAt: (pt) => hitsTarget(c.id, pt) });
-    let fc;
-    try { fc = await chooser; } catch { throw new BadCommand(`upload: клик по элементу ${c.id} не открыл выбор файла`); }
+    // Окно выбора перехватывается, только пока ждём его: слушатель ставится до клика и снимается после.
+    // CHOOSER_MS отсчитывается от клика, а не от начала пути мыши: путь сам по себе бывает несколько секунд.
+    let opened;
+    const chooser = new Promise((resolve) => { opened = resolve; });
+    page.on('filechooser', opened);
+    let fc, timer;
+    try {
+      await human.click(page, el, { verifyAt: (pt) => hitsTarget(c.id, pt) });
+      fc = await Promise.race([chooser, new Promise((resolve) => { timer = setTimeout(resolve, CHOOSER_MS, null); })]);
+    } finally {
+      clearTimeout(timer);
+      page.off('filechooser', opened);
+    }
+    if (!fc) throw new BadCommand(`upload: клик по элементу ${c.id} не открыл выбор файла`);
     await human.pause(800, 2500);
     return fc.setFiles(file);
   };
