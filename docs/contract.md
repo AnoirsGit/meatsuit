@@ -12,7 +12,7 @@ Russian version: [04-contract.md](04-contract.md); the two change together.
 | Where | What |
 |---|---|
 | repository root | the library: `index.js` (`connect`/`task`), `eyes.js` and `dom.js` (the snapshot), `hands.js` (commands), `human.js` and `human/` (mouse, wheel, keyboard, habits), `guard.js`, `supervise.js`, `limits.js`, `window.js`, `capture.js`, `telegram.js`; `sites.example.json`; tests in `npm test` |
-| `tools/` | programs for a human: `save-tab.js` (save the open tabs into the archive), `telegram-chats.js` (find a group's chatId) |
+| `tools/` | programs for a human: `init.js` and `config-ui.js` (the deploy file), `live-check.js` (the acceptance check), `secret-scan.sh` and `hooks/`, `save-tab.js` (save the open tabs into the archive), `telegram-chats.js` (find a group's chatId) |
 | `docker/` | the mirror: a browser in Neko (Google Chrome by default, or Brave) that callers reach over CDP; the profile lives in a volume ([docker/README.md](../docker/README.md)) |
 | `extras/` | maintained services around the core: the HTTP service (`GET /view`, `POST /act`), warm-up (`life*`), the egress check (`egress`), the queue, `notify`, owner presence, the browser lock and `selfcheck`. Developed and tested (`npm --prefix extras ci`, then `npm run test:extras`). The core takes nothing from `extras/` (checked by `test/api.test.js`) |
 

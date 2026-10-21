@@ -12,7 +12,7 @@ meatsuit — запуск браузера, запоминание и глаза
 | Где | Что |
 |---|---|
 | корень репозитория | библиотека: `index.js` (`connect`/`task`), `eyes.js` и `dom.js` (снимок), `hands.js` (команды), `human.js` и `human/` (мышь, колесо, клавиатура, повадки), `guard.js`, `supervise.js`, `limits.js`, `window.js`, `capture.js`, `telegram.js`; `sites.example.json`; тесты `npm test` |
-| `tools/` | программы для человека: `save-tab.js` (сохранить открытые вкладки в архив), `telegram-chats.js` (узнать chatId группы) |
+| `tools/` | программы для человека: `init.js` и `config-ui.js` (файл деплоя), `live-check.js` (приёмка), `secret-scan.sh` и `hooks/`, `save-tab.js` (сохранить открытые вкладки в архив), `telegram-chats.js` (узнать chatId группы) |
 | `docker/` | зеркало: браузер в Neko (Google Chrome по умолчанию или Brave), к нему подключаются по CDP; профиль живёт в томе ([docker/README.md](../docker/README.md)) |
 | `extras/` | поддерживаемые сервисы вокруг ядра: HTTP-сервис (`GET /view`, `POST /act`), прогрев (`life*`), проверка выхода (`egress`), очередь, `notify`, хозяин у руля, замок браузера и `selfcheck`. Развиваются и тестируются (`npm --prefix extras ci`, затем `npm run test:extras`). Ядро из `extras/` ничего не берёт (проверяет `test/api.test.js`) |
 
