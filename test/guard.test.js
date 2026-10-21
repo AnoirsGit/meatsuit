@@ -20,6 +20,7 @@ assert.equal(check(snap({ text: 'Verify you are human' })), 'капча');
 assert.equal(check(snap({ dialogs: [{ name: 'Check', text: 'Подтвердите, что вы не робот', elements: [] }] })), 'капча');
 assert.match(check(snap({ text: 'Unusual activity detected' })), /подозрительная/);
 assert.match(check(snap({ text: 'Ваш аккаунт заблокирован' })), /подозрительная/);
+assert.match(check(snap({ text: 'Подозрительная активность в аккаунте' })), /подозрительная/, 'кириллица: \\w в RegExp без флага u её не ловит');
 assert.equal(check(snap({ url: 'https://hh.kz/account/login' })), 'страница входа');
 assert.equal(check(snap({ url: 'https://gitlab.test/users/sign_in' })), 'страница входа'); // вход Rails с подчёркиванием
 assert.equal(check(snap({ elements: [{ id: 1, role: 'textbox', name: 'Пароль' }] })), 'страница входа');
