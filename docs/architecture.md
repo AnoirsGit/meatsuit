@@ -42,7 +42,7 @@ The core reads no environment variables (`test/api.test.js` checks it). Only the
 
 `task()` queues behind a lock file in `dir` (works across processes), checks the site's limits, opens its own window, runs the caller's function under supervision and closes the window. A captcha, a login page, a block or a page off the task's site raises `NeedsHuman`: the task stops and **the window stays open** for the person. Budgets (`maxCommands`, `maxMinutes`) end runaway tasks. `dryRun` lets a caller rehearse on a live site: it sees everything and changes nothing.
 
-The command set is closed (`click`, `fill`, `type`, `press`, `scroll`, `wait`, `back`, `goto`): no arbitrary JavaScript, and `goto` stays on the task's site. Clicks check that the target is really under the cursor before pressing; typing checks the focus.
+The command set is closed (`click`, `fill`, `type`, `press`, `select`, `upload`, `scroll`, `wait`, `back`, `goto`): no arbitrary JavaScript, `goto` stays on the task's site, and `upload` takes files only from the task's `uploadDirs`. Clicks check that the target is really under the cursor before pressing; typing checks the focus.
 
 ## The deploy file and the config page
 
@@ -70,7 +70,4 @@ The owner's stealth review of 20.10.2026 was done on this line and lives in `ext
 
 ## What is verified
 
-- Tested: the library in real headless Chromium on local pages; the deploy file, `init`, the config page in a real browser; `docker compose config` for both browsers, with and without Tailscale.
-- Run for real with earlier versions: the library against a Neko mirror with Chrome for one caller project; the mirror with Brave on a desktop and once on a rented server.
-- Running on a server since 8 October 2026: this compose file with Chrome and the Tailscale exit, `verify.sh` green, cookies and `localStorage` survive a restart and a re-create, one caller signed in and running `dryRun` tasks; with the exit node unset the browser has no network (the kill switch, checked 8 October).
-- Not yet: Brave with this compose file, a recorded row of the live check in [acceptance.md](acceptance.md). Open items: [ROADMAP.md](ROADMAP.md).
+The status table in the [README](../README.md#status) is the one place for it; open items are in [ROADMAP.md](ROADMAP.md).
