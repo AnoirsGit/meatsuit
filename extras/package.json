@@ -1,0 +1,18 @@
+{
+  "name": "meatsuit-extras",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Заморожено: HTTP-сервис, прогрев и проверка выхода из ветки main. Работает и тестируется, не развивается. Ядро meatsuit (корень репозитория) отсюда ничего не берёт.",
+  "scripts": {
+    "pretest": "node -e \"require.resolve('patchright')\" 2>/dev/null || { echo 'extras: нет patchright, сначала: npm --prefix extras ci' >&2; exit 1; }",
+    "test": "node --test --test-concurrency=1",
+    "test:e2e": "E2E=1 node --test --test-concurrency=1 test/e2e.test.js",
+    "life": "cd .. && node extras/life.js"
+  },
+  "dependencies": {
+    "patchright": "^1.63.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

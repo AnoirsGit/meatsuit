@@ -1,17 +1,19 @@
 # HTTP API reference
 
+> **Frozen.** This page describes `extras/`: code from an earlier line of meatsuit that works and is tested (`npm --prefix extras ci`, then `npm run test:extras`) but is not developed. The modules named here live in `extras/` (`extras/server.js`, `extras/life.js`, `extras/limits.js` and so on) and run from the repository root as `node extras/<file>`. The maintained product is the library and the mirror: [README](../README.md), [contract.md](contract.md).
+
 meatsuit exposes one browser to your own scripts through a small HTTP service. A script asks for a task, looks at a page with `GET /view`, does things with `POST /act`, and ends the task. The service queues tasks, paces them, checks the network exit, and moves the mouse and keyboard like a person. For the idea behind this, see [architecture](architecture.md).
 
-Everything below follows the code in [`server.js`](../server.js), [`driver.js`](../driver.js) and [`view.js`](../view.js). Where a Russian note disagrees with the code, the code wins. The `message` field in error bodies is a human-readable hint that is currently in Russian. Match on `error` and the other fields, never on `message`.
+Everything below follows the code in [`server.js`](../extras/server.js), [`driver.js`](../extras/driver.js) and [`view.js`](../extras/view.js). Where a Russian note disagrees with the code, the code wins. The `message` field in error bodies is a human-readable hint that is currently in Russian. Match on `error` and the other fields, never on `message`.
 
 ## Running the service
 
-Requires Node 20+ and `npm install` (Patchright). The browser must already be running with its CDP port (Chrome DevTools Protocol) reachable at `--cdp`. With Docker, `docker compose --profile api up -d` runs it inside the browser's network (see [Docker notes](../docker/README.md#http-service); the compose definition has not been started in a container yet).
+Requires Node 20+ and `npm --prefix extras ci` (Patchright). The browser must already be running with its CDP port (Chrome DevTools Protocol) reachable at `--cdp`. With Docker, `docker/up.sh --profile api up -d --build` runs it inside the browser's network (see [Docker notes](../docker/README.md#frozen-services-warm-up-and-the-http-service); the compose definition has not been started in a container yet).
 
 ```sh
-node server.js [--host 127.0.0.1] [--port 8787] [--data data] [--cdp http://127.0.0.1:9222] \
+node extras/server.js [--host 127.0.0.1] [--port 8787] [--data data] [--cdp http://127.0.0.1:9222] \
                [--sites profiles/sites.json] [--clients profiles/clients.json] [--egress profiles/egress.json] \
-               [--tz Asia/Almaty]
+               [--tz Europe/Berlin]
 ```
 
 Environment: `MEATSUIT_HOST`, `MEATSUIT_PORT`, `MEATSUIT_CDP`, `MEATSUIT_TZ`, optionally `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` for alerts, and optionally `MEATSUIT_NEKO_URL` with `NEKO_ADMIN_PASSWORD` so the service can tell when the owner is at the controls in the mirror (see [owner presence](#owner-presence-and-the-browser-lock)). The service refuses to start without three files: `profiles/clients.json` (who may call; git-ignored; see [authentication](#authentication)), `profiles/sites.json` (which sites exist and their pacing; see [limits](#limits)) and `profiles/egress.json` (the expected exit; see [egress](#egress-check)).
@@ -119,7 +121,7 @@ No match is `404 not_found`. More than one match is `422 ambiguous` with up to 2
 
 **Response:** `{"ok":true,"url":"https://...","settled":true,"guard":null,"paced":1250}`. After an action the service waits for the page to go quiet (no navigation or requests for about 500 ms, at most 10 s). If it never goes quiet, `settled` is `false`, which is not an error.
 
-**Pacing between actions.** A script that receives a page and clicks half a second later gives itself away by rhythm alone. Before `goto`, `back`, `click`, `fill`, `hover`, `type` and `key` the service therefore waits for a human reaction time, counted from the end of the previous action: median about 1.8 s (0.7 to 6 s) when the page changed since the previous action, about 0.65 s (0.25 to 2.5 s) for another action on the same page, about 0.3 s before `type` and `key` (typing already starts with its own reaction pause). Only the missing part is waited: a client that spent ten seconds thinking is not slowed at all. `scroll` and `pause` are not paced. `paced` in the response is how many milliseconds the service added, so you can see when you are being slowed. The numbers are the author's guesses ([`human/pace.js`](../human/pace.js)), not measurements.
+**Pacing between actions.** A script that receives a page and clicks half a second later gives itself away by rhythm alone. Before `goto`, `back`, `click`, `fill`, `hover`, `type` and `key` the service therefore waits for a human reaction time, counted from the end of the previous action: median about 1.8 s (0.7 to 6 s) when the page changed since the previous action, about 0.65 s (0.25 to 2.5 s) for another action on the same page, about 0.3 s before `type` and `key` (typing already starts with its own reaction pause). Only the missing part is waited: a client that spent ten seconds thinking is not slowed at all. `scroll` and `pause` are not paced. `paced` in the response is how many milliseconds the service added, so you can see when you are being slowed. The numbers are the author's guesses ([`human/pace.js`](../extras/human/pace.js)), not measurements.
 
 **Guard before and after.** The page is checked for a captcha, block or sign-in page **before** every action as well as after it. A challenge that appeared between actions (a delayed check, a lost session) therefore answers `409` without the hands touching the page. `GET /view` also reports what it sees: a guard verdict in `view` marks the task at once (journal, site pause, Telegram message), the page is still returned, and the next action is refused with `409` before it reaches the browser.
 
@@ -176,7 +178,7 @@ A refusal is `429` with `reason`: `closed`, `too_big`, `hour`, `day`, `hours`, `
 
 **The numbers are the author's untested starting values.** Platforms do not publish thresholds for account behavior. Tune them for yourself and treat them as a way to behave moderately, not as a guarantee.
 
-**Time zone.** Day boundaries and `hours` use one zone for the whole service: `--tz` or `MEATSUIT_TZ`, an IANA name such as `Europe/Berlin`. The default is `Asia/Almaty` (the author's zone), so **set yours**. An unknown name stops the service at start. Pick the zone of the place your exit is in, since that is where the account "lives". The flag is covered by unit tests of argument parsing; it has not been run against a live service in another zone.
+**Time zone.** Day boundaries and `hours` use one zone for the whole service: `--tz` or `MEATSUIT_TZ`, an IANA name such as `Europe/Berlin`. Without them the service counts in `UTC`, so **set yours**. An unknown name stops the service at start. Pick the zone of the place your exit is in, since that is where the account "lives". The flag is covered by unit tests of argument parsing; it has not been run against a live service in another zone.
 
 ## Egress check
 

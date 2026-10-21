@@ -2,11 +2,21 @@
  * Человеческий темп: мышь по кривой со своей скоростью, прокрутка колесом,
  * печать клавишами с ритмом и опечатками.
  *
- * Планы считают human/mouse.js и human/keys.js (чистые функции, их проверяют
- * тесты). Здесь они проигрываются на странице playwright по часам: время
- * берётся от начала плана, а не копится из пауз, поэтому задержки запросов
- * к браузеру ритм не сбивают. Последнюю позицию курсора держим сами:
- * playwright её не отдаёт.
+ * Планы считают human/mouse.js и human/keys.js (чистые функции, их проверяет
+ * test/human.test.js). Здесь они проигрываются на странице playwright по часам:
+ * время берётся от начала плана, а не копится из пауз, поэтому задержки запросов
+ * к браузеру ритм не сбивают. Последнюю позицию курсора держим сами: playwright
+ * её не отдаёт.
+ *
+ * Руки ветки main плюс две вещи ядра:
+ * - курсор уже над элементом — рука к нему не едет (только задерживается);
+ * - click(page, el, { verifyAt }): перед нажатием вызывающий проверяет точку под
+ *   курсором (оверлей, сдвиг вёрстки); бросил — нажатия нет.
+ *
+ * Что зовёт ядро (hands.js), и это не меняется без него:
+ *   click(page, el, { verifyAt? })  hover(page, el)  type(page, text)  press(page, key)
+ *   scroll(page, px)  pause(a, b)  sleep(ms)
+ * el — всё, у чего есть boundingBox() и scrollIntoViewIfNeeded() (локатор playwright, dom.handle).
  *
  * Последний аргумент функций — {sleep, now, rnd}: часы и генератор можно
  * подменить, в тестах минута печати проигрывается мгновенно.
@@ -31,18 +41,19 @@ async function play(events, env, fire) {
   }
 }
 
-/** Повадки человека: быстрая или медленная рука, дрожь, как часто дёргается, как печатает. */
+/** Повадки человека: быстрая или медленная рука, дрожь, как часто дёргается, как печатает и как часто ошибается. */
 function newPersona(rnd = Math.random) {
   return {
     speed: clamp(lognormal(rnd, 1, 0.15), 0.7, 1.4),
     tremor: between(rnd, 0.4, 1),
     twitch: between(rnd, 0.1, 0.5),
     wpm: clamp(52 + 10 * normal(rnd), 30, 95),
+    typoRate: clamp(lognormal(rnd, 0.022, 0.35), 0.008, 0.05),
   };
 }
 
 // Допустимые границы повадок: за ними рука превращается в телепорт (speed NaN), а печать в вечность (wpm 0).
-const PERSONA_RANGE = { speed: [0.5, 2], tremor: [0, 2], twitch: [0, 1], wpm: [20, 150] };
+const PERSONA_RANGE = { speed: [0.5, 2], tremor: [0, 2], twitch: [0, 1], wpm: [20, 150], typoRate: [0, 0.1] };
 const inRange = (v, [lo, hi]) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
 
 /**
@@ -55,13 +66,19 @@ function restorePersona(saved, rnd = Math.random) {
 }
 
 // Человек в браузере один, поэтому повадки общие на все страницы и держатся, пока жив процесс.
-// usePersona подставляет сохранённые (чтобы после перезапуска печатал в том же темпе); null — сбросить.
+// usePersona подставляет сохранённые (connect берёт их из <dir>/persona.json); null — сбросить.
 let shared = null;
 const usePersona = (p) => { shared = p == null ? null : restorePersona(p); };
 const personaOf = (rnd) => shared || (shared = newPersona(rnd));
 
 const cursor = new WeakMap();
 const sizes = new WeakMap();
+
+/** Курсор уже над элементом (с отступом margin от края): двигать мышь не нужно. */
+function inside(pos, box, margin = 2) {
+  return !!pos && !!box && pos.x >= box.x + margin && pos.x <= box.x + box.width - margin
+    && pos.y >= box.y + margin && pos.y <= box.y + box.height - margin;
+}
 
 /** Размер окна страницы. Мышь не должна выходить за него; fresh — спросить заново, иначе берётся прежний ответ. */
 async function sizeOf(page, fresh = false) {
@@ -154,21 +171,31 @@ async function scrollToView(page, locator, env) {
   return locator.scrollIntoViewIfNeeded();
 }
 
-/** Подвести мышь к элементу: прокрутка колесом, путь к точке около центра, недолгая задержка над ним. */
+/**
+ * Подвести мышь к элементу: прокрутка колесом, путь к точке около центра, недолгая задержка над ним.
+ * Курсор уже над элементом — рука не едет, только задерживается (дрожь не выводит её за элемент).
+ */
 async function hover(page, locator, opts = {}) {
   const env = envOf(opts);
   await scrollToView(page, locator, env);
   const box = await locator.boundingBox({ timeout: 5000 }); // нет элемента — не ждать 30 секунд
   if (!box) throw new Error('элемент не виден');
-  const target = pickPoint(box, await cursorOf(page, env.rnd), env.rnd);
-  await moveTo(page, target.x, target.y, { ...opts, width: Math.min(box.width, box.height) });
+  if (!inside(cursor.get(page), box)) {
+    const target = pickPoint(box, await cursorOf(page, env.rnd), env.rnd);
+    await moveTo(page, target.x, target.y, { ...opts, width: Math.min(box.width, box.height) });
+  }
   await linger(page, clamp(lognormal(env.rnd, 130, 0.4), 50, 500), { ...opts, box });
 }
 
-/** Навести и кликнуть: точка около центра, задержка перед нажатием, кнопка держится не мгновенно. */
+/**
+ * Навести и кликнуть: точка около центра, задержка перед нажатием, кнопка держится не мгновенно.
+ * opts.verifyAt(point): пока рука шла, страница могла сдвинуться или накрыться оверлеем; вызывающий
+ * проверяет точку под курсором прямо перед нажатием и бросает, если там не цель — тогда клика нет.
+ */
 async function click(page, locator, opts = {}) {
   const env = envOf(opts);
   await hover(page, locator, opts);
+  if (opts.verifyAt) await opts.verifyAt({ ...(cursor.get(page) || {}) });
   await page.mouse.down();
   await env.sleep(clamp(lognormal(env.rnd, 85, 0.3), 45, 200));
   await page.mouse.up();
@@ -181,7 +208,7 @@ const cdpOf = (page) => {
   return sessions.get(page);
 };
 
-async function press(page, ev, state) {
+async function pressEvent(page, ev, state) {
   if (ev.op === 'insert') return page.keyboard.insertText(ev.text);
   const e = ev.entry, down = ev.op === 'down';
   if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') state.shift = down;
@@ -201,20 +228,23 @@ async function press(page, ev, state) {
   });
 }
 
-/** Печать в сфокусированное поле: opts.wpm и opts.typoRate переопределяют повадки страницы. */
+/**
+ * Печать в сфокусированное поле. Темп и доля опечаток — из повадок (persona.json);
+ * opts.wpm и opts.typoRate их переопределяют. Перевод строки — Shift+Enter.
+ */
 async function type(page, text, opts = {}) {
   const env = envOf(opts), me = personaOf(env.rnd);
-  const plan = planTyping(text, { wpm: opts.wpm || me.wpm, typoRate: opts.typoRate, rnd: env.rnd });
+  const plan = planTyping(text, { wpm: opts.wpm || me.wpm, typoRate: opts.typoRate ?? me.typoRate, rnd: env.rnd });
   const state = { shift: false };
-  await play(plan, env, (ev) => press(page, ev, state));
+  await play(plan, env, (ev) => pressEvent(page, ev, state));
 }
 
 /** Одна клавиша целиком (Escape, Enter, Tab…): нажал, подержал, отпустил. */
-async function pressKey(page, key, opts = {}) {
+async function press(page, key, opts = {}) {
   const env = envOf(opts);
   await page.keyboard.down(key);
   await env.sleep(clamp(lognormal(env.rnd, 85, 0.3), 45, 200));
   await page.keyboard.up(key);
 }
 
-module.exports = { moveTo, hover, click, scroll, type, press: pressKey, linger, pause, rand, sleep, newPersona, restorePersona, usePersona, planMove, planTyping, planScroll };
+module.exports = { moveTo, hover, click, scroll, type, press, linger, pause, rand, sleep, inside, newPersona, restorePersona, usePersona, planMove, planTyping, planScroll };

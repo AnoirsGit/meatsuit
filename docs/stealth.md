@@ -2,8 +2,13 @@
 
 A review of 20.10.2026 of the whole project from one angle: how would a site tell the bot from the owner? The
 assessment is based on the code and on commonly known detector tells. **Nothing has been checked on detector sites
-or real platforms.** You can now measure instead of guessing: `node selfcheck.js` (below). Russian original with
+or real platforms.** You can now measure instead of guessing: `node extras/selfcheck.js` (below). Russian original with
 more detail: [ru/09-stealth.md](ru/09-stealth.md).
+
+> **Where the code is.** The review was done on the HTTP service and warm-up line, which now lives in
+> [`extras/`](../extras/) (frozen, see [architecture.md](architecture.md#frozen-extras)). Module and test paths
+> below (`driver.js`, `server.js`, `life.js`, `human/pace.js`, `window.js`, `test/…`) are relative to `extras/`.
+> The 53 px wheel notch and seek scrolling also apply to the core library's `human/mouse.js`.
 
 ## In short
 
@@ -35,7 +40,7 @@ Done and verified: a headed Brave without `--enable-automation` (`webdriver` is 
 and **no `Runtime.enable` trace was found under `connectOverCDP`**: the `Error.stack` getter probe on
 `console.debug` (the technique DataDome and Cloudflare use) reports `cdpLeak=false` on a local headless Chromium.
 The docs used to say "not verified"; it is now measured on Chromium, still not on the Brave in Neko. New windows
-copy the owner's window bounds ([`window.js`](../window.js)). `GET /view` is built in an isolated world.
+copy the owner's window bounds ([`window.js`](../extras/window.js)). `GET /view` is built in an isolated world.
 
 Expected yellow marks in the container (not measured yet): **no WebGL** (`--disable-gpu --disable-software-rasterizer`
 in `brave-start.sh`; dropping the second flag leaves software WebGL, which is still a yellow but better than none),
@@ -52,7 +57,7 @@ A site sees rhythm (time from page load to the first action), mouse paths, typin
 came from (referrer, URL depth), time of day, volume.
 
 Done today:
-- **Think pause** ([`human/pace.js`](../human/pace.js), applied in [`driver.js`](../driver.js)): before `goto`,
+- **Think pause** ([`human/pace.js`](../extras/human/pace.js), applied in [`driver.js`](../extras/driver.js)): before `goto`,
   `back`, `click`, `fill`, `hover`, `type` and `key` the service waits out a human reaction time counted from the end
   of the previous action (median about 1.8 s after a page change, 0.65 s on the same page, 0.3 s before typing). Only
   the missing part is waited, so a client that thinks for itself is not slowed. `paced` in the response shows the
@@ -112,7 +117,7 @@ Also done the same day: the service and the warm-up step aside while the owner h
 
 ## What to check on the server once the exit node is up
 
-1. `docker compose --profile api run --rm server node selfcheck.js --tz Asia/Almaty`: on the author's machine this
+1. `docker/up.sh --profile api run --rm server node extras/selfcheck.js --tz "<your exit zone>"`: on the author's machine this
    gave no red marks and one yellow (notifications); the server image is the same, so expect the same. Any red: stop
    and investigate before the first sign-in on a platform.
 2. In the mirror's DevTools console: `addEventListener('wheel', e => console.log(e.deltaY))`, then scroll by hand.
