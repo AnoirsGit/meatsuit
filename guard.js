@@ -11,7 +11,7 @@ class NeedsHuman extends Error {
 
 const CAPTCHA = /captcha|hcaptcha|arkose|verify (that )?you('| a)re (a )?human|i'?m not a robot|не робот/i;
 const SUSPICIOUS = new RegExp([
-  'unusual activity', 'suspicious activity', 'подозрительн\\w* активност',
+  'unusual activity', 'suspicious activity', 'подозрительн[а-яё]* активност',
   'account (has been )?(suspended|banned|restricted|locked)', 'аккаунт (заблокирован|ограничен|приостановлен)',
   'too many requests', 'слишком много запросов', 'access denied', 'доступ ограничен',
 ].join('|'), 'i');
