@@ -88,11 +88,17 @@ docker/up.sh up -d --force-recreate
 ```
 
 **4. Пересоздать соседей.** То, что подключено к браузеру через `container:meatsuit-browser` и живёт постоянно, со
-старым сетевым окружением остаётся без сети:
+старым сетевым окружением остаётся без сети. Найти их:
 
 ```sh
-cd /opt/cvs && docker compose --profile apply up -d --force-recreate apply   # отклики и коды из remora (идут через tailscale0 этого стека)
+docker ps -q | xargs docker inspect --format '{{.Name}} {{.HostConfig.NetworkMode}}' | grep 'container:'
 ```
+
+Каждый из списка пересоздать в его проекте (`docker compose … up -d --force-recreate <сервис>`). У cvs команда зависит
+от того, какой автоотклик слит (решение владельца ещё не принято): с сервисом `apply` из веток `agent/cvs-*` —
+`cd /opt/cvs && docker compose --profile apply up -d --force-recreate apply`; на нынешнем `main` cvs подключается
+файлом `docker-compose.meatsuit.yml` — тогда `docker compose -f docker-compose.yml -f docker-compose.meatsuit.yml
+--profile telegram up -d --force-recreate jobs`.
 
 Бот tinder-matcher (`deploy/run.sh` → `docker compose run --rm matcher`) — новый контейнер на каждый запуск cron, сам
 берёт новое сетевое окружение; его `pult` и `ui` живут в своей сети, их пересоздавать не нужно.
