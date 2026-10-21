@@ -9,6 +9,17 @@
   "example.org": {
     "perDay": 0
   },
+  "login.example.net": {
+    "perDay": 4,
+    "perHour": 2,
+    "hours": "8-23",
+    "maxCommands": 20,
+    "maxMinutes": 8,
+    "codeLogin": {
+      "path": "^/account/login",
+      "maxMinutes": 6
+    }
+  },
   "*": {
     "perDay": 3,
     "perHour": 2,

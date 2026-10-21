@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { check } = require('../guard.js');
+const { check, codeLoginRule } = require('../guard.js');
 const { telegramNotifier } = require('../index.js'); // экспорт для вызывающих сохранён (решение 3)
 const limits = require('../limits.js');
 
@@ -32,6 +32,45 @@ const banner = 'We use cookies to improve your experience. '.repeat(20).trim();
 assert.match(check(snap({ text: `${block} ${banner}`, textParts: [block.length, banner.length] })), /подозрительная/, 'длинный кусок спрятал короткую заглушку');
 const bio = 'captcha '.repeat(200).trim();
 assert.equal(check(snap({ text: `${bio} Привет`, textParts: [bio.length, 'Привет'.length] })), null, 'длинный кусок проверен рядом с коротким');
+
+// codeLogin: вход по одноразовому коду снимает только «страницу входа» и только на объявленном пути своей площадки.
+{
+  const cl = { codeLogin: { site: 'hh.kz', path: codeLoginRule({ path: '^/account/login' }).path } };
+  const at = (url, o = {}) => check(snap({ url, title: 'Вход', elements: [{ id: 1, role: 'textbox', name: 'Код из SMS' }], ...o }), cl);
+  // разрешено
+  assert.equal(at('https://hh.kz/account/login'), null, 'объявленный путь');
+  assert.equal(at('https://hh.kz/account/login?backurl=%2Fvacancy%2F1'), null, 'query не мешает');
+  assert.equal(at('https://almaty.hh.kz/account/login'), null, 'поддомен своей площадки');
+  assert.equal(at('https://HH.KZ/account/login/code'), null, 'путь с якорем ^ — продолжение тоже его');
+  assert.equal(at('https://hh.kz/vacancy/1'), null, 'обычная страница как была');
+  // запрещено: без согласия задачи
+  assert.equal(check(snap({ url: 'https://hh.kz/account/login' })), 'страница входа', 'без codeLogin');
+  assert.equal(check(snap({ url: 'https://hh.kz/account/login' }), {}), 'страница входа', 'codeLogin не передан');
+  // запрещено: поле пароля на объявленном пути
+  assert.equal(at('https://hh.kz/account/login', { elements: [{ id: 1, role: 'textbox', name: 'Телефон', inputType: 'password' }] }), 'страница входа', 'inputType password');
+  assert.equal(at('https://hh.kz/account/login', { elements: [{ id: 1, role: 'textbox', name: 'Пароль' }] }), 'страница входа', 'поле «Пароль»');
+  assert.equal(at('https://hh.kz/account/login', { elements: [{ id: 1, role: 'textbox', name: 'Password' }] }), 'страница входа', 'поле «Password»');
+  // запрещено: капча и блокировка проверяются раньше
+  assert.equal(at('https://hh.kz/account/login', { text: 'Подтвердите, что вы не робот' }), 'капча', 'капча текстом');
+  assert.equal(at('https://hh.kz/account/login', { frames: ['https://newassets.hcaptcha.com/captcha/v1/x/static/hcaptcha.html#frame=checkbox'] }), 'капча', 'капча во фрейме');
+  assert.match(at('https://hh.kz/account/login', { text: 'Подозрительная активность. Повторите позже.' }), /подозрительная/, 'подозрительная активность');
+  assert.match(at('https://hh.kz/account/login', { text: 'Too many requests' }), /подозрительная/, 'слишком много запросов');
+  // запрещено: не тот путь, не та площадка, не https
+  assert.equal(at('https://hh.kz/login'), 'страница входа', 'другой путь');
+  assert.equal(at('https://hh.kz/login?next=/account/login'), 'страница входа', 'путь в query не считается');
+  assert.equal(at('https://hh.kz/x/account/login'), 'страница входа', 'путь без якоря в начале');
+  assert.equal(at('https://hh.ru/account/login'), 'страница входа', 'другая площадка');
+  assert.equal(at('https://evilhh.kz/account/login'), 'страница входа', 'хост, оканчивающийся на имя площадки');
+  assert.equal(at('https://hh.kz.evil.test/account/login'), 'страница входа', 'площадка как поддомен чужого');
+  assert.equal(at('http://hh.kz/account/login'), 'страница входа', 'не https');
+  // правило: один путь с якорем, без лишнего
+  assert.equal(codeLoginRule({ path: '^/checkpoint/challenge', maxMinutes: 6 }).maxMinutes, 6);
+  assert.ok(!('maxMinutes' in codeLoginRule({ path: '^/account/login' })));
+  for (const bad of [undefined, null, [], 'path', {}, { path: 1 }, { path: 'account/login' }, { path: '/account/login' }, { path: '^/' },
+    { path: '^/(' }, { path: '^/a', maxMinutes: 0 }, { path: '^/a', maxMinutes: '5' }, { path: '^/a', hosts: ['x'] }]) {
+    assert.throws(() => codeLoginRule(bad), /codeLogin:/, JSON.stringify(bad));
+  }
+}
 
 (async () => {
   // Простая проверка совместимости импорта; подробно адаптер проверяет test/telegram.test.js.

@@ -1,14 +1,18 @@
 /**
  * Присмотр за задачей: оборачивает see/act руками hands в guard, бюджет и стоп.
  *
- *   const { api, state } = supervise(h, { name, site, notify, maxCommands, maxMinutes });
+ *   const { api, state } = supervise(h, { name, site, notify, maxCommands, maxMinutes, codeLogin? });
+ *
+ * codeLogin — { path: RegExp, maxMinutes? } из codeLoginRule (guard.js): задача входит по одноразовому коду.
+ * Тогда guard не считает стопом страницу входа на этом пути площадки (если на ней нет поля пароля), а бюджет
+ * задачи урезан: не больше CODE_LOGIN_MAX_COMMANDS команд и не дольше codeLogin.maxMinutes, если задано.
  *   ... await fn(api) ...; state.finish();
  *
  * После NeedsHuman (капча, вход, уход с площадки) стоп не снимается: все следующие
  * вызовы бросают ту же ошибку, даже если проект её поймал. state.stopped говорит
  * вызывающему, что окно надо оставить человеку.
  */
-const { check: guardCheck, NeedsHuman } = require('./guard.js');
+const { check: guardCheck, NeedsHuman, CODE_LOGIN_MAX_COMMANDS } = require('./guard.js');
 
 class BudgetExceeded extends Error {}
 
@@ -28,14 +32,19 @@ const isWrite = (c, els) => {
   return false;
 };
 
-function supervise(h, { name, site, extraHosts = [], notify, maxCommands, maxMinutes, onWrite }) {
+function supervise(h, { name, site, extraHosts = [], notify, maxCommands, maxMinutes, onWrite, codeLogin = null }) {
+  const guardOpts = codeLogin ? { codeLogin: { site, path: codeLogin.path } } : {};
+  if (codeLogin) {
+    maxCommands = Math.min(maxCommands, CODE_LOGIN_MAX_COMMANDS);
+    if (codeLogin.maxMinutes) maxMinutes = Math.min(maxMinutes, codeLogin.maxMinutes);
+  }
   const hosts = [site, ...extraHosts]; // площадка и хосты, где страница может оказаться (extraHosts из task)
   let els = null; // последний виденный список элементов: по нему отличаем клик по вкладке
-  const state = { stopped: null, finished: false, commands: 0, finish() { state.finished = true; } };
+  const state = { stopped: null, finished: false, commands: 0, maxCommands, maxMinutes, finish() { state.finished = true; } };
   const deadline = Date.now() + maxMinutes * 60e3;
 
   const stopIfNeeded = async (snap) => {
-    let reason = guardCheck(snap);
+    let reason = guardCheck(snap, guardOpts);
     if (!reason && !onSite(snap.url, hosts)) reason = `страница вне площадки ${site}`;
     if (!reason) return;
     state.stopped = new NeedsHuman(reason, snap.url);

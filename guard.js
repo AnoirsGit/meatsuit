@@ -1,7 +1,7 @@
 /**
  * Предохранитель: по снимку страницы решает, что дальше без человека нельзя.
  * Капча, страница входа, «подозрительная активность» — стоп и сообщение мне.
- * Обхода нет.
+ * Обхода нет. Одно узкое исключение — вход по одноразовому коду (codeLogin, ниже).
  *
  * check() — чистая функция, её проверяет test/guard.test.js.
  */
@@ -63,8 +63,42 @@ const shortText = (s) => {
 
 const urlPath = (u) => { try { const x = new URL(u); return x.pathname + x.search; } catch { return ''; } };
 
-/** null, если всё нормально, иначе причина остановки. */
-function check(s) {
+// Вход по одноразовому коду (codeLogin). Страницу входа можно не считать стопом, только если сошлось всё:
+// задача попросила (task(..., { codeLogin: true })), у площадки в sites.json вызывающего объявлен один путь
+// (`"codeLogin": { "path": "^/account/login" }`), адрес — https на хосте площадки (или её поддомене) и путь
+// совпал, на странице нет поля пароля. Капча и «подозрительная активность» проверяются раньше и не снимаются.
+const CODE_LOGIN_MAX_COMMANDS = 20;
+
+/**
+ * Правило codeLogin из записи площадки → { path: RegExp, maxMinutes? }. Бросает на неверном виде:
+ * путь — строка с якорем «^/…» (один путь, не «весь сайт»), maxMinutes — положительное число, если есть.
+ */
+function codeLoginRule(c) {
+  const bad = (why) => new Error(`codeLogin: ${why} (образец: "codeLogin": { "path": "^/account/login" })`);
+  if (!c || typeof c !== 'object' || Array.isArray(c)) throw bad('нужен объект');
+  if (typeof c.path !== 'string' || !/^\^\/./.test(c.path)) throw bad('path — регулярное выражение пути с якорем «^/» и хотя бы одним символом после «/»');
+  let path;
+  try { path = new RegExp(c.path); } catch (e) { throw bad(`path не разбирается: ${e.message}`); }
+  if (c.maxMinutes !== undefined && !(typeof c.maxMinutes === 'number' && c.maxMinutes > 0)) throw bad('maxMinutes — положительное число');
+  const extra = Object.keys(c).filter((k) => k !== 'path' && k !== 'maxMinutes');
+  if (extra.length) throw bad(`лишние поля: ${extra.join(', ')}`);
+  return { path, ...(c.maxMinutes !== undefined && { maxMinutes: c.maxMinutes }) };
+}
+
+/** Адрес — объявленный путь входа по коду на площадке site. codeLogin: { site, path: RegExp }. */
+function codeLoginPage(url, { site, path }) {
+  let x; try { x = new URL(url); } catch { return false; }
+  if (x.protocol !== 'https:') return false;
+  const host = x.hostname.toLowerCase();
+  const own = String(site).toLowerCase();
+  return (host === own || host.endsWith('.' + own)) && path.test(x.pathname);
+}
+
+/**
+ * null, если всё нормально, иначе причина остановки.
+ * opts.codeLogin — { site, path: RegExp } для задачи с codeLogin (собирает supervise); без него как всегда.
+ */
+function check(s, { codeLogin } = {}) {
   const dialogs = (s.dialogs || []).map((d) => `${d.name} ${d.text}`).join(' ');
   const names = (s.elements || []).map((e) => e.name).join(' ');
   const short = shortText(s);
@@ -73,8 +107,9 @@ function check(s) {
   if (CAPTCHA.test(haystack) || captchaFrame(s.frames || [], s.hiddenFrames || [])) return 'капча';
   if (SUSPICIOUS.test(haystack)) return 'подозрительная активность или ограничение аккаунта';
   const passwordField = (s.elements || []).some((e) => e.inputType === 'password' || (e.role === 'textbox' && PASSWORD.test(e.name)));
-  if (passwordField || (s.url && LOGIN_URL.test(urlPath(s.url)))) return 'страница входа';
+  if (passwordField) return 'страница входа'; // пароль бот не вводит никогда, codeLogin тоже
+  if (s.url && LOGIN_URL.test(urlPath(s.url))) return codeLogin && codeLoginPage(s.url, codeLogin) ? null : 'страница входа';
   return null;
 }
 
-module.exports = { check, NeedsHuman };
+module.exports = { check, NeedsHuman, codeLoginRule, CODE_LOGIN_MAX_COMMANDS };
