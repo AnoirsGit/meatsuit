@@ -99,6 +99,20 @@ test('chrome.conf и compose согласованы: CDP 9222 и та же па�
   assert.match(fs.readFileSync(path.join(DOCKER, 'neko', 'brave-start.sh'), 'utf8'), /PROFILE=\/home\/neko\/\.config\/brave\n/);
 });
 
+// docker stop: compose ждёт stop_grace_period, но браузер останавливает supervisord внутри Neko и ждёт его только
+// stopwaitsecs (по умолчанию 10 с), потом SIGKILL — свежие cookie и входы не успевают лечь на диск.
+test('остановка: supervisord ждёт браузер дольше своих 10 с, но меньше stop_grace_period compose', () => {
+  const compose = fs.readFileSync(path.join(DOCKER, 'docker-compose.yml'), 'utf8');
+  const grace = Number((/stop_grace_period:\s*(\d+)s/.exec(compose) || [])[1]);
+  assert.ok(grace > 0, 'у neko нет stop_grace_period в секундах');
+  for (const conf of ['chrome.conf', 'neko/brave.conf']) {
+    const text = fs.readFileSync(path.join(DOCKER, conf), 'utf8');
+    assert.match(text, /^stopsignal=INT$/m, `${conf}: браузер сбрасывает данные по SIGINT`);
+    const wait = Number((/^stopwaitsecs=(\d+)$/m.exec(text) || [])[1]);
+    assert.ok(wait > 10 && wait < grace, `${conf}: stopwaitsecs=${wait || 'нет'}, нужно больше 10 и меньше ${grace}`);
+  }
+});
+
 test('папка на хосте вместо тома: у обоих браузеров, хозяином её делает profile-init', { skip: !hasDockerCompose && 'нет docker compose' }, (t) => {
   for (const name of Object.keys(BROWSERS)) {
     const file = envFile(t, { MEATSUIT_BROWSER: name, MEATSUIT_PROFILE_DIR: '/srv/meatsuit/profile' });
