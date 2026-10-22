@@ -6,6 +6,7 @@
  */
 const fs = require('node:fs');
 const path = require('node:path');
+const { randomUUID } = require('node:crypto');
 
 class LimitReached extends Error {}
 
@@ -118,21 +119,48 @@ function charge(site, rule, file, at) {
   fs.writeFileSync(file, JSON.stringify(all));
 }
 
+/** Кто держит замок: { token, pid, name?, site?, since } из файла или null (пусто, мусор, старая версия с одним PID). */
+function lockHolder(file) {
+  try { const v = JSON.parse(fs.readFileSync(file, 'utf8')); return v && typeof v === 'object' ? v : null; } catch { return null; }
+}
+
+/** Текст отказа «браузер занят»: чья задача, на какой площадке и с какого времени, сколько ждали. */
+function busyText(file, timeoutMs) {
+  const h = lockHolder(file);
+  const str = (v) => (typeof v === 'string' && v ? v.slice(0, 100) : null);
+  const name = h && str(h.name), site = h && str(h.site);
+  const since = h && Number.isFinite(h.since) ? ` с ${new Date(h.since).toTimeString().slice(0, 5)}` : '';
+  const who = name ? `задачей «${name}»${site ? ` (${site})` : ''}${since}` : 'другой задачей';
+  const waited = timeoutMs >= 60e3 ? `${Math.round(timeoutMs / 60e3)} мин` : `${Math.round(timeoutMs / 1000)} с`;
+  return `очередь: браузер занят ${who}, не дождались своей очереди за ${waited}`;
+}
+
 /**
  * Межпроцессный замок на файле. Держатель раз в heartbeatMs обновляет mtime;
  * замок старше staleMs считается брошенным; забирает его один ждущий под вторым замком `.reclaim`.
  * По PID нельзя: в контейнере после перезапуска PID тот же, и замок жил бы вечно.
+ * В файле — кто держит: { token, pid, name, site, since } (holder — { name, site } задачи). release() снимает
+ * только свой замок: держатель, который завис дольше staleMs, просыпается и не уносит замок того, кто его забрал.
+ * Не дождались за timeoutMs — LimitReached «браузер занят …»: как исчерпанный лимит, задача не начинается,
+ * браузер не тронут, повторить позже.
  * Возвращает release().
  */
-async function lock(file, { pollMs = 500, timeoutMs = 30 * 60e3, heartbeatMs = 5000, staleMs = 30000 } = {}) {
+async function lock(file, { pollMs = 500, timeoutMs = 30 * 60e3, heartbeatMs = 5000, staleMs = 30000, holder = {} } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const until = Date.now() + timeoutMs;
+  const token = `${process.pid}-${randomUUID()}`;
+  const who = {};
+  for (const k of ['name', 'site']) if (typeof holder[k] === 'string' && holder[k]) who[k] = holder[k].slice(0, 100);
   for (;;) {
     try {
-      fs.writeFileSync(file, String(process.pid), { flag: 'wx' });
+      fs.writeFileSync(file, JSON.stringify({ token, pid: process.pid, ...who, since: Date.now() }), { flag: 'wx' });
       const beat = setInterval(() => { try { const t = new Date(); fs.utimesSync(file, t, t); } catch {} }, heartbeatMs);
       beat.unref();
-      return () => { clearInterval(beat); try { fs.unlinkSync(file); } catch {} };
+      return () => {
+        clearInterval(beat);
+        const h = lockHolder(file);
+        if (h && h.token === token) { try { fs.unlinkSync(file); } catch {} }
+      };
     } catch (e) {
       if (e.code !== 'EEXIST') throw e;
       let age = 0;
@@ -151,7 +179,7 @@ async function lock(file, { pollMs = 500, timeoutMs = 30 * 60e3, heartbeatMs = 5
         }
         continue;
       }
-      if (Date.now() > until) throw new Error('очередь: не дождались своей очереди');
+      if (Date.now() > until) throw new LimitReached(busyText(file, timeoutMs));
       await sleep(pollMs);
     }
   }
