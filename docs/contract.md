@@ -68,6 +68,13 @@ and records the task (`dryRun` spends no slots) → opens a separate window → 
 budget → closes the window. On `NeedsHuman` the window stays open for the human to handle in the mirror. New tabs
 the page opens are closed. Returns what the function returned.
 
+The queue is one for all callers of one `dir` (tinder-matcher and cvs in one browser wait for each other). A task
+waits for it up to 30 minutes; if the browser is still busy, `task` throws `LimitReached` ("the browser is busy with
+task «…» (site) since HH:MM") without touching the browser or spending a slot, so the caller treats it like a limit and
+retries later, not as its own failure. While `fn` runs, every other caller waits, including while your own code waits
+for a model: put timeouts on your own awaits inside `fn` (`maxMinutes` is checked before each `see`/`act`, not while
+your code is waiting).
+
 ### sites.json
 
 ```json
@@ -128,7 +135,7 @@ are how many more are allowed (`null` means no limit, `0` means no such site). `
 
 | Error | When | What the caller should do |
 |---|---|---|
-| `LimitReached` | the site is not in `sites.json` (and there is no `"*"`), `perDay: 0`, outside hours, day or hour limit | do not start the task, retry later |
+| `LimitReached` | the site is not in `sites.json` (and there is no `"*"`), `perDay: 0`, outside hours, day or hour limit; the browser stayed busy with another caller's task for 30 minutes (the text names that task and site) | do not start the task, retry later |
 | `NeedsHuman` (`.reason`, `.url`) | a captcha, a sign-in page (except the declared path of a `codeLogin` task), a block, leaving the site's host (and not to `extraHosts`) | stop; the window is open for the human. The state is not cleared until the task ends |
 | `BudgetExceeded` | more than `maxCommands` commands or `maxMinutes` minutes | treat the task as failed |
 | `StaleElement` | `gen` is out of date, the element is gone, something other than the target is under the cursor before the press, focus moved | take a fresh snapshot |

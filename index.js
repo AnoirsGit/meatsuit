@@ -140,7 +140,14 @@ async function connect({
     if (rule && rule.maxCommands) maxCommands = Math.min(maxCommands, rule.maxCommands);
     if (rule && rule.maxMinutes) maxMinutes = Math.min(maxMinutes, rule.maxMinutes);
 
-    const release = await lock(path.join(dir, 'queue.lock'));
+    // Очередь «один бот за раз» на все вызывающие одного dir. Браузер занят дольше срока — LimitReached
+    // с тем, кто занял (повторить позже), а не ошибка: вызывающий не должен считать это своей поломкой.
+    let release;
+    try { release = await lock(path.join(dir, 'queue.lock'), { holder: { name, site } }); }
+    catch (e) {
+      if (e instanceof LimitReached) await emit('limit', `meatsuit: «${name}» не запущена: ${e.message}`);
+      throw e;
+    }
     let page;
     let opened = false; // окно открыла эта задача
     let onPopup;
