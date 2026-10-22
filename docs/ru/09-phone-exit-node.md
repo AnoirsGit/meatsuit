@@ -88,7 +88,8 @@ docker/up.sh up -d --force-recreate
 ```
 
 **4. Пересоздать соседей.** То, что подключено к браузеру через `container:meatsuit-browser` и живёт постоянно, со
-старым сетевым окружением остаётся без сети. Найти их:
+старым сетевым окружением остаётся без сети. `docker/up.sh` после такого `up` сам печатает их список с командой для
+каждого (сам их не пересоздаёт). Найти их и руками:
 
 ```sh
 docker ps -q | xargs docker inspect --format '{{.Name}} {{.HostConfig.NetworkMode}}' | grep 'container:'
