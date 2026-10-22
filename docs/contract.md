@@ -57,7 +57,7 @@ await ms.close();
 | `site` | the site's host, its key in `sites.json`; `goto` is limited to it as well |
 | `uploadDirs` | an array of absolute paths to directories `upload` may take files from (CVs, letters). Without it `upload` is a `BadCommand`. A wrong shape is an error before the queue and the browser |
 | `extraHosts` | an array of hosts (`['company.com']`, no scheme, path or `*`) where the page may end up without a stop: a "thank you" page on the company's own site after an ATS form. Subdomains too. `goto` there is not allowed; limits and counters go by `site`; guard (captcha, sign-in, block) works there too. A wrong shape is an error before the queue and the browser |
-| `maxCommands`, `maxMinutes` | the task's budget; the ceiling comes from the site (`sites.json`), the caller may choose less |
+| `maxCommands`, `maxMinutes` | the task's budget; the ceiling comes from the site (`sites.json`), the caller may choose less. `maxMinutes` is checked before each command; a task still running 15 minutes after it (a page that does not answer, the caller's own await that hangs) is ended by meatsuit: `BudgetExceeded`, the window is closed (after `NeedsHuman` it stays for the human), the queue is free |
 | `dryRun`, `dryRunNavigation` | a rehearsal, see "Hands" |
 | `readOnly` | the task only reads: it spends `perHour` but not `perDay`, and `perDay` does not stop it. The first writing command (`fill`, `type`, `select`, `upload`, `press Enter`, a `click` not on a `tab`) counts a full day slot before it runs; if the day is used up, that is `LimitReached` and the command does not run |
 | `capture` | the screen archive `{ dir, htmlPerSignature = 5, maxMB = 500 }`; nothing is written without it |
@@ -73,7 +73,8 @@ waits for it up to 30 minutes; if the browser is still busy, `task` throws `Limi
 task «…» (site) since HH:MM") without touching the browser or spending a slot, so the caller treats it like a limit and
 retries later, not as its own failure. While `fn` runs, every other caller waits, including while your own code waits
 for a model: put timeouts on your own awaits inside `fn` (`maxMinutes` is checked before each `see`/`act`, not while
-your code is waiting).
+your code is waiting). A task still running 15 minutes after its `maxMinutes` is ended by meatsuit, so one hung task
+cannot hold the browser forever.
 
 ### sites.json
 

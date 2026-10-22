@@ -19,6 +19,7 @@ const { chromium } = require('playwright-core');
 
 const PORT = 9341;
 const SITE = 'example.test';
+const settle = () => new Promise((r) => setTimeout(r, 300));
 
 (async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meatsuit-queue-'));
@@ -66,6 +67,35 @@ const SITE = 'example.test';
     assert.ok(!notes.some((n) => n.event === 'error'), 'занятый браузер — не ошибка');
     hold();
     assert.equal(await ms.task('t2', async () => 'ok', { site: SITE }), 'ok');
+
+    // Зависшая задача не держит очередь вечно. maxMinutes проверяется перед командой, а see() на странице
+    // с зависшим главным потоком (бесконечный цикл в её скрипте) не возвращается никогда, и замок очереди всё это
+    // время обновляется. Сторож: через maxMinutes + запас задача кончается BudgetExceeded, окно закрывается
+    // (зависший вызов обрывается), очередь свободна для другого вызывающего; notify('error') один раз.
+    const { HANG, BudgetExceeded } = require('../supervise.js');
+    HANG.graceMs = 300;
+    await ctx.route('https://hang.test/**', (r) => r.fulfill({ contentType: 'text/html',
+      body: '<button>Like</button><script>setTimeout(() => { for (;;) {} }, 300)</script>' }));
+    fs.writeFileSync(sitesFile, JSON.stringify({ [SITE]: { perDay: 5 }, 'hang.test': { perDay: 5 } }));
+    notes.length = 0;
+    const base = ctx.pages().length;
+    const hung = ms.task('hung', async ({ see, act }) => {
+      await act({ cmd: 'goto', url: 'https://hang.test/' });
+      await new Promise((r) => setTimeout(r, 700)); // скрипт страницы уже крутит цикл
+      await see();
+    }, { site: 'hang.test', maxMinutes: 0.05 });
+    hung.catch(() => {});
+    const t0 = Date.now();
+    const other = await realLock(path.join(state, 'queue.lock'), { pollMs: 20, timeoutMs: 20000 }); // другой вызывающий
+    other();
+    assert.ok(Date.now() - t0 < 15000, 'очередь освободилась только по сроку ожидания');
+    await assert.rejects(hung, (e) => e instanceof BudgetExceeded && /не закончилась/.test(e.message), 'зависшая задача кончается BudgetExceeded');
+    await settle();
+    assert.equal(ctx.pages().length, base, 'окно зависшей задачи закрыто');
+    assert.equal(notes.filter((n) => n.event === 'error').length, 1, JSON.stringify(notes));
+    assert.match(notes.find((n) => n.event === 'error').text, /hung.*не закончилась/);
+    HANG.graceMs = 15 * 60e3;
+    assert.equal(await ms.task('t3', async () => 'ok', { site: SITE }), 'ok', 'после зависшей задачи браузер работает');
     await ms.close();
   } finally { await ctx.close(); }
 

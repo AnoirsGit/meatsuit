@@ -16,6 +16,11 @@ const { check: guardCheck, NeedsHuman, CODE_LOGIN_MAX_COMMANDS } = require('./gu
 
 class BudgetExceeded extends Error {}
 
+// Сторож задачи (index.js): сколько ждать сверх maxMinutes, прежде чем считать задачу зависшей. Срок проверяется
+// перед каждой командой, а начатая команда не обрывается: самая долгая — fill на 2000 знаков, до ~13 минут печати.
+// Объект, а не число: тест укорачивает запас, не трогая список экспорта ядра.
+const HANG = { graceMs: 15 * 60e3 };
+
 // В уведомление уходит адрес без query и hash: там бывают токены входа и коды подтверждения.
 const publicUrl = (url) => { try { const u = new URL(url); return u.origin + u.pathname; } catch { return 'неизвестный адрес'; } };
 
@@ -75,4 +80,4 @@ function supervise(h, { name, site, extraHosts = [], notify, maxCommands, maxMin
   return { api, state };
 }
 
-module.exports = { supervise, BudgetExceeded };
+module.exports = { supervise, BudgetExceeded, HANG };
