@@ -20,7 +20,7 @@ const { NeedsHuman, check: guardCheck, codeLoginRule } = require('./guard.js');
 const eyes = require('./eyes.js');
 const { telegramNotifier, createTelegram, findChats, TelegramError } = require('./telegram.js');
 const { openWindow } = require('./window.js');
-const { supervise, BudgetExceeded } = require('./supervise.js');
+const { supervise, BudgetExceeded, HANG } = require('./supervise.js');
 const { signature, normalizeName, urlPattern } = require('./capture.js');
 const { ruleFor, reserve, charge, peek: peekLimit, status: limitStatus, lock, LimitReached } = require('./limits.js');
 const { loadPersona } = require('./human/persona-file.js');
@@ -105,10 +105,11 @@ async function connect({
   // singleTab: ищем уже открытую вкладку площадки (по хосту); нет её — undefined, окно откроет task() после reserve.
   // Вкладку могли закрыть прямо перед задачей (человек в зеркале, другой клиент CDP): подключение узнаёт об этом
   // событием чуть позже и ещё отдаёт её в pages(). Такую пропускаем, а не падаем «Target page … closed».
-  async function siteTab(site, codeLogin) {
+  async function siteTab(site, codeLogin, onExamine = () => {}) {
     const onSite = (u) => hostOn(u, site);
     for (const found of browser.contexts()[0].pages()) {
       if (found.isClosed() || !onSite(found.url())) continue;
+      onExamine(found); // сторож задачи закроет её, если снимок повиснет
       // Снимок без команд: на вкладке может быть капча, которую решает человек (оставлена прошлой задачей,
       // в том числе другим процессом), её не трогаем.
       let snap;
@@ -148,13 +149,35 @@ async function connect({
       if (e instanceof LimitReached) await emit('limit', `meatsuit: «${name}» не запущена: ${e.message}`);
       throw e;
     }
+    let released = false;
+    const unlock = () => { if (!released) { released = true; release(); } };
     let page;
+    let examined = null; // вкладка площадки, которую siteTab снимает до того, как она станет окном задачи
     let opened = false; // окно открыла эта задача
     let onPopup;
     let run; // присмотр за задачей: стоп, бюджет, конец
+    let hung = null; // сработал сторож: BudgetExceeded «задача не закончилась»
     const started = Date.now();
+    // Сторож. maxMinutes проверяется перед каждой командой, но зависшая страница (бесконечный цикл в её скрипте:
+    // CDP не отвечает) или зависшее ожидание в коде вызывающего держали бы задачу — и очередь всех вызывающих —
+    // вечно, замок при этом обновлялся бы. Через maxMinutes + HANG.graceMs задача кончается: окно закрывается
+    // (зависшие вызовы на странице обрываются; после NeedsHuman окно остаётся человеку), следующие see/act бросают,
+    // очередь свободна. Начатая длинная команда (fill до ~13 минут) в запас укладывается.
+    const hangMs = Number.isFinite(maxMinutes) && maxMinutes > 0 ? maxMinutes * 60e3 + HANG.graceMs : null;
+    const watchdog = hangMs && setTimeout(() => {
+      const keep = !!(run && run.state.stopped);
+      const took = hangMs >= 60e3 ? `${Math.round(hangMs / 60e3)} мин` : `${Math.round(hangMs / 1000)} с`;
+      hung = new BudgetExceeded(`${name}: задача не закончилась за ${took} (страница или код вызывающего не отвечает), ${keep ? 'окно оставлено человеку' : 'окно закрыто'}`);
+      if (run) run.state.finish();
+      const p = page || examined;
+      if (p && !keep) p.close().catch(() => {});
+      unlock();
+      emit('error', `meatsuit: «${name}» на ${site} зависла: ${hung.message}`);
+    }, hangMs);
+    if (watchdog) watchdog.unref();
     try {
-      const found = rule && rule.singleTab ? await siteTab(site, codeLogin) : null; // до reserve: сбой поиска не тратит слот
+      const found = rule && rule.singleTab ? await siteTab(site, codeLogin, (p) => { examined = p; }) : null; // до reserve: сбой поиска не тратит слот
+      if (hung) throw hung;
       const limitsFile = path.join(dir, 'limits.json');
       const slot = new Date();
       try { (dryRun ? peekLimit : reserve)(site, rule, limitsFile, slot, { readOnly }); } // репетиция квоту не тратит
@@ -164,6 +187,7 @@ async function connect({
       }
       page = found || await openWindow(browser);
       opened = !found;
+      if (hung) throw hung;
       botPages.add(page);
       onPopup = (p) => { botPages.add(p); p.close().catch(() => {}); }; // новые вкладки бот не ведёт
       page.on('popup', onPopup);
@@ -171,11 +195,14 @@ async function connect({
       run = supervise(h, { name, site, extraHosts, notify: (t) => emit('needsHuman', t), maxCommands, maxMinutes, codeLogin,
         onWrite: readOnly && !dryRun ? () => charge(site, rule, limitsFile, slot) : null }); // read-only задача записала: полный слот задним числом
       await emit('start', `meatsuit: «${name}» на ${site} запущена${dryRun ? ' (dryRun)' : ''}`);
+      if (hung) throw hung;
       const result = await fn(run.api);
+      if (hung) throw hung; // код вызывающего вернулся уже после сторожа
       if (run.state.stopped) throw run.state.stopped; // проект проглотил NeedsHuman и вернулся как ни в чём не бывало
       await emit('done', `meatsuit: «${name}» на ${site} завершена за ${Math.round((Date.now() - started) / 1000)} с, команд: ${run.state.commands}`);
       return result;
     } catch (err) {
+      if (hung) throw hung; // сторож уже сообщил; зависший вызов оборвался закрытием окна — причина в зависании
       // NeedsHuman уже отправлен из supervise; остальное (бюджет, сбой в проекте) сообщаем здесь.
       if (err instanceof NeedsHuman && !run) await emit('needsHuman', `meatsuit: «${name}» на ${site} остановлен: ${err.message}`); // при взятии вкладки supervise ещё не создан
       if (!(err instanceof NeedsHuman) && !(err instanceof LimitReached)) {
@@ -183,13 +210,14 @@ async function connect({
       }
       throw err;
     } finally {
+      clearTimeout(watchdog);
       if (run) run.state.finish();
       if (page && rule && rule.singleTab) { // вкладка площадки живёт дальше: убираем только свои следы
         page.off('popup', onPopup);
         botPages.delete(page);
         if (opened && !(run && run.state.stopped) && !hostOn(page.url(), site)) await page.close().catch(() => {}); // задача упала до goto: пустое окно не копим
       } else if (page && !(run && run.state.stopped)) await page.close().catch(() => {});
-      release();
+      unlock();
     }
   }
 
