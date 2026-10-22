@@ -17,11 +17,12 @@ const MULTI = 'multi.test';
 const CAP = 'cap.test';
 const HIDE = 'hide.test';
 const FRESH = 'fresh.test';
+const GONE = 'gone.test';
 
 (async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meatsuit-single-'));
   const sitesFile = path.join(tmp, 'sites.json');
-  fs.writeFileSync(sitesFile, JSON.stringify({ [SINGLE]: { perDay: 100, singleTab: true }, [MULTI]: { perDay: 100 }, [CAP]: { perDay: 100, singleTab: true }, [HIDE]: { perDay: 1, singleTab: true }, [FRESH]: { perDay: 1, singleTab: true } }));
+  fs.writeFileSync(sitesFile, JSON.stringify({ [SINGLE]: { perDay: 100, singleTab: true }, [MULTI]: { perDay: 100 }, [CAP]: { perDay: 100, singleTab: true }, [HIDE]: { perDay: 1, singleTab: true }, [FRESH]: { perDay: 1, singleTab: true }, [GONE]: { perDay: 1, singleTab: true } }));
 
   const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), {
     headless: true, args: [`--remote-debugging-port=${PORT}`],
@@ -131,6 +132,31 @@ const FRESH = 'fresh.test';
   await ms3.task('f2', async ({ see }) => { await see(); ranFresh = true; }, { site: FRESH });
   assert.equal(ranFresh, true, 'после решения капчи задача идёт: слот не был потрачен');
   await ms3.close();
+
+  // Дыра 5: вкладку площадки закрыли прямо перед задачей (человек в зеркале или другой клиент CDP). Подключение
+  // узнаёт об этом событием чуть позже и ещё отдаёт её в pages(): задача не должна падать «Target page … closed»,
+  // а должна пропустить закрытую вкладку и открыть свою (perDay: 1 — слот тратится один раз).
+  const tab = await ctx.newPage();
+  await tab.goto(`https://${GONE}/app`);
+  let pg;
+  chromium.connectOverCDP = async (u) => { pg = await orig.call(chromium, u); return pg; };
+  const ms4 = await connect({ cdpUrl: `http://127.0.0.1:${PORT}`, dir: path.join(tmp, 'state4'), sitesFile });
+  chromium.connectOverCDP = orig;
+  const stale = pg.contexts()[0].pages().find((q) => q.url().includes(GONE));
+  assert.ok(stale, 'подключение видит вкладку площадки');
+  await tab.close();
+  for (let i = 0; i < 50 && !stale.isClosed(); i++) await settle();
+  const realPages = pg.contexts()[0].pages.bind(pg.contexts()[0]);
+  stale.isClosed = () => false; // событие о закрытии ещё не дошло
+  pg.contexts()[0].pages = () => [stale, ...realPages()];
+  const url5 = await ms4.task('g1', async ({ act }) => (await act({ cmd: 'goto', url: `https://${GONE}/app` })).url, { site: GONE });
+  assert.equal(url5, `https://${GONE}/app`);
+  delete pg.contexts()[0].pages;
+  await settle();
+  const own5 = ctx.pages().filter((q) => q.url().includes(GONE));
+  assert.equal(own5.length, 1, 'открыта одна своя вкладка площадки');
+  await own5[0].close();
+  await ms4.close();
 
   await ms.close();
   await ctx.close();

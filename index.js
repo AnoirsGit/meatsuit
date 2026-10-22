@@ -67,6 +67,10 @@ function codeLoginFor(sites, site, optIn) {
   return codeLoginRule(own.codeLogin);
 }
 
+// Так Playwright отвечает про вкладку, которой уже нет: «Target page, context or browser has been closed»,
+// «…: page: no object with guid …» (подключение уже забыло вкладку), «Target closed», «Session closed».
+const CLOSED_PAGE = /has been closed|no object with guid|Target closed|Session closed/i;
+
 const isHost = (h) => typeof h === 'string' && /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i.test(h);
 
 async function connect({
@@ -99,13 +103,17 @@ async function connect({
   const hostOn = (u, site) => { try { const h = new URL(u).hostname; return h === site || h.endsWith('.' + site); } catch { return false; } };
 
   // singleTab: ищем уже открытую вкладку площадки (по хосту); нет её — undefined, окно откроет task() после reserve.
+  // Вкладку могли закрыть прямо перед задачей (человек в зеркале, другой клиент CDP): подключение узнаёт об этом
+  // событием чуть позже и ещё отдаёт её в pages(). Такую пропускаем, а не падаем «Target page … closed».
   async function siteTab(site, codeLogin) {
     const onSite = (u) => hostOn(u, site);
-    const found = browser.contexts()[0].pages().find((p) => onSite(p.url()));
-    if (found) {
+    for (const found of browser.contexts()[0].pages()) {
+      if (found.isClosed() || !onSite(found.url())) continue;
       // Снимок без команд: на вкладке может быть капча, которую решает человек (оставлена прошлой задачей,
       // в том числе другим процессом), её не трогаем.
-      const snap = await eyes.see(found);
+      let snap;
+      try { snap = await eyes.see(found); }
+      catch (e) { if (found.isClosed() || CLOSED_PAGE.test(e.message)) continue; throw e; }
       const reason = guardCheck(snap, codeLogin ? { codeLogin: { site, path: codeLogin.path } } : {});
       if (reason) throw new NeedsHuman(reason, snap.url);
       return found;
