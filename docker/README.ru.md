@@ -86,8 +86,10 @@ docker/up.sh
 1. Поднять exit node дома ([egress.md](../docs/egress.md#recommended-setup)).
 2. В файл деплоя: `MEATSUIT_EGRESS=tailscale` и `TS_EXTRA_ARGS="--exit-node=<домашний узел> --exit-node-allow-lan-access=true"` — в двойных кавычках (там пробел); без доступа к LAN зеркало не открывается. `TS_AUTHKEY` (одноразовый ключ) можно не задавать: ссылка для входа будет в `docker/up.sh logs tailscale`.
 3. `docker/up.sh`. Браузер ждёт, пока Tailscale войдёт и exit node будет в сети.
-4. В зеркале открыть `https://ipinfo.io`: должно быть ваше домашнее подключение.
+4. В зеркале открыть `https://ipinfo.io`: должно быть ваше домашнее подключение. В файле деплоя поставить `MEATSUIT_TZ` — пояс этой страны: `UTC` по умолчанию годится только для локального запуска, а сайт может сверить пояс браузера с адресом. У вызывающих `TZ` — тот же пояс (по нему считаются `hours` их `sites.json`).
 5. По желанию — несколько exit node: с `MEATSUIT_EXIT_NODES=home-phone,anoir-pc` контейнер Tailscale сам переходит на следующий, когда первый не в сети, а `MEATSUIT_EXIT_COUNTRY` / `MEATSUIT_EXIT_ASN` заставляют его проверить выход, прежде чем браузер получит сеть ([egress.md](../docs/egress.md#fallback-order), шаги для телефона — [ru/09-phone-exit-node.md](../docs/ru/09-phone-exit-node.md)).
+
+Имена — для админки и ACL: контейнер выхода — `meatsuit-tailscale-1` (проект compose `meatsuit`, сервис `tailscale`); в tailnet это машина с именем из `TS_HOSTNAME` (по умолчанию `meatsuit`). Своего имени в tailnet у контейнера браузера нет: он живёт под этим.
 
 **Не включайте exit node на самом хосте через SSH по его публичному адресу**: сессия повиснет ([egress.md](../docs/egress.md#ssh-safety-warning)). С 8 октября 2026 работает на сервере владельца в версии ветки `ms-trunk` (один exit node, без выбора по списку; см. ниже), выключатель при выключенном exit node проверен там же.
 
