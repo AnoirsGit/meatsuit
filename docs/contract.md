@@ -277,7 +277,9 @@ one process, the last one sets the human. The file lives outside the repository 
   `valueLength`, `labelLength`); for `upload` only the file type (`fileType: 'pdf'`), without the path or name.
   Addresses (`cmd.url`, `url`, `urlAfter`) are stored without query and hash: those can carry sign-in tokens, codes
   and typed searches. An error is the first line of the message, with the command's text and address removed. Other
-  command fields are not written.
+  command fields are not written. A journal line that cannot be written (no permission on the file in the shared `dir`,
+  a full disk) does not fail the command: the line is lost and the reason goes to stderr, so a click that happened is
+  never reported as failed.
 - Recording (`recordDir`) and the archive (`capture`) are different: they hold whole snapshots and commands, field
   text included.
 - `hands(page, { recordDir })` writes snapshots to `NNNN.json`; `replay(recordDir)` gives the same `{ see, act }`
