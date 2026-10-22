@@ -172,8 +172,13 @@ function hands(page, opts = {}) {
   let gens = 0; // поколения снимков: монотонно за всё время жизни hands
   let chain = Promise.resolve(); // команды и снимки идут строго по очереди
 
+  // Журнал не должен ронять команду: строка пишется уже после действия, и брошенная здесь ошибка выдала бы
+  // выполненный клик за упавший (вызывающий повторил бы отправку), а в catch подменила бы ошибку самой команды.
+  // Сбой записи (нет прав на файл в общем dir, диск полон) — только в stderr, как у архива.
   const log = (entry) => {
-    if (logFile) fs.appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), dryRun, ...entry }) + '\n');
+    if (!logFile) return;
+    try { fs.appendFileSync(logFile, JSON.stringify({ ts: new Date().toISOString(), dryRun, ...entry }) + '\n'); }
+    catch (e) { console.error('meatsuit: журнал не записан:', e.message); }
   };
 
   const record = (cmd, snapshot) => {

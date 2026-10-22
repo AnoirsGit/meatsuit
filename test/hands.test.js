@@ -256,6 +256,29 @@ const rejects = (c, hosts) => assert.throws(() => validate(c, hosts), BadCommand
   assert.ok(lines.some((l) => l.result === 'ok' && l.cmd.cmd === 'fill'));
   assert.ok(lines.every((l) => l.ts && l.url));
 
+  // Журнал не пишется (нет прав на файл в общем dir, диск полон): команда, которая уже выполнилась, не должна
+  // выглядеть упавшей — вызывающий повторил бы её (второе сообщение, второй отклик). Ошибка команды остаётся своей,
+  // а сбой журнала уходит в stderr.
+  {
+    await page.setContent(HTML);
+    const brokenLog = path.join(dir, 'log-is-a-dir');
+    fs.mkdirSync(brokenLog); // каталог вместо файла: appendFileSync бросает EISDIR
+    const errs = [];
+    const origErr = console.error;
+    console.error = (...a) => errs.push(a.join(' '));
+    try {
+      const hb = hands(page, { logFile: brokenLog });
+      const b0 = await hb.see();
+      const rb = await hb.act({ cmd: 'click', id: b0.elements.find((e) => e.name === 'Like').id, gen: b0.gen });
+      assert.ok(rb.removed.some((e) => e.name === 'Like'), 'клик выполнен, а act упал на журнале');
+      await assert.rejects(hb.act({ cmd: 'click', id: 1, gen: b0.gen }), StaleElement, 'ошибку команды подменил сбой журнала');
+      const hd = hands(page, { dryRun: true, logFile: brokenLog });
+      const d1 = await hd.see();
+      assert.deepEqual(await hd.act({ cmd: 'click', id: d1.elements[0].id, gen: d1.gen }), { dryRun: true, changed: false });
+    } finally { console.error = origErr; }
+    assert.ok(errs.some((m) => /журнал/.test(m)), 'сбой журнала должен уйти в stderr');
+  }
+
   await browser.close();
 
   // Воспроизведение: тот же интерфейс, без браузера.
