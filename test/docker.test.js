@@ -194,3 +194,57 @@ test('up.sh на подставном docker: --env-file с путём из MEAT
   assert.equal(up(eg, [], { ...env, MEATSUIT_EGRESS: 'off' }).status, 0, 'окружение главнее файла, как у compose');
   assert.deepEqual(args(), ['compose', '--env-file', eg, '-f', compose, 'up', '-d']);
 });
+
+// Соседи браузера (network_mode: "container:meatsuit-browser" в чужих проектах) держатся за id контейнера: compose
+// записывает в NetworkMode «container:<id>». Пересоздали браузер — они живут в сети старого контейнера, то есть без
+// сети, пока их не пересоздать. up.sh после up называет их и печатает команду, но чужие проекты сам не трогает.
+test('up.sh после up, пересоздавшего браузер: соседи в сети старого контейнера и команда для каждого', (t) => {
+  const bin = tmpdir(t);
+  const st = (f) => path.join(bin, f);
+  fs.writeFileSync(st('docker'), `#!/bin/sh
+case "$1" in
+  inspect)
+    if [ "$3" = '{{.Id}}' ]; then [ "$4" = meatsuit-browser ] && cat "${st('id')}"; exit 0; fi
+    printf '%s\\n' "$@" > "${st('inspect-args')}"; cat "${st('neighbours')}" ;;
+  ps) printf 'c1\\nc2\\nc3\\nc4\\nc5\\n' ;;
+  compose) printf '%s\\n' "$@" > "${st('compose-args')}"; if [ -f "${st('next-id')}" ]; then cp "${st('next-id')}" "${st('id')}"; fi ;;
+esac
+exit 0
+`, { mode: 0o755 });
+  const env = { PATH: `${bin}:${process.env.PATH}` };
+  const OLD = 'a'.repeat(64), NEW = 'b'.repeat(64);
+  fs.writeFileSync(st('neighbours'), [
+    `/jobs-apply|container:${OLD}|jobs|apply|/srv/jobs|/srv/jobs/docker-compose.yml,/srv/jobs/docker-compose.browser.yml|`,
+    `/tm-matcher-run-1f2e|container:${OLD}|tm|matcher|/srv/tm/deploy|/srv/tm/deploy/docker-compose.yml|True`,
+    `/plain|container:${OLD}|||||`,
+    `/other-sidecar|container:${'c'.repeat(64)}|x|y|/srv/x|/srv/x/c.yml|`,
+    '/meatsuit-tailscale-1|default|meatsuit|tailscale|/srv/meatsuit/docker|/srv/meatsuit/docker/docker-compose.yml|',
+  ].join('\n') + '\n');
+  const file = envFile(t);
+
+  // Браузер пересоздан: id сменился.
+  fs.writeFileSync(st('id'), `${OLD}\n`);
+  fs.writeFileSync(st('next-id'), `${NEW}\n`);
+  let r = up(file, ['up', '-d', '--force-recreate'], env);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(fs.readFileSync(st('compose-args'), 'utf8').trimEnd().split('\n').slice(-3), ['up', '-d', '--force-recreate']);
+  assert.match(r.stderr, /остались без сети/);
+  assert.match(r.stderr, /^ {2}jobs-apply: cd \/srv\/jobs && docker compose -p jobs -f \/srv\/jobs\/docker-compose\.yml -f \/srv\/jobs\/docker-compose\.browser\.yml up -d --force-recreate apply$/m);
+  assert.match(r.stderr, /^ {2}tm-matcher-run-1f2e: разовый запуск \(compose run\)/m);
+  assert.match(r.stderr, /^ {2}plain: не из compose/m);
+  assert.doesNotMatch(r.stderr, /other-sidecar|meatsuit-tailscale-1/, 'чужие соседи и сам стек не в списке');
+  assert.deepEqual(fs.readFileSync(st('inspect-args'), 'utf8').trimEnd().split('\n').slice(-5), ['c1', 'c2', 'c3', 'c4', 'c5'], 'смотрит и остановленные (ps -a)');
+
+  // Браузер тот же (up без пересоздания): ничего не печатает.
+  fs.rmSync(st('next-id'));
+  r = up(file, ['up', '-d'], env);
+  assert.equal(r.status, 0);
+  assert.equal(r.stderr, '');
+
+  // Браузера до up не было (первый запуск): сравнивать не с чем, тишина.
+  fs.writeFileSync(st('id'), '');
+  fs.writeFileSync(st('next-id'), `${NEW}\n`);
+  r = up(file, [], env);
+  assert.equal(r.status, 0);
+  assert.equal(r.stderr, '');
+});

@@ -84,6 +84,8 @@ volumes:
     external: true
 ```
 
+Re-creating the browser (`docker/up.sh up -d --force-recreate`, a new image, the Tailscale container re-created) gives `meatsuit-browser` a new container id, but the callers' containers stay joined to the old one: compose stores `container:<id>` in their network mode, so they have no network until they are re-created. After an `up` that re-created the browser, `docker/up.sh` lists them on stderr with the command for each (`cd <dir> && docker compose -p <project> -f <files> up -d --force-recreate <service>`); it never touches other projects itself. One-off `docker compose run` containers (a cron run) take the new network on their next run.
+
 All callers of one browser must pass the same `dir` to `connect()`: the queue lock lives there, and with different locks two bots would enter the browser at once. `peek(site, { sitesFile, dir })` from the library reads what is left of a site's limits without spending a slot ([contract.md](../docs/contract.md)).
 
 The container's host name is fixed too (`meatsuit-browser`): Chromium's profile lock remembers the host name, and after a re-create under a new name the browser would open a "profile in use on another computer" window. With the Tailscale overlay the browser shares the Tailscale container's network and host name instead (Docker allows no own host name there), which is just as stable.
