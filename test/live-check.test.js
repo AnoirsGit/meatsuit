@@ -10,10 +10,10 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { chromium } = require('playwright-core');
+const { cdpPort } = require('./cdp-port.js');
 const { parseArgs, run, pages } = require('../tools/live-check.js');
 
-const PORT = 9338;
-const CDP = `http://127.0.0.1:${PORT}`;
+let CDP = 'http://127.0.0.1:9222'; // для разбора аргументов; настоящий адрес — после запуска браузера
 
 (async () => {
   // Аргументы: обязательные --cdp и --dir, хост без схемы, путь входа с /; из командной строки — код 2.
@@ -28,7 +28,9 @@ const CDP = `http://127.0.0.1:${PORT}`;
   assert.match(cli.stderr, /нужен --cdp/);
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meatsuit-live-'));
-  const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), { headless: true, args: [`--remote-debugging-port=${PORT}`] });
+  const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), { headless: true, args: ['--remote-debugging-port=0'] });
+  const PORT = await cdpPort(path.join(tmp, 'profile'));
+  CDP = `http://127.0.0.1:${PORT}`;
   try {
     const login = '<title>Sign in</title><form><input type="password" aria-label="Password"></form>';
     await ctx.route('https://example.com/**', (r) => {

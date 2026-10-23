@@ -10,10 +10,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require('playwright-core');
+const { cdpPort } = require('./cdp-port.js');
 const { supervise, BudgetExceeded } = require('../supervise.js');
 const { codeLoginRule, NeedsHuman, CODE_LOGIN_MAX_COMMANDS } = require('../guard.js');
 
-const PORT = 9352;
 const CODE = '482913';
 
 (async () => {
@@ -86,7 +86,8 @@ const CODE = '482913';
     'bad.test': { perDay: 100, codeLogin: { path: 'account/login' } },
     '*': { perDay: 100, codeLogin: declared }, // из "*" codeLogin не берётся
   }));
-  const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), { headless: true, args: [`--remote-debugging-port=${PORT}`] });
+  const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), { headless: true, args: ['--remote-debugging-port=0'] });
+  const PORT = await cdpPort(path.join(tmp, 'profile'));
   const { connect } = require('../index.js');
   let ms;
   try {

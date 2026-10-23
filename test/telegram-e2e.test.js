@@ -11,9 +11,9 @@ const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require('playwright-core');
+const { cdpPort } = require('./cdp-port.js');
 const { connect, createTelegram, NeedsHuman, LimitReached } = require('../index.js');
 
-const PORT = 9335;
 const TOKEN = '777:E2E-secret';
 const GROUP = -1002233;
 const THREAD = 5;
@@ -36,7 +36,8 @@ const THREAD = 5;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meatsuit-tg-'));
   const sitesFile = path.join(tmp, 'sites.json');
   fs.writeFileSync(sitesFile, JSON.stringify({ 'example.test': { perDay: 100 }, 'closed.test': { perDay: 0 } }));
-  const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), { headless: true, args: [`--remote-debugging-port=${PORT}`] });
+  const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), { headless: true, args: ['--remote-debugging-port=0'] });
+  const PORT = await cdpPort(path.join(tmp, 'profile'));
   let html = '<button>Like</button>';
   ctx.on('page', (p) => { p.setContent(html).catch(() => {}); });
 

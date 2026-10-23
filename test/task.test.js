@@ -9,9 +9,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require('playwright-core');
+const { cdpPort } = require('./cdp-port.js');
 const { connect, NeedsHuman, LimitReached, BudgetExceeded } = require('../index.js');
 
-const PORT = 9333;
 const SITE = 'example.test';
 const OK = '<button onclick="document.title=\'clicked\'">Like</button>';
 const CAPTCHA = '<p>Verify you are human</p>';
@@ -23,8 +23,9 @@ const CAPTCHA = '<p>Verify you are human</p>';
 
   // «Мой браузер»: с профилем и портом отладки. Мою вкладку бот трогать не должен.
   const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), {
-    headless: true, args: [`--remote-debugging-port=${PORT}`],
+    headless: true, args: ['--remote-debugging-port=0'],
   });
+  const PORT = await cdpPort(path.join(tmp, 'profile'));
   const mine = ctx.pages()[0] || (await ctx.newPage());
   await mine.setContent('<title>моя вкладка</title>');
 

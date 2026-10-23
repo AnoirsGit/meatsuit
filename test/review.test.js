@@ -9,11 +9,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require('playwright-core');
+const { cdpPort } = require('./cdp-port.js');
 const { hands, BadCommand, StaleElement, connect, NeedsHuman } = require('../index.js');
 const { validate } = require('../hands.js');
 const { check } = require('../guard.js');
 
-const PORT = 9334;
 const PAGES = {
   'https://example.test/a': '<a href="https://example.test/b">Next page</a><button>Apply 1</button>',
   'https://example.test/b': '<button>Delete account</button><button>Two</button>',
@@ -41,7 +41,8 @@ const PAGES = {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meatsuit-rev-'));
   const sitesFile = path.join(tmp, 'sites.json');
   fs.writeFileSync(sitesFile, JSON.stringify({ 'example.test': { perDay: 100 } }));
-  const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), { headless: true, args: [`--remote-debugging-port=${PORT}`] });
+  const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), { headless: true, args: ['--remote-debugging-port=0'] });
+  const PORT = await cdpPort(path.join(tmp, 'profile'));
   await ctx.route('**/*', (r) => {
     const body = PAGES[r.request().url().replace(/\?.*$/, '')];
     return body ? r.fulfill({ contentType: 'text/html', body }) : r.fulfill({ status: 404, body: 'no' });

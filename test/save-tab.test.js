@@ -9,9 +9,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require('playwright-core');
+const { cdpPort } = require('./cdp-port.js');
 const { saveTabs, sanitizeFiles } = require('../tools/save-tab.js');
 
-const PORT = 9336;
 const PAGES = {
   'https://example.test/app/matches': '<a href="/app/messages/abc123">Анна</a><a href="/app/messages/def456">Белла</a><script>window.T="СЕКРЕТ-СКРИПТ"</script><input type="email" value="me@example.com">',
   'https://example.test/app/messages/abc123': '<textarea placeholder="Type a message"></textarea><button>Send</button>',
@@ -20,7 +20,8 @@ const PAGES = {
 
 (async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meatsuit-save-'));
-  const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), { headless: true, args: [`--remote-debugging-port=${PORT}`] });
+  const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), { headless: true, args: ['--remote-debugging-port=0'] });
+  const PORT = await cdpPort(path.join(tmp, 'profile'));
   await ctx.route('**/*', (r) => {
     const body = PAGES[r.request().url().replace(/\?.*$/, '')];
     return body ? r.fulfill({ contentType: 'text/html', body }) : r.fulfill({ status: 404, body: 'no' });

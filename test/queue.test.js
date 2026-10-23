@@ -16,8 +16,8 @@ const realLock = limits.lock;
 limits.lock = (file, o = {}) => realLock(file, { ...o, timeoutMs: 300, pollMs: 20 });
 const { connect, LimitReached } = require('../index.js');
 const { chromium } = require('playwright-core');
+const { cdpPort } = require('./cdp-port.js');
 
-const PORT = 9341;
 const SITE = 'example.test';
 const settle = () => new Promise((r) => setTimeout(r, 300));
 
@@ -50,7 +50,8 @@ const settle = () => new Promise((r) => setTimeout(r, 300));
   // task(): браузер занят другим вызывающим — LimitReached до окна и до слота, notify('limit'); освободился — идёт.
   const sitesFile = path.join(tmp, 'sites.json');
   fs.writeFileSync(sitesFile, JSON.stringify({ [SITE]: { perDay: 5 } }));
-  const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), { headless: true, args: [`--remote-debugging-port=${PORT}`] });
+  const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), { headless: true, args: ['--remote-debugging-port=0'] });
+  const PORT = await cdpPort(path.join(tmp, 'profile'));
   try {
     const state = path.join(tmp, 'state');
     const notes = [];

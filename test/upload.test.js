@@ -10,10 +10,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require('playwright-core');
+const { cdpPort } = require('./cdp-port.js');
 const { connect, hands, BadCommand } = require('../index.js');
 const { validate } = require('../hands.js');
 
-const PORT = 9351;
 const SHOW = (n) => `document.getElementById('n${n}').textContent = [...this.files].map((f) => f.name + ':' + f.size + ':' + f.type).join('|')`;
 const FORM = `<body style="margin:0;font:16px sans-serif">
   <div><input type="file" id="f1" aria-label="Резюме" accept=".pdf,.doc,.docx" onchange="${SHOW(1)}"> <span id="n1"></span></div>
@@ -66,7 +66,8 @@ const byName = (s, name, inputType) => s.elements.find((e) => e.name === name &&
   validate(up(cv), [], { uploadDirs });
   validate(up(path.join(docs, 'CV.PDF')), [], { uploadDirs }); // расширение без учёта регистра
 
-  const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), { headless: true, args: [`--remote-debugging-port=${PORT}`] });
+  const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), { headless: true, args: ['--remote-debugging-port=0'] });
+  const PORT = await cdpPort(path.join(tmp, 'profile'));
   await ctx.route('https://form.test/**', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: FORM }));
   const page = await ctx.newPage();
   await page.setViewportSize({ width: 900, height: 700 });
