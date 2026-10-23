@@ -52,11 +52,14 @@ function supervise(h, { name, site, extraHosts = [], notify, maxCommands, maxMin
   const state = { stopped: null, finished: false, commands: 0, maxCommands, maxMinutes, finish() { state.finished = true; } };
   const deadline = Date.now() + maxMinutes * 60e3;
 
-  const stopIfNeeded = async (snap) => {
+  // before: стоп из проверки до команды — команда не выполнялась (у NeedsHuman поле before: true). Без него стоп из
+  // act() — про страницу после команды: команда выполнилась (сообщение могло уйти, форма — отправиться).
+  const stopIfNeeded = async (snap, { before = false } = {}) => {
     let reason = guardCheck(snap, guardOpts);
     if (!reason && !onSite(snap.url, hosts)) reason = `страница вне площадки ${site}`;
     if (!reason) return;
     state.stopped = new NeedsHuman(reason, snap.url);
+    if (before) state.stopped.before = true;
     try { await notify(`meatsuit: «${name}» на ${site} остановлен: ${reason}. ${publicUrl(snap.url)}`); }
     catch (e) { console.error('meatsuit: не удалось отправить уведомление:', e.message); }
     throw state.stopped;
@@ -76,7 +79,7 @@ function supervise(h, { name, site, extraHosts = [], notify, maxCommands, maxMin
       // Guard до команды: капча, блок, вход или чужой хост могли появиться, пока вызывающий думал после see(), и не
       // накрыть цель (проверка точки под курсором её не видит). Тогда стоп до нажатия, а не после (ревью скрытности
       // 20.10, как у сервиса из extras/). Свежий снимок не меняет id и gen вызывающего.
-      if (TOUCHES.has(c && c.cmd) && h.probe) await stopIfNeeded(await h.probe());
+      if (TOUCHES.has(c && c.cmd) && h.probe) await stopIfNeeded(await h.probe(), { before: true });
       if (onWrite && isWrite(c, els)) { const f = onWrite; onWrite = null; f(); } // до команды и один раз: слот один, дневной лимит может остановить запись
       const r = await h.act(c);
       if (!r.dryRun && r.elements) els = r;

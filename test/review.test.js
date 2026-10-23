@@ -108,7 +108,7 @@ const PAGES = {
     await act({ cmd: 'goto', url: 'https://example.test/out' });
     const s = await see();
     await act({ cmd: 'click', id: s.elements[0].id, gen: s.gen });
-  }, { site: 'example.test' }), (e) => e instanceof NeedsHuman && /вне площадки/.test(e.reason));
+  }, { site: 'example.test' }), (e) => e instanceof NeedsHuman && /вне площадки/.test(e.reason) && !e.before, 'стоп после клика — без before: клик был');
   assert.equal(notes.length, 1);
   assert.ok(!/SECRET|token=|frag/.test(notes[0]), 'в уведомление не должны попадать query и hash: ' + notes[0]);
   assert.match(notes[0], /https:\/\/other\.test\/x/);
@@ -124,7 +124,7 @@ const PAGES = {
     assert.equal(s.frames.length, 0, 'капча не должна успеть появиться до see');
     await new Promise((r) => setTimeout(r, 3500)); // модель думает
     await act({ cmd: 'click', id: s.elements.find((e) => e.name === 'Submit').id, gen: s.gen });
-  }, { site: 'example.test' }), (e) => e instanceof NeedsHuman && /капча/.test(e.reason));
+  }, { site: 'example.test' }), (e) => e instanceof NeedsHuman && /капча/.test(e.reason) && e.before === true, 'стоп до команды помечен before: клика не было');
   const lateWin = ctx.pages().find((p) => p.url().includes('/late'));
   assert.equal(await lateWin.evaluate(() => window.submitted === true), false, 'нажата кнопка на странице с капчей');
   await lateWin.close();
