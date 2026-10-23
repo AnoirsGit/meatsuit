@@ -137,7 +137,7 @@ are how many more are allowed (`null` means no limit, `0` means no such site). `
 | Error | When | What the caller should do |
 |---|---|---|
 | `LimitReached` | the site is not in `sites.json` (and there is no `"*"`), `perDay: 0`, outside hours, day or hour limit; the browser stayed busy with another caller's task for 30 minutes (the text names that task and site) | do not start the task, retry later |
-| `NeedsHuman` (`.reason`, `.url`) | a captcha, a sign-in page (except the declared path of a `codeLogin` task), a block, leaving the site's host (and not to `extraHosts`) | stop; the window is open for the human. The state is not cleared until the task ends |
+| `NeedsHuman` (`.reason`, `.url`, `.before`) | a captcha, a sign-in page (except the declared path of a `codeLogin` task), a block, leaving the site's host (and not to `extraHosts`) | stop; the window is open for the human. The state is not cleared until the task ends. From `act()`: with `before: true` the stop came from the check before the command and **the command did not run**; without it the command ran and the stop is about the page after it (a message may be out, a form sent) |
 | `BudgetExceeded` | more than `maxCommands` commands or `maxMinutes` minutes | treat the task as failed |
 | `StaleElement` | `gen` is out of date, the element is gone, something other than the target is under the cursor before the press, focus moved | take a fresh snapshot |
 | `BadCommand` | a command outside the set or with bad fields | a bug in the caller's code or the model |
