@@ -21,6 +21,9 @@ const PAGES = {
   'https://other.test/x': '<p>other</p>',
   'https://example.test/two': '<button onclick="window.n=(window.n||[]);n.push(\'One\')">One</button><button onclick="window.n=(window.n||[]);n.push(\'Two\')">Two</button>',
   'https://example.test/pw': '<input type="password" placeholder="••••" value="s3cret">',
+  // Виджет капчи появляется через 2,5 с после загрузки, под кнопкой, не накрывая её.
+  'https://example.test/late': '<button onclick="window.submitted = true">Submit</button><div id="w"></div><script>setTimeout(() => { const f = document.createElement(\'iframe\'); f.src = \'https://www.google.com/recaptcha/api2/anchor?k=KEY&size=normal\'; f.width = 300; f.height = 80; document.getElementById(\'w\').append(f); }, 2500)</script>',
+  'https://www.google.com/recaptcha/api2/anchor': '<p>I am not a robot</p>',
 };
 
 (async () => {
@@ -111,6 +114,20 @@ const PAGES = {
   const left = count();
   assert.ok(left >= 2, 'окно после стопа остаётся человеку');
   await ctx.pages().find((p) => p.url().includes('other.test'))?.close();
+
+  // Капча появилась, пока вызывающий думал между see и act, и кнопку не накрывает (проверка точки под курсором её не
+  // видит): guard до команды — стоп, клика нет. Бот не должен нажимать на странице с проверкой (ревью скрытности 20.10).
+  await assert.rejects(ms.task('late-captcha', async ({ see, act }) => {
+    await act({ cmd: 'goto', url: 'https://example.test/late' });
+    const s = await see();
+    assert.equal(s.frames.length, 0, 'капча не должна успеть появиться до see');
+    await new Promise((r) => setTimeout(r, 3500)); // модель думает
+    await act({ cmd: 'click', id: s.elements.find((e) => e.name === 'Submit').id, gen: s.gen });
+  }, { site: 'example.test' }), (e) => e instanceof NeedsHuman && /капча/.test(e.reason));
+  const lateWin = ctx.pages().find((p) => p.url().includes('/late'));
+  assert.equal(await lateWin.evaluate(() => window.submitted === true), false, 'нажата кнопка на странице с капчей');
+  await lateWin.close();
+  notes.length = 1; // уведомление о капче не мешает счёту ниже
 
   // extraHosts: страница «спасибо» на другом хосте — не стоп, задача завершается, окно закрывается.
   // goto туда по-прежнему нельзя: extraHosts только разрешает там оказаться.
