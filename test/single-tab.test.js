@@ -9,9 +9,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require('playwright-core');
+const { cdpPort } = require('./cdp-port.js');
 const { connect } = require('../index.js');
 
-const PORT = 9337;
 const SINGLE = 'single.test';
 const MULTI = 'multi.test';
 const CAP = 'cap.test';
@@ -25,8 +25,9 @@ const GONE = 'gone.test';
   fs.writeFileSync(sitesFile, JSON.stringify({ [SINGLE]: { perDay: 100, singleTab: true }, [MULTI]: { perDay: 100 }, [CAP]: { perDay: 100, singleTab: true }, [HIDE]: { perDay: 1, singleTab: true }, [FRESH]: { perDay: 1, singleTab: true }, [GONE]: { perDay: 1, singleTab: true } }));
 
   const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), {
-    headless: true, args: [`--remote-debugging-port=${PORT}`],
+    headless: true, args: ['--remote-debugging-port=0'],
   });
+  const PORT = await cdpPort(path.join(tmp, 'profile'));
   await ctx.route(/\.test\//, (r) => r.fulfill({ contentType: 'text/html', body: r.request().url().includes('/captcha') ? '<p>Please solve the captcha</p>' : '<button>Like</button>' }));
   const mine = ctx.pages()[0] || (await ctx.newPage());
   await mine.goto(`https://${SINGLE}/app`); // «вкладка человека»
