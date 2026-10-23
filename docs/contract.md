@@ -179,7 +179,10 @@ Fields by kind of element:
 | file field `<input type=file>` | `button` | `inputType: 'file'`; `value` is the attached file names joined with commas (`''` while nothing is attached), which shows that the CV went in. A hidden field (`display:none`, `hidden`, `opacity:0`) or one covered by its own label is in the snapshot if its label (`label for` or a wrapping label) or a button in the same parent is visible: `inView` comes from that, `name` is its own or the label's |
 
 The result of `see()`/`act()` goes through guard: a captcha (iframes included, except an invisible reCAPTCHA), a
-sign-in page (except a code sign-in, see "Code sign-in") or a block → `NeedsHuman` instead of the result.
+sign-in page (except a code sign-in, see "Code sign-in") or a block → `NeedsHuman` instead of the result. Before a
+command that touches the page (`click`, `fill`, `type`, `press`, `select`, `upload`) the page is checked once more on a
+fresh snapshot: a captcha, a block, a sign-in page or another host that appeared while the caller was thinking stops
+the task before the command runs, not after it. That snapshot is not returned and does not change `id`/`gen`.
 
 ## Hands: `act(command)`
 

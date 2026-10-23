@@ -30,6 +30,10 @@ const onSite = (url, hosts) => {
 };
 
 /** Команда записи: меняет что-то на площадке. Клик не по заведомой вкладке считается записью. */
+// Команды, которые трогают содержимое страницы: перед ними страница проверяется заново (guard до команды).
+// goto, back, scroll и wait — нет: они не нажимают и не вводят ничего на текущей странице.
+const TOUCHES = new Set(['click', 'fill', 'type', 'press', 'select', 'upload']);
+
 const isWrite = (c, els) => {
   if (c.cmd === 'fill' || c.cmd === 'type' || c.cmd === 'select' || c.cmd === 'upload') return true;
   if (c.cmd === 'press') return c.key === 'Enter';
@@ -69,6 +73,10 @@ function supervise(h, { name, site, extraHosts = [], notify, maxCommands, maxMin
     async act(c) {
       ensureOpen();
       if (++state.commands > maxCommands) throw new BudgetExceeded(`${name}: больше ${maxCommands} команд`);
+      // Guard до команды: капча, блок, вход или чужой хост могли появиться, пока вызывающий думал после see(), и не
+      // накрыть цель (проверка точки под курсором её не видит). Тогда стоп до нажатия, а не после (ревью скрытности
+      // 20.10, как у сервиса из extras/). Свежий снимок не меняет id и gen вызывающего.
+      if (TOUCHES.has(c && c.cmd) && h.probe) await stopIfNeeded(await h.probe());
       if (onWrite && isWrite(c, els)) { const f = onWrite; onWrite = null; f(); } // до команды и один раз: слот один, дневной лимит может остановить запись
       const r = await h.act(c);
       if (!r.dryRun && r.elements) els = r;

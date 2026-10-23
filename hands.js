@@ -196,18 +196,19 @@ function hands(page, opts = {}) {
   };
 
   // Клик с переходом рвёт контекст страницы посреди снимка: ждём загрузку и повторяем.
-  const look = async (o) => {
+  const observe = async (o) => {
     for (let attempt = 0; ; attempt++) {
-      try {
-        const seen = await eyes.observe(page, { ...o, gen: ++gens });
-        last = seen.snap;
-        world = seen.world;
-        return seen.snap;
-      } catch (err) {
+      try { return await eyes.observe(page, o); } catch (err) {
         if (attempt >= 3 || !/context was destroyed|navigat/i.test(err.message)) throw err;
         await page.waitForLoadState('domcontentloaded').catch(() => {});
       }
     }
+  };
+  const look = async (o) => {
+    const seen = await observe({ ...o, gen: ++gens });
+    last = seen.snap;
+    world = seen.world;
+    return seen.snap;
   };
 
   // SPA рисует после domcontentloaded: снимаем, пока набор элементов и текст не замрут на quietMs
@@ -498,7 +499,13 @@ function hands(page, opts = {}) {
     }
   });
 
-  return { see, act };
+  /**
+   * Свежий снимок только для guard перед командой (supervise): капча, вход или уход с площадки могли появиться,
+   * пока вызывающий думал. Последний снимок, его мир и номера не трогает: id и gen вызывающего остаются годными.
+   */
+  const probe = serial(async () => (await observe({})).snap);
+
+  return { see, act, probe };
 }
 
 /**
