@@ -115,6 +115,18 @@ function uploadFile(file, uploadDirs, { read = true } = {}) {
 }
 
 /**
+ * Точка для колеса над прокруткой, в которой лежит элемент (dom.handle.scrollBox): середина её видимой части ± четверть.
+ * Точка над самим элементом не годится: крайняя строка списка бывает обрезана краем панели, и курсор уходит за панель
+ * (inView снимка считается по окну, не по панели).
+ */
+async function wheelPoint(el) {
+  const r = await el.scrollBox();
+  if (!r || r.x1 <= r.x0 || r.y1 <= r.y0) throw new StaleElement('scroll: элемент не на экране');
+  const mid = (a, b) => a + (b - a) * human.rand(0.25, 0.75);
+  return { x: mid(r.x0, r.x1), y: mid(r.y0, r.y1) };
+}
+
+/**
  * Проверка команды до выполнения. Бросает BadCommand. Чистая функция (файловую систему не трогает).
  * uploadDirs — каталоги, откуда upload может брать файлы; без них upload выключен.
  */
@@ -145,7 +157,7 @@ function validate(c, allowedHosts = [], { uploadDirs = [] } = {}) {
       if (byLabel && !(typeof c.label === 'string' && c.label.trim() && c.label.length <= MAX_OPTION)) bad(`label — непустая строка до ${MAX_OPTION}`);
       break;
     }
-    case 'scroll': if (!(c.px === undefined || (Number.isFinite(c.px) && c.px >= 0 && c.px <= 5000))) bad('px от 0 до 5000, только вниз'); break;
+    case 'scroll': if (!(c.px === undefined || (Number.isFinite(c.px) && c.px >= 0 && c.px <= 5000))) bad('px от 0 до 5000, только вниз'); optTarget(); break;
     case 'wait':
       if (!(Number.isFinite(c.ms) && c.ms >= 0 && c.ms <= MAX_WAIT) && !isText(c.text)) bad(`нужен ms до ${MAX_WAIT} или text`);
       break;
@@ -448,7 +460,10 @@ function hands(page, opts = {}) {
         return human.press(page, c.key);
       case 'select': return choose(c);
       case 'upload': return upload(c);
-      case 'scroll': return human.scroll(page, c.px);
+      case 'scroll':
+        // С id/gen колесо крутится над прокруткой элемента: вложенная (список в боковой панели) двигается только под курсором.
+        if (hasTarget(c)) { const at = await wheelPoint(await target(c.id, c.gen)); await human.moveTo(page, at.x, at.y); }
+        return human.scroll(page, c.px);
       case 'wait':
         if (c.text) return page.getByText(c.text).first().waitFor({ state: 'visible', timeout: MAX_WAIT });
         return human.sleep(c.ms);
@@ -471,10 +486,11 @@ function hands(page, opts = {}) {
     validate(c, allowedHosts, { uploadDirs });
     if (c.cmd === 'upload') uploadFile(c.file, uploadDirs, { read: false }); // и в репетиции: нет файла — видно сразу
     const url = page.url();
-    // dryRunNavigation: клик по role=tab только переключает вид внутри страницы.
+    // dryRunNavigation: клик по role=tab только переключает вид внутри страницы, прокрутка только двигает вид.
     const tabClick = dryRunNavigation && c.cmd === 'click' && last && c.gen === last.gen
       && last.elements.some((e) => e.id === c.id && e.role === 'tab');
-    if (dryRun && c.cmd !== 'goto' && !tabClick) { // навигация только читает страницу: без неё dryRun остаётся на about:blank и видеть нечего
+    const viewScroll = dryRunNavigation && c.cmd === 'scroll';
+    if (dryRun && c.cmd !== 'goto' && !tabClick && !viewScroll) { // навигация только читает страницу: без неё dryRun остаётся на about:blank и видеть нечего
       log({ cmd: journalCmd(c), url: journalUrl(url), result: 'dry-run' });
       return { dryRun: true, changed: false };
     }

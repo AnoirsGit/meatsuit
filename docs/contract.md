@@ -196,7 +196,7 @@ The set is closed; anything else is a `BadCommand` before it runs.
 | `upload` | `id`, `gen`, `file` | a file from `uploadDirs` into the form, see below |
 | `type` | `text`, `id?`, `gen?` | types into the focused element, one line; with `id`/`gen` the focus is checked before the first key |
 | `press` | `key`, `id?`, `gen?` | `Enter` `Escape` `Tab` `Backspace` `ArrowDown` `ArrowUp` `PageDown` `PageUp` |
-| `scroll` | `px?` | down, 0 to 5000 |
+| `scroll` | `px?`, `id?`, `gen?` | down, 0 to 5000; with `id`/`gen` the mouse first moves over the element (no click) and the wheel turns over it: this is how a nested scroll moves, such as a list in a side panel |
 | `wait` | `ms` (up to 15000) or `text` | a pause, or until the text appears |
 | `back` | — | back in history |
 | `goto` | `url` | `https:` only, and only the site's host or its subdomain |
@@ -204,7 +204,7 @@ The set is closed; anything else is a `BadCommand` before it runs.
 Returns the snapshot diff after the command. `dryRun: true`: `see` works, `act` returns `{ dryRun: true,
 changed: false }` and only writes to the journal (`upload` checks the file first); the exception is `goto`, which runs.
 `dryRunNavigation: true` also runs a `click` on an element with the `tab` role (switching a view) when no link,
-button, field or label is above it.
+button, field or label is above it, and `scroll` (it only moves the view; this is how a rehearsal sees a list that loads on scroll).
 
 ### fill in a textarea (a cover letter)
 

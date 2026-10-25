@@ -96,6 +96,33 @@ const rejects = (c, hosts) => assert.throws(() => validate(c, hosts), BadCommand
   assert.ok(navLines.some((l) => l.cmd.cmd === 'click' && l.result === 'ok' && l.dryRun === true), 'клик по tab должен быть в журнале как ok');
   assert.equal(navLines.filter((l) => l.result === 'dry-run').length, 9);
 
+  // scroll с id/gen: колесо над прокруткой элемента двигает её (окно не двигается), даже если элемент обрезан краем панели;
+  // dryRunNavigation выполняет scroll (только вид), без опции он остаётся в журнале.
+  rejects({ cmd: 'scroll', px: 300, id: 1 });
+  validate({ cmd: 'scroll', px: 300, id: 1, gen: 1 });
+  const PANEL = `<body style="margin:0"><div id="p" style="height:190px;width:300px;overflow-y:auto">
+    ${Array.from({ length: 40 }, (_, i) => `<a href="#c${i}" style="display:block;height:40px">Chat ${i}</a>`).join('')}
+  </div></body>`;
+  for (const dryRunNavigation of [false, true]) {
+    await page.setContent(PANEL);
+    const hs = hands(page, { dryRun: true, dryRunNavigation });
+    const s0 = await hs.see();
+    const res = await hs.act({ cmd: 'scroll', px: 600, id: s0.elements.find((e) => e.name === 'Chat 4').id, gen: s0.gen }); // видна на 30 из 40 px
+    const top = await page.evaluate(() => document.getElementById('p').scrollTop);
+    if (dryRunNavigation) {
+      assert.equal(res.dryRun, undefined);
+      assert.ok(top > 0, 'scroll над списком не сдвинул вложенную прокрутку');
+    } else {
+      assert.deepEqual(res, { dryRun: true, changed: false });
+      assert.equal(top, 0, 'dryRun без dryRunNavigation прокрутил');
+    }
+  }
+  await page.setContent(PANEL);
+  const hst = hands(page, { dryRun: true, dryRunNavigation: true });
+  const st0 = await hst.see();
+  await hst.see(); // новый gen: старый id устарел
+  await assert.rejects(hst.act({ cmd: 'scroll', px: 600, id: st0.elements[0].id, gen: st0.gen }), StaleElement);
+
   // Оверлей появился, пока мышь шла к tab: клик по координатам попал бы в него. Клика нет, StaleElement.
   await page.setContent(TABS);
   const ho = hands(page, { dryRun: true, dryRunNavigation: true });
