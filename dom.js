@@ -51,12 +51,25 @@ async function run(world, fn, arg) {
 
 /**
  * Элемент по номеру из снимка, в виде, который понимает human.click:
- * scrollIntoViewIfNeeded() и boundingBox().
+ * scrollIntoViewIfNeeded() и boundingBox(); scrollBox() — для scroll с id.
  */
 function handle(world, id) {
   return {
     async same() { return run(world, (i) => globalThis.__ms.same(i), id); },
     async boundingBox() { return run(world, (i) => globalThis.__ms.box(i), id); },
+    // Видимая часть ближайшего предка, прокручиваемого по вертикали (иначе окна): где крутить колесо, чтобы сдвинуть список элемента.
+    async scrollBox() {
+      return run(world, (i) => {
+        const el = globalThis.__ms.els[i];
+        if (!el) return null;
+        const up = (n) => n.parentElement || n.getRootNode().host || null;
+        const top = (n) => !n || n === document.body || n === document.documentElement;
+        let p = up(el);
+        while (!top(p) && !(/(auto|scroll|overlay)/.test(getComputedStyle(p).overflowY) && p.scrollHeight > p.clientHeight)) p = up(p);
+        const b = top(p) ? { left: 0, top: 0, right: innerWidth, bottom: innerHeight } : p.getBoundingClientRect();
+        return { x0: Math.max(0, b.left), y0: Math.max(0, b.top), x1: Math.min(innerWidth, b.right), y1: Math.min(innerHeight, b.bottom) };
+      }, id);
+    },
     async scrollIntoViewIfNeeded() {
       let res;
       try {
