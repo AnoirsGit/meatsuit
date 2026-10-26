@@ -84,4 +84,4 @@ function handle(world, id) {
   };
 }
 
-module.exports = { openWorld, run, handle, StaleWorld };
+module.exports = { cdpOf, openWorld, run, handle, StaleWorld };

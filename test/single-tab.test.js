@@ -1,6 +1,7 @@
 /**
  * sites.json: "singleTab": true: задачи идут в уже открытой вкладке площадки, число вкладок
  * не меняется, вкладка не закрывается. Без флага: окно на задачу, как раньше.
+ * Заброшенные вкладки площадки (staleTabHours) закрываются; часы подменяются правкой отметок в <dir>/tabs.json.
  *
  *   node test/single-tab.test.js
  */
@@ -18,17 +19,20 @@ const CAP = 'cap.test';
 const HIDE = 'hide.test';
 const FRESH = 'fresh.test';
 const GONE = 'gone.test';
+const STALE = 'stale.test';
+const OFF = 'off.test';
 
 (async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meatsuit-single-'));
   const sitesFile = path.join(tmp, 'sites.json');
-  fs.writeFileSync(sitesFile, JSON.stringify({ [SINGLE]: { perDay: 100, singleTab: true }, [MULTI]: { perDay: 100 }, [CAP]: { perDay: 100, singleTab: true }, [HIDE]: { perDay: 1, singleTab: true }, [FRESH]: { perDay: 1, singleTab: true }, [GONE]: { perDay: 1, singleTab: true } }));
+  fs.writeFileSync(sitesFile, JSON.stringify({ [SINGLE]: { perDay: 100, singleTab: true }, [MULTI]: { perDay: 100 }, [CAP]: { perDay: 100, singleTab: true }, [HIDE]: { perDay: 1, singleTab: true }, [FRESH]: { perDay: 1, singleTab: true }, [GONE]: { perDay: 1, singleTab: true }, [STALE]: { perDay: 100, singleTab: true }, [OFF]: { perDay: 100, singleTab: true, staleTabHours: 0 } }));
 
   const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), {
     headless: true, args: ['--remote-debugging-port=0'],
   });
   const PORT = await cdpPort(path.join(tmp, 'profile'));
-  await ctx.route(/\.test\//, (r) => r.fulfill({ contentType: 'text/html', body: r.request().url().includes('/captcha') ? '<p>Please solve the captcha</p>' : '<button>Like</button>' }));
+  await ctx.route(/\.test\//, (r) => r.fulfill({ contentType: 'text/html', body: r.request().url().includes('/captcha') ? '<p>Please solve the captcha</p>'
+    : r.request().url().includes('/typed') ? '<textarea aria-label="Сообщение"></textarea>' : '<button>Like</button>' }));
   const mine = ctx.pages()[0] || (await ctx.newPage());
   await mine.goto(`https://${SINGLE}/app`); // «вкладка человека»
 
@@ -158,6 +162,66 @@ const GONE = 'gone.test';
   assert.equal(own5.length, 1, 'открыта одна своя вкладка площадки');
   await own5[0].close();
   await ms4.close();
+
+  // Заброшенные вкладки: без активности дольше staleTabHours (по умолчанию 48 ч) закрываются, кроме рабочей,
+  // вкладки на экране, вкладки с капчей и вкладки с набранным текстом; смена адреса — активность.
+  const tabs = require('../tabs.js');
+  const state5 = path.join(tmp, 'state5');
+  const tabsFile = path.join(state5, 'tabs.json');
+  const idOf = async (q) => { const s = await ctx.newCDPSession(q); try { return (await s.send('Target.getTargetInfo')).targetInfo.targetId; } finally { await s.detach(); } };
+  const age = (hours, ids, extra = {}) => { // сдвиг часов: отметки становятся старше на hours
+    const st = JSON.parse(fs.readFileSync(tabsFile, 'utf8'));
+    for (const id of ids) Object.assign(st[id], { at: st[id].at - hours * 3600e3 }, extra);
+    fs.writeFileSync(tabsFile, JSON.stringify(st));
+  };
+  const open = async (u) => { const q = await ctx.newPage(); await q.goto(u); await settle(); return q; }; // подключение ms5 узнаёт о вкладке событием чуть позже
+  const ms5 = await connect({ cdpUrl: `http://127.0.0.1:${PORT}`, dir: state5, sitesFile });
+  const run5 = (site, name) => ms5.task(name, async ({ see }) => { used.push((await see()).url); }, { site });
+  const t = {};
+  for (const k of ['a', 'b', 'c', 'captcha', 'typed', 'moved']) t[k] = await open(`https://${STALE}/${k}?q=secret#h`);
+  await t.typed.fill('textarea', 'недописанное');
+  const id = {};
+  for (const k of Object.keys(t)) id[k] = await idOf(t[k]);
+  await run5(STALE, 'st1'); // первая встреча: всем «сейчас», ничего не закрыто
+  assert.equal(Object.values(t).filter((q) => q.isClosed()).length, 0, 'новые вкладки не закрываются');
+
+  // Настоящее чтение видимости: в headless все вкладки на экране, поэтому старые вкладки живы.
+  age(100, Object.values(id));
+  await run5(STALE, 'st2');
+  await settle();
+  assert.equal(Object.values(t).filter((q) => q.isClosed()).length, 0, 'вкладка на экране не закрывается');
+
+  // Дальше на экране только c (в headless иначе не сделать).
+  const realProbe = tabs.probe;
+  tabs.probe = async (q) => { const r = await realProbe(q); return { ...r, visible: r.id === id.c }; };
+  age(49, [id.a]);
+  age(47, [id.b]);
+  age(100, [id.c, id.captcha, id.typed]);
+  age(100, [id.moved], { mark: 'прежний адрес' });
+  used.length = 0;
+  await run5(STALE, 'st3');
+  await settle();
+  assert.deepEqual(used, [`https://${STALE}/c?q=secret#h`], 'рабочая — вкладка на экране');
+  assert.equal(t.a.isClosed(), true, '49 ч без активности — закрыта');
+  for (const k of ['b', 'c', 'captcha', 'typed', 'moved']) assert.equal(t[k].isClosed(), false, `вкладка ${k} должна остаться`);
+  const st5 = JSON.parse(fs.readFileSync(tabsFile, 'utf8'));
+  assert.equal(st5[id.a], undefined, 'отметка закрытой вкладки убрана');
+  assert.ok(Date.now() - st5[id.moved].at < 60e3, 'смена адреса обнуляет счётчик');
+  const closed = fs.readFileSync(path.join(state5, 'journal.jsonl'), 'utf8').trim().split('\n').map(JSON.parse).filter((l) => l.cmd.cmd === 'closeTab');
+  assert.deepEqual(closed.map((l) => [l.url, l.idleHours]), [[`https://${STALE}/a`, 49]], 'в журнале адрес без query и часы простоя');
+  for (const q of Object.values(t)) if (!q.isClosed()) await q.close();
+
+  // staleTabHours: 0 — ничего не закрывается.
+  const g = await open(`https://${OFF}/g`);
+  const h = await open(`https://${OFF}/h`);
+  await run5(OFF, 'o1');
+  age(1000, [await idOf(g), await idOf(h)]);
+  await run5(OFF, 'o2');
+  await settle();
+  assert.equal(g.isClosed() || h.isClosed(), false, 'staleTabHours: 0 ничего не закрывает');
+  tabs.probe = realProbe;
+  await g.close(); await h.close();
+  await ms5.close();
 
   await ms.close();
   await ctx.close();

@@ -15,9 +15,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require('playwright-core');
-const { hands, replay, BadCommand, StaleElement } = require('./hands.js');
+const { hands, replay, journalUrl, BadCommand, StaleElement } = require('./hands.js');
 const { NeedsHuman, check: guardCheck, codeLoginRule } = require('./guard.js');
 const eyes = require('./eyes.js');
+const { StaleWorld } = require('./dom.js');
+const tabs = require('./tabs.js');
 const { telegramNotifier, createTelegram, findChats, TelegramError } = require('./telegram.js');
 const { openWindow } = require('./window.js');
 const { supervise, BudgetExceeded, HANG } = require('./supervise.js');
@@ -105,27 +107,67 @@ async function connect({
   // singleTab: ищем уже открытую вкладку площадки (по хосту); нет её — undefined, окно откроет task() после reserve.
   // Вкладку могли закрыть прямо перед задачей (человек в зеркале, другой клиент CDP): подключение узнаёт об этом
   // событием чуть позже и ещё отдаёт её в pages(). Такую пропускаем, а не падаем «Target page … closed».
-  async function siteTab(site, codeLogin, onExamine = () => {}) {
+  // Из нескольких вкладок площадки рабочая — на экране, иначе с самой свежей активностью; остальные без активности
+  // дольше staleTabHours закрываются (правило и исключения — tabs.js). Отметки — в <dir>/tabs.json.
+  async function siteTab(site, codeLogin, onExamine = () => {}, { hours = 0, dryRun = false, alive = () => true } = {}) {
     const onSite = (u) => hostOn(u, site);
+    const tabsFile = path.join(dir, 'tabs.json');
+    const seen = [];
+    let busy; // вкладка сменила документ во время снимка: в этот раз её не трогаем (ни выбора, ни закрытия)
     for (const found of browser.contexts()[0].pages()) {
       if (found.isClosed() || !onSite(found.url())) continue;
       onExamine(found); // сторож задачи закроет её, если снимок повиснет
       // Снимок без команд: на вкладке может быть капча, которую решает человек (оставлена прошлой задачей,
       // в том числе другим процессом), её не трогаем.
-      let snap;
-      try { snap = await eyes.see(found); }
-      catch (e) { if (found.isClosed() || CLOSED_PAGE.test(e.message)) continue; throw e; }
+      let snap, info;
+      try { snap = await eyes.see(found); info = await tabs.probe(found); }
+      catch (e) {
+        if (found.isClosed() || CLOSED_PAGE.test(e.message)) continue;
+        if (e instanceof StaleWorld) { busy = busy || e; continue; }
+        throw e;
+      }
       const reason = guardCheck(snap, codeLogin ? { codeLogin: { site, path: codeLogin.path } } : {});
-      if (reason) throw new NeedsHuman(reason, snap.url);
-      return found;
+      seen.push({ page: found, ...info, url: snap.url, title: snap.title, reason, typed: tabs.typed(snap) });
+    }
+    if (!alive()) return; // сработал сторож: очередь уже отдана, ничего не закрываем и не пишем
+    const now = Date.now();
+    let state = tabs.update(tabs.load(tabsFile), seen, now);
+    const chosen = tabs.pick(seen, state);
+    if (chosen) onExamine(chosen.page);
+    for (const t of dryRun ? [] : tabs.stale(seen, state, chosen, hours, now)) {
+      await t.page.close().catch(() => {});
+      journal({ ts: new Date(now).toISOString(), dryRun: false, cmd: { cmd: 'closeTab' }, url: journalUrl(t.url), result: 'ok', idleHours: Math.round((now - state[t.id].at) / tabs.HOUR) });
     }
     // Playwright мог не увидеть существующую вкладку (Debian Chromium): тогда новую не открываем, чтобы не плодить дубль.
     const session = await browser.newBrowserCDPSession();
-    try {
-      const { targetInfos } = await session.send('Target.getTargets');
-      if (targetInfos.some((t) => t.type === 'page' && onSite(t.url))) throw new Error(`singleTab: вкладка ${site} есть, но Playwright её не видит`);
-    } finally { await session.detach().catch(() => {}); }
+    let targetInfos;
+    try { ({ targetInfos } = await session.send('Target.getTargets')); }
+    finally { await session.detach().catch(() => {}); }
+    state = tabs.prune(state, targetInfos.filter((t) => t.type === 'page').map((t) => t.targetId));
+    tabs.save(tabsFile, state);
+    if (chosen) {
+      if (chosen.reason) throw new NeedsHuman(chosen.reason, chosen.url);
+      return chosen.page;
+    }
+    if (busy) throw busy; // как раньше: ни одна вкладка площадки не дала снимок — ошибка снимка, а не новое окно
+    if (targetInfos.some((t) => t.type === 'page' && onSite(t.url))) throw new Error(`singleTab: вкладка ${site} есть, но Playwright её не видит`);
   }
+
+  // Отметить активность вкладки сейчас (под замком очереди). Сбой не роняет задачу: худшее — вкладка простоит дольше.
+  async function touchTab(page) {
+    try {
+      const file = path.join(dir, 'tabs.json');
+      const state = tabs.load(file);
+      const id = await tabs.targetId(page);
+      tabs.save(file, { ...state, [id]: { ...state[id], at: Date.now() } });
+    } catch (e) { console.error('meatsuit: отметка вкладки не записана:', e.message); }
+  }
+
+  // Строка журнала рук не от команды (закрытая вкладка). Не записалась — не беда: причина в stderr, как в hands.js.
+  const journal = (entry) => {
+    try { fs.appendFileSync(path.join(dir, 'journal.jsonl'), JSON.stringify(entry) + '\n'); }
+    catch (e) { console.error('meatsuit: не удалось записать журнал:', e.message); }
+  };
 
   async function task(name, fn, { site, extraHosts = [], uploadDirs = [], maxCommands = 60, maxMinutes = 10, dryRun = false, dryRunNavigation = false, readOnly = false, capture, codeLogin: codeLoginOpt = false } = {}) {
     if (!site) throw new Error('task: нужен site');
@@ -140,6 +182,7 @@ async function connect({
     // Потолок бюджета задаёт площадка, а не вызывающий проект.
     if (rule && rule.maxCommands) maxCommands = Math.min(maxCommands, rule.maxCommands);
     if (rule && rule.maxMinutes) maxMinutes = Math.min(maxMinutes, rule.maxMinutes);
+    const staleHours = rule && rule.singleTab ? tabs.staleHours(rule) : 0; // кривой staleTabHours — ошибка до очереди
 
     // Очередь «один бот за раз» на все вызывающие одного dir. Браузер занят дольше срока — LimitReached
     // с тем, кто занял (повторить позже), а не ошибка: вызывающий не должен считать это своей поломкой.
@@ -176,7 +219,7 @@ async function connect({
     }, hangMs);
     if (watchdog) watchdog.unref();
     try {
-      const found = rule && rule.singleTab ? await siteTab(site, codeLogin, (p) => { examined = p; }) : null; // до reserve: сбой поиска не тратит слот
+      const found = rule && rule.singleTab ? await siteTab(site, codeLogin, (p) => { examined = p; }, { hours: staleHours, dryRun, alive: () => !hung }) : null; // до reserve: сбой поиска не тратит слот
       if (hung) throw hung;
       const limitsFile = path.join(dir, 'limits.json');
       const slot = new Date();
@@ -216,6 +259,7 @@ async function connect({
         page.off('popup', onPopup);
         botPages.delete(page);
         if (opened && !(run && run.state.stopped) && !hostOn(page.url(), site)) await page.close().catch(() => {}); // задача упала до goto: пустое окно не копим
+        if (run && !hung && !page.isClosed()) await touchTab(page); // бот работал во вкладке — это её активность
       } else if (page && !(run && run.state.stopped)) await page.close().catch(() => {});
       unlock();
     }
