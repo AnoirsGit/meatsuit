@@ -548,4 +548,4 @@ function replay(dir, opts = {}) {
   };
 }
 
-module.exports = { hands, replay, validate, BadCommand, StaleElement };
+module.exports = { hands, replay, validate, journalUrl, BadCommand, StaleElement };

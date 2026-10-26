@@ -51,7 +51,7 @@ await ms.close();
 |---|---|
 | `cdpUrl` | the CDP address of the shared browser; required |
 | `sitesFile` or `sites` | the **caller's** site limits: the path to its `sites.json` (read for every task, so an edit applies without a restart) or an object of the same shape. Exactly one of the two; with neither, with both, or with a missing file `connect` fails before it touches the browser. Sample: `sites.example.json` |
-| `dir` | the queue lock `queue.lock`, the counters `limits.json`, the journal `journal.jsonl` and the human's habits `persona.json`; `~/.meatsuit` by default. **All callers of one browser must pass the same `dir`**: otherwise their locks differ and two bots enter the browser at once. With the mirror from `docker/` this is the `state/` folder in the `meatsuit_profile` volume (see "Attaching to the mirror") |
+| `dir` | the queue lock `queue.lock`, the counters `limits.json`, the journal `journal.jsonl`, the human's habits `persona.json` and the tab marks `tabs.json`; `~/.meatsuit` by default. **All callers of one browser must pass the same `dir`**: otherwise their locks differ and two bots enter the browser at once. With the mirror from `docker/` this is the `state/` folder in the `meatsuit_profile` volume (see "Attaching to the mirror") |
 | `notify(text, event)` | the caller's async notification function. A failed send does not fail the task; it goes to stderr |
 | `notifyOn` | which events to send: `'start'`, `'done'`, `'limit'`, `'error'`, `'needsHuman'`; by default `['needsHuman', 'limit', 'error']` |
 | `site` | the site's host, its key in `sites.json`; `goto` is limited to it as well |
@@ -93,6 +93,15 @@ cannot hold the browser forever.
   not close it; guard checks the tab before a slot is spent (a captcha left to the human is not touched).
   `singleTab` is read **only from the `sites.json` rule** (the site's own entry or `"*"`); `task` has no option of
   that name, and passing `task(..., { singleTab })` changes nothing.
+- `staleTabHours` (default `48`, `0` turns it off) applies with `singleTab` only. With several tabs of the site, the
+  working tab is the one on screen, otherwise the one with the latest activity. Before a task, the other tabs of the
+  site with no activity for longer than `staleTabHours` hours are closed. Activity is: a task ran in the tab, its
+  address or title changed, it is on screen (`visibilityState`); a tab the core sees for the first time gets "now".
+  Never closed: the working tab, a tab on screen, one with a captcha, sign-in or block page, one with text typed in
+  a field, one still loading; with `dryRun` nothing is closed. The marks live in `<dir>/tabs.json` (CDP target id →
+  a hash of address and title, and the time); nothing changes on the page. A closed tab is a journal line
+  `cmd: { cmd: 'closeTab' }` with `url` without query and hash and `idleHours`. Activity is seen only at checks
+  (once per task).
 - `codeLogin: { "path": "^/account/login", "maxMinutes"?: 6 }` is the path where a task with
   `task(..., { codeLogin: true })` may go through a one-time-code sign-in. It is read **only from the site's own
   entry**, never from `"*"`.
