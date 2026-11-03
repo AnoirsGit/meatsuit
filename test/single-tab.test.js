@@ -39,6 +39,9 @@ const OFF = 'off.test';
   const ms = await connect({ cdpUrl: `http://127.0.0.1:${PORT}`, dir: path.join(tmp, 'state'), sitesFile });
   const count = () => ctx.pages().length;
   const settle = () => new Promise((r) => setTimeout(r, 300));
+  // Вкладку «человека» уводим тем же соединением, что и тест; соединение ядра узнаёт о новом адресе событием чуть позже.
+  // Без паузы ядро ещё считает вкладку на прежней площадке (то берёт её вместо нового окна, то «Playwright её не видит»).
+  const goMine = async (url) => { await mine.goto(url); await settle(); };
   const used = [];
   const run = (site, name) => ms.task(name, async ({ see }) => {
     const s = await see();
@@ -67,7 +70,7 @@ const OFF = 'off.test';
   await p.close();
 
   // Нет вкладки площадки: открывается одна и остаётся; вторая задача её же и берёт.
-  await mine.goto('about:blank');
+  await goMine('about:blank');
   await ms.task('s3', async ({ act }) => { await act({ cmd: 'goto', url: `https://${SINGLE}/app` }); }, { site: SINGLE });
   await settle();
   assert.equal(count(), 2, 'вкладка, открытая ботом, остаётся');
@@ -77,25 +80,25 @@ const OFF = 'off.test';
 
   // Без флага: окно на задачу, закрывается.
   await ctx.pages().find((q) => q !== mine).close();
-  await mine.goto('about:blank');
+  await goMine('about:blank');
   await ms.task('m1', async ({ see }) => { await see(); assert.equal(count(), 2); }, { site: MULTI });
   await settle();
   assert.equal(count(), 1, 'без флага окно задачи закрывается');
 
   // Дыра 1: вкладку с капчей, оставленную человеку, следующая задача не трогает, пока капча не решена.
   const { NeedsHuman } = require('../index.js');
-  await mine.goto(`https://${CAP}/captcha`);
+  await goMine(`https://${CAP}/captcha`);
   await assert.rejects(ms.task('c1', async ({ see }) => { await see(); }, { site: CAP }), NeedsHuman);
   let ran = false;
   await assert.rejects(ms.task('c2', async ({ act }) => { ran = true; await act({ cmd: 'goto', url: `https://${CAP}/app` }); }, { site: CAP }), NeedsHuman);
   assert.equal(ran, false, 'задача не должна запускаться, пока капча на странице');
   assert.equal(mine.url(), `https://${CAP}/captcha`, 'goto не должен уводить страницу с капчей');
-  await mine.goto(`https://${CAP}/app`); // человек решил
+  await goMine(`https://${CAP}/app`); // человек решил
   await ms.task('c3', async ({ see }) => { await see(); ran = true; }, { site: CAP });
   assert.equal(ran, true, 'после решения капчи задача идёт');
 
   // Дыра 2: окно, открытое задачей, закрывается, если она упала до goto; после NeedsHuman остаётся.
-  await mine.goto('about:blank');
+  await goMine('about:blank');
   await assert.rejects(ms.task('e1', async () => { throw new Error('boom'); }, { site: SINGLE }), /boom/);
   await settle();
   assert.equal(count(), 1, 'пустое окно упавшей задачи не копится');
@@ -110,7 +113,7 @@ const OFF = 'off.test';
   await left.close();
 
   // Дыра 3: если Playwright не видит вкладку, слот лимита не тратится (perDay: 1 хватает на повтор).
-  await mine.goto(`https://${HIDE}/app`);
+  await goMine(`https://${HIDE}/app`);
   let pb;
   const orig = chromium.connectOverCDP;
   chromium.connectOverCDP = async (u) => { pb = await orig.call(chromium, u); return pb; };
@@ -124,7 +127,7 @@ const OFF = 'off.test';
 
   // Дыра 4: новый процесс (cron) ничего не помнит о прошлом, а вкладка площадки уже на капче.
   // Задача не запускается, страница не тронута, слот не потрачен (perDay: 1), человеку уходит needsHuman.
-  await mine.goto(`https://${FRESH}/captcha`);
+  await goMine(`https://${FRESH}/captcha`);
   const notes = [];
   const ms3 = await connect({ cdpUrl: `http://127.0.0.1:${PORT}`, dir: path.join(tmp, 'state3'), sitesFile,
     notify: async (text, event) => { notes.push({ text, event }); } });
@@ -133,7 +136,7 @@ const OFF = 'off.test';
   assert.equal(ranFresh, false, 'задача не должна запускаться на вкладке с капчей');
   assert.equal(mine.url(), `https://${FRESH}/captcha`, 'страница с капчей не должна уходить');
   assert.ok(notes.some((n) => n.event === 'needsHuman' && /f1/.test(n.text)), 'человеку должно уйти needsHuman');
-  await mine.goto(`https://${FRESH}/app`); // человек решил
+  await goMine(`https://${FRESH}/app`); // человек решил
   await ms3.task('f2', async ({ see }) => { await see(); ranFresh = true; }, { site: FRESH });
   assert.equal(ranFresh, true, 'после решения капчи задача идёт: слот не был потрачен');
   await ms3.close();
