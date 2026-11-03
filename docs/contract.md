@@ -273,7 +273,7 @@ the keys, the option is set directly with `input` and `change` events (these are
 
 `BadCommand` before any action: the target is not a `<select>`, it has `multiple`, the list or the option is not
 available (`disabled`, including on an `optgroup`), or there is no such option. Verified in headless Chromium
-(`test/forms.test.js`); not verified live in Chrome under Neko.
+(`test/forms.test.js`). On macOS (seen 5 November) the arrow keys do not change a closed list in Chromium, so the fallback to synthetic events runs there and that test fails (open item, [ROADMAP](ROADMAP.md), in Russian); not re-run on Linux that day; not verified live in Chrome under Neko.
 
 ### The hands' pace
 

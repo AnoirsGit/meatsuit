@@ -262,7 +262,7 @@ changed: false }` и только пишет в журнал (`upload` пере�
 `input` и `change` (они синтетические, как у `selectOption` в Playwright). Вариант уже выбран — ничего не делается.
 
 `BadCommand` до любого действия: цель не `<select>`, `multiple`, список или вариант недоступен (`disabled`, в том
-числе у `optgroup`), такого варианта нет. Проверено в headless Chromium (`test/forms.test.js`); в Chrome под Neko
+числе у `optgroup`), такого варианта нет. Проверено в headless Chromium (`test/forms.test.js`). На macOS (видели 5 ноября) стрелки не меняют выбор закрытого списка в Chromium, поэтому там срабатывает запасной путь с синтетическими событиями, и этот тест красный (открытый пункт, [ROADMAP](ROADMAP.md)); на Linux в тот день не гоняли; в Chrome под Neko
 живьём не проверено.
 
 ### Темп рук
