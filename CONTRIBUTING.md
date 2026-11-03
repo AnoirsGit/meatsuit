@@ -42,7 +42,7 @@ npm run test:extras        # browser tests look for /usr/bin/chromium or the pat
 
 On macOS (checked on Node 24, Chromium headless shell from `playwright-core`):
 
-- point `MEATSUIT_CHROMIUM` at the headless shell, for example `~/Library/Caches/ms-playwright/chromium_headless_shell-<build>/chrome-headless-shell-mac-arm64/chrome-headless-shell`. Without `/usr/bin/chromium` or that variable the browser tests of `extras/` skip themselves, and a green `npm run test:extras` then proves little: look at the `skipped` count. The one end-to-end suite (`npm run test:e2e`) reads the path from `CHROMIUM`, not `MEATSUIT_CHROMIUM`, and also needs `E2E=1` (the npm script sets it);
+- point `MEATSUIT_CHROMIUM` at the headless shell, for example `~/Library/Caches/ms-playwright/chromium_headless_shell-<build>/chrome-headless-shell-mac-arm64/chrome-headless-shell`. Without `/usr/bin/chromium` or that variable the browser tests of `extras/` skip themselves, and a green `npm run test:extras` then proves little: look at the `skipped` count. The one end-to-end suite (`npm --prefix extras run test:e2e`) reads the path from `CHROMIUM`, not `MEATSUIT_CHROMIUM`, and also needs `E2E=1` (the npm script sets it);
 - `tools/secret-scan.sh` has to parse in the macOS `/bin/sh` (bash 3.2) as well as in `dash`, so no heredoc inside `$( )` with an unpaired quote;
 - `test/forms.test.js` (the `select` check) and one test in `extras/test/driver.test.js` fail: on macOS the arrow key does not change a closed `<select>`, so the hand falls back to synthetic events. A known open item, see Status in the README; do not loosen the tests.
 
