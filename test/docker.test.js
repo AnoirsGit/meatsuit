@@ -99,6 +99,15 @@ test('chrome.conf и compose согласованы: CDP 9222 и та же па�
   assert.match(fs.readFileSync(path.join(DOCKER, 'neko', 'brave-start.sh'), 'utf8'), /PROFILE=\/home\/neko\/\.config\/brave\n/);
 });
 
+// WebGL: с --disable-software-rasterizer у Chrome нет программного WebGL (жёлтая отметка selfcheck). У Brave
+// помогло --enable-unsafe-swiftshader (измерено 20.10, docs/stealth.md); у Chrome правка внесена, на сервере не измерена.
+// Тест держит файл согласованным с этими документами, а не доказывает WebGL.
+test('chrome.conf: программный WebGL включён, старый выключающий флаг не вернулся', () => {
+  const conf = fs.readFileSync(path.join(DOCKER, 'chrome.conf'), 'utf8');
+  assert.match(conf, /^\s+--enable-unsafe-swiftshader$/m);
+  assert.doesNotMatch(conf, /--disable-software-rasterizer/);
+});
+
 // docker stop: compose ждёт stop_grace_period, но браузер останавливает supervisord внутри Neko и ждёт его только
 // stopwaitsecs (по умолчанию 10 с), потом SIGKILL — свежие cookie и входы не успевают лечь на диск.
 test('остановка: supervisord ждёт браузер дольше своих 10 с, но меньше stop_grace_period compose', () => {
