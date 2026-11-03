@@ -191,3 +191,14 @@ test('вне git-репозитория: код 2 и понятное сообщ
   assert.equal(r.status, 2);
   assert.match(r.stderr, /не git-репозиторий/);
 });
+
+// Скрипт разбирается всеми оболочками, какие есть под рукой: /bin/bash на macOS — это bash 3.2, он не терпел heredoc
+// с непарной кавычкой внутри $( ), и из-за этого pretest и хук падали на ноутбуке при зелёном dash на сервере.
+test('скрипт разбирается (-n) в /bin/sh, /bin/bash и dash, где они есть', () => {
+  const shells = ['/bin/sh', '/bin/bash', '/usr/bin/dash', '/bin/dash'].filter((s) => fs.existsSync(s));
+  assert.ok(shells.length > 0, 'нет ни одной оболочки');
+  for (const sh of shells) {
+    const r = spawnSync(sh, ['-n', SCAN], { encoding: 'utf8' });
+    assert.equal(r.status, 0, `${sh} -n: ${r.stderr}`);
+  }
+});
