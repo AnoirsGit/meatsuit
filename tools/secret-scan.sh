@@ -49,7 +49,9 @@ list_paths() {
 }
 
 # Правила по содержимому: имя, табуляция, регулярное выражение POSIX ERE (без \b, \d: их нет в POSIX).
-RULES=$(cat <<'EOF'
+# Функцией, а не $(cat <<EOF): bash 3.2 (/bin/sh в macOS) путает кавычки в тексте heredoc внутри $( ).
+rules() {
+cat <<'EOF'
 private-key	-----BEGIN ([A-Z0-9]+ )*PRIVATE KEY( BLOCK)?-----
 telegram-bot-token	(^|[^A-Za-z0-9_])[0-9]{8,10}:[A-Za-z0-9_-]{35}([^A-Za-z0-9_-]|$)
 telegram-bot-token	TELEGRAM_BOT_TOKEN["']?[[:space:]]*[=:][[:space:]]*["']?[0-9]+:
@@ -71,7 +73,8 @@ real-asn	(^|[^A-Za-z0-9_+/=-])AS[[:space:]]?[0-9]{1,10}([^A-Za-z0-9_]|$)
 real-asn	[Aa][Ss][Nn]["']?[[:space:]]*[:=][[:space:]]*\[?[[:space:]]*[0-9][0-9, ]*
 ssh-host	(^|[^A-Za-z0-9_-])ssh[[:space:]]+([^[:space:]]+[[:space:]]+)*[A-Za-z0-9._-]+@[A-Za-z0-9][A-Za-z0-9._-]*
 EOF
-)
+}
+RULES=$(rules)
 
 # Отсев допустимого: учебные и частные ASN, служебные адреса tailnet, учебные хосты в ssh.
 FILTER='
