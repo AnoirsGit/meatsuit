@@ -30,5 +30,8 @@
   "homepage": "https://github.com/AnoirsGit/meatsuit#readme",
   "dependencies": {
     "playwright-core": "^1.63.0"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
