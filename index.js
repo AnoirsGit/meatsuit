@@ -26,6 +26,7 @@ const { supervise, BudgetExceeded, HANG } = require('./supervise.js');
 const { signature, normalizeName, urlPattern } = require('./capture.js');
 const { ruleFor, reserve, charge, peek: peekLimit, status: limitStatus, lock, LimitReached } = require('./limits.js');
 const { loadPersona } = require('./human/persona-file.js');
+const holds = require('./holds.js');
 
 /**
  * Лимиты площадок принадлежат вызывающему проекту: путь к его sites.json (читается на каждую задачу,
@@ -55,6 +56,13 @@ function peek(site, { sitesFile, sites, dir = DEFAULT_DIR, now = new Date(), rea
   const rule = ruleFor(sitesSource({ sitesFile, sites })(), site);
   return { site, rule: rule || null, ...limitStatus(site, rule, path.join(dir, 'limits.json'), now, { readOnly }) };
 }
+
+/**
+ * Стоп площадки после NeedsHuman (holds.js) — без браузера, тот же dir, что у connect().
+ * holdState → { site, reason, url, since, until } или null; releaseHold → { released }.
+ */
+const holdState = (site, { dir = DEFAULT_DIR, now } = {}) => holds.holdState(site, { dir, now });
+const releaseHold = (site, { dir = DEFAULT_DIR, now } = {}) => holds.releaseHold(site, { dir, now });
 
 /**
  * Вход по одноразовому коду: нужны оба согласия — опция задачи и правило в своей записи площадки
@@ -183,6 +191,19 @@ async function connect({
     if (rule && rule.maxCommands) maxCommands = Math.min(maxCommands, rule.maxCommands);
     if (rule && rule.maxMinutes) maxMinutes = Math.min(maxMinutes, rule.maxMinutes);
     const staleHours = rule && rule.singleTab ? tabs.staleHours(rule) : 0; // кривой staleTabHours — ошибка до очереди
+    const holdFor = holds.holdHours(rule); // кривой holdHours — тоже
+    // Стоп площадки после прошлого NeedsHuman: в браузер не идём, очередь не ждём, слот не тратим, notify не шлём
+    // (о стопе уже сообщили, когда его ставили).
+    const onHold = () => {
+      const held = holds.holdState(site, { dir });
+      if (!held) return null;
+      const e = new NeedsHuman(`${site} на стопе до ${holds.clock(held.until)} после «${held.reason}»; снять раньше — releaseHold('${site}') или node tools/release.js ${site}`, held.url);
+      e.hold = held;
+      e.onHold = true;
+      return e;
+    };
+    const heldBefore = onHold();
+    if (heldBefore) throw heldBefore;
 
     // Очередь «один бот за раз» на все вызывающие одного dir. Браузер занят дольше срока — LimitReached
     // с тем, кто занял (повторить позже), а не ошибка: вызывающий не должен считать это своей поломкой.
@@ -192,6 +213,9 @@ async function connect({
       if (e instanceof LimitReached) await emit('limit', `meatsuit: «${name}» не запущена: ${e.message}`);
       throw e;
     }
+    // Пока ждали очередь, задача другого процесса на этой площадке могла упереться в капчу и поставить стоп.
+    const heldNow = onHold();
+    if (heldNow) { release(); throw heldNow; }
     let released = false;
     const unlock = () => { if (!released) { released = true; release(); } };
     let page;
@@ -245,6 +269,12 @@ async function connect({
       await emit('done', `meatsuit: «${name}» на ${site} завершена за ${Math.round((Date.now() - started) / 1000)} с, команд: ${run.state.commands}`);
       return result;
     } catch (err) {
+      // Любой NeedsHuman (guard ядра или проект) ставит стоп площадки на holdHours: cron не заходит на капчу снова.
+      const stop = err instanceof NeedsHuman ? err : run && run.state.stopped;
+      if (stop) {
+        try { stop.hold = holds.hold(site, { dir, reason: stop.reason ?? stop.message, url: stop.url, hours: holdFor }) || undefined; }
+        catch (e) { console.error(`meatsuit: не удалось поставить стоп ${site}:`, e.message); }
+      }
       if (hung) throw hung; // сторож уже сообщил; зависший вызов оборвался закрытием окна — причина в зависании
       // NeedsHuman уже отправлен из supervise; остальное (бюджет, сбой в проекте) сообщаем здесь.
       if (err instanceof NeedsHuman && !run) await emit('needsHuman', `meatsuit: «${name}» на ${site} остановлен: ${err.message}`); // при взятии вкладки supervise ещё не создан
@@ -270,4 +300,4 @@ async function connect({
 
 // telegramNotifier и остальное из telegram.js — помощник для вызывающего (токен и группу передаёт он);
 // оставлены здесь для совместимости импорта, новым проектам проще require('meatsuit/telegram.js').
-module.exports = { connect, hands, replay, signature, normalizeName, urlPattern, NeedsHuman, LimitReached, BudgetExceeded, BadCommand, StaleElement, telegramNotifier, createTelegram, findChats, TelegramError, peek };
+module.exports = { connect, hands, replay, signature, normalizeName, urlPattern, NeedsHuman, LimitReached, BudgetExceeded, BadCommand, StaleElement, telegramNotifier, createTelegram, findChats, TelegramError, peek, holdState, releaseHold };

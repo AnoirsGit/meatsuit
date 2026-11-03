@@ -30,6 +30,7 @@ const {
   NeedsHuman, LimitReached, BudgetExceeded, BadCommand, StaleElement, // errors
   telegramNotifier, createTelegram, findChats, TelegramError,       // Telegram helper
   peek,                                               // what is left of a site's limit, without spending a slot
+  holdState, releaseHold,                             // a site's hold after NeedsHuman: read it, lift it
 } = require('meatsuit');
 const { validate } = require('meatsuit/hands.js');   // checking a command without a browser:
 // validate(command, allowedHosts = [], { uploadDirs = [] } = {}) — throws BadCommand
@@ -51,7 +52,7 @@ await ms.close();
 |---|---|
 | `cdpUrl` | the CDP address of the shared browser; required |
 | `sitesFile` or `sites` | the **caller's** site limits: the path to its `sites.json` (read for every task, so an edit applies without a restart) or an object of the same shape. Exactly one of the two; with neither, with both, or with a missing file `connect` fails before it touches the browser. Sample: `sites.example.json` |
-| `dir` | the queue lock `queue.lock`, the counters `limits.json`, the journal `journal.jsonl`, the human's habits `persona.json` and the tab marks `tabs.json`; `~/.meatsuit` by default. **All callers of one browser must pass the same `dir`**: otherwise their locks differ and two bots enter the browser at once. With the mirror from `docker/` this is the `state/` folder in the `meatsuit_profile` volume (see "Attaching to the mirror") |
+| `dir` | the queue lock `queue.lock`, the counters `limits.json`, the journal `journal.jsonl`, the human's habits `persona.json`, the tab marks `tabs.json` and the site holds `holds/`; `~/.meatsuit` by default. **All callers of one browser must pass the same `dir`**: otherwise their locks differ and two bots enter the browser at once. With the mirror from `docker/` this is the `state/` folder in the `meatsuit_profile` volume (see "Attaching to the mirror") |
 | `notify(text, event)` | the caller's async notification function. A failed send does not fail the task; it goes to stderr |
 | `notifyOn` | which events to send: `'start'`, `'done'`, `'limit'`, `'error'`, `'needsHuman'`; by default `['needsHuman', 'limit', 'error']` |
 | `site` | the site's host, its key in `sites.json`; `goto` is limited to it as well |
@@ -63,7 +64,7 @@ await ms.close();
 | `capture` | the screen archive `{ dir, htmlPerSignature = 5, maxMB = 500 }`; nothing is written without it |
 | `codeLogin` | `true` means the task signs in with a one-time code (see "Code sign-in" below). The site also needs its own `sites.json` entry with `codeLogin`; without it, with a malformed rule, or with a value other than `true`/`false` it is an error before the queue and the browser |
 
-`task` in order: joins the queue (one bot at a time; the lock file works across processes) → checks the site's limit
+`task` in order: a site on hold throws `NeedsHuman` with `onHold: true` right away (see "Site hold") → joins the queue (one bot at a time; the lock file works across processes) → checks the site's limit
 and records the task (`dryRun` spends no slots) → opens a separate window → calls the function under guard and the
 budget → closes the window. On `NeedsHuman` the window stays open for the human to handle in the mirror. New tabs
 the page opens are closed. Returns what the function returned.
@@ -105,6 +106,28 @@ cannot hold the browser forever.
 - `codeLogin: { "path": "^/account/login", "maxMinutes"?: 6 }` is the path where a task with
   `task(..., { codeLogin: true })` may go through a one-time-code sign-in. It is read **only from the site's own
   entry**, never from `"*"`.
+- `holdHours` (default `6`, `0` means no hold) is how many hours the site stays on hold after a `NeedsHuman`; see
+  "Site hold".
+
+### Site hold after NeedsHuman
+
+Any `NeedsHuman` of a task (the core's guard — captcha, sign-in, block, leaving the site — or one thrown by the
+caller's code) puts **this site on hold** for `holdHours` hours. While it holds, `task` for the site throws
+`NeedsHuman` with `onHold: true` right away: it does not wait for the queue, touches no tabs or windows, spends no
+slot and **sends no `notify`** (that was sent when the hold was set). Other sites of the same browser keep working.
+The hold applies to `dryRun` too. A solved captcha does not lift it: the human does, or the time runs out. After that
+the next task runs as usual; if the captcha is still on the tab, guard gives `NeedsHuman` and a new hold again, so it
+works as a reminder every `holdHours`.
+
+```js
+const h = holdState(site, { dir? });              // → { site, reason, url, since, until } (ms) or null
+const { released } = releaseHold(site, { dir? }); // lift it early; released — whether a hold was in force
+```
+
+No browser and no queue; `dir` is the same as for `connect` (`~/.meatsuit` by default). From a shell:
+`node tools/release.js <site> [--dir …]` (without a site it lists the holds; `--dir` defaults to `MEATSUIT_DIR`).
+The `NeedsHuman` that set the hold carries `.hold` as well, with the time the site is held until (`until`). The files
+are `<dir>/holds/<site>.json`; their format is not part of the contract.
 
 ### Code sign-in (codeLogin)
 
@@ -146,7 +169,7 @@ are how many more are allowed (`null` means no limit, `0` means no such site). `
 | Error | When | What the caller should do |
 |---|---|---|
 | `LimitReached` | the site is not in `sites.json` (and there is no `"*"`), `perDay: 0`, outside hours, day or hour limit; the browser stayed busy with another caller's task for 30 minutes (the text names that task and site) | do not start the task, retry later |
-| `NeedsHuman` (`.reason`, `.url`, `.before`) | a captcha, a sign-in page (except the declared path of a `codeLogin` task), a block, leaving the site's host (and not to `extraHosts`) | stop; the window is open for the human. The state is not cleared until the task ends. From `act()`: with `before: true` the stop came from the check before the command and **the command did not run**; without it the command ran and the stop is about the page after it (a message may be out, a form sent) |
+| `NeedsHuman` (`.reason`, `.url`, `.before`, `.hold`, `.onHold`) | a captcha, a sign-in page (except the declared path of a `codeLogin` task), a block, leaving the site's host (and not to `extraHosts`); the site is on hold (`onHold: true`) | stop; the window is open for the human. The site goes on hold (`.hold.until`); `onHold: true` means the task never started: not a failure, and no reason to retry before `until`. The state is not cleared until the task ends. From `act()`: with `before: true` the stop came from the check before the command and **the command did not run**; without it the command ran and the stop is about the page after it (a message may be out, a form sent) |
 | `BudgetExceeded` | more than `maxCommands` commands or `maxMinutes` minutes | treat the task as failed |
 | `StaleElement` | `gen` is out of date, the element is gone, something other than the target is under the cursor before the press, focus moved | take a fresh snapshot |
 | `BadCommand` | a command outside the set or with bad fields | a bug in the caller's code or the model |

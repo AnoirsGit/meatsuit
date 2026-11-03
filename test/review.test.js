@@ -40,7 +40,7 @@ const PAGES = {
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meatsuit-rev-'));
   const sitesFile = path.join(tmp, 'sites.json');
-  fs.writeFileSync(sitesFile, JSON.stringify({ 'example.test': { perDay: 100 } }));
+  fs.writeFileSync(sitesFile, JSON.stringify({ 'example.test': { perDay: 100, holdHours: 0 } }));
   const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), { headless: true, args: ['--remote-debugging-port=0'] });
   const PORT = await cdpPort(path.join(tmp, 'profile'));
   await ctx.route('**/*', (r) => {

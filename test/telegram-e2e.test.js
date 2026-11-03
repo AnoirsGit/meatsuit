@@ -35,7 +35,7 @@ const THREAD = 5;
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meatsuit-tg-'));
   const sitesFile = path.join(tmp, 'sites.json');
-  fs.writeFileSync(sitesFile, JSON.stringify({ 'example.test': { perDay: 100 }, 'closed.test': { perDay: 0 } }));
+  fs.writeFileSync(sitesFile, JSON.stringify({ 'example.test': { perDay: 100, holdHours: 0 }, 'closed.test': { perDay: 0 } }));
   const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), { headless: true, args: ['--remote-debugging-port=0'] });
   const PORT = await cdpPort(path.join(tmp, 'profile'));
   let html = '<button>Like</button>';

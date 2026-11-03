@@ -11,7 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require('playwright-core');
 const { cdpPort } = require('./cdp-port.js');
-const { connect } = require('../index.js');
+const { connect, releaseHold } = require('../index.js');
 
 const SINGLE = 'single.test';
 const MULTI = 'multi.test';
@@ -25,7 +25,7 @@ const OFF = 'off.test';
 (async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meatsuit-single-'));
   const sitesFile = path.join(tmp, 'sites.json');
-  fs.writeFileSync(sitesFile, JSON.stringify({ [SINGLE]: { perDay: 100, singleTab: true }, [MULTI]: { perDay: 100 }, [CAP]: { perDay: 100, singleTab: true }, [HIDE]: { perDay: 1, singleTab: true }, [FRESH]: { perDay: 1, singleTab: true }, [GONE]: { perDay: 1, singleTab: true }, [STALE]: { perDay: 100, singleTab: true }, [OFF]: { perDay: 100, singleTab: true, staleTabHours: 0 } }));
+  fs.writeFileSync(sitesFile, JSON.stringify({ [SINGLE]: { perDay: 100, singleTab: true }, [MULTI]: { perDay: 100 }, [CAP]: { perDay: 100, singleTab: true, holdHours: 0 }, [HIDE]: { perDay: 1, singleTab: true }, [FRESH]: { perDay: 1, singleTab: true }, [GONE]: { perDay: 1, singleTab: true }, [STALE]: { perDay: 100, singleTab: true }, [OFF]: { perDay: 100, singleTab: true, staleTabHours: 0 } }));
 
   const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), {
     headless: true, args: ['--remote-debugging-port=0'],
@@ -134,8 +134,12 @@ const OFF = 'off.test';
   assert.equal(mine.url(), `https://${FRESH}/captcha`, 'страница с капчей не должна уходить');
   assert.ok(notes.some((n) => n.event === 'needsHuman' && /f1/.test(n.text)), 'человеку должно уйти needsHuman');
   await mine.goto(`https://${FRESH}/app`); // человек решил
-  await ms3.task('f2', async ({ see }) => { await see(); ranFresh = true; }, { site: FRESH });
-  assert.equal(ranFresh, true, 'после решения капчи задача идёт: слот не был потрачен');
+  // Стоп площадки держится до снятия руками (или holdHours): решённая капча его не снимает.
+  await assert.rejects(ms3.task('f2', async () => { ranFresh = true; }, { site: FRESH }), (e) => e instanceof NeedsHuman && e.onHold === true);
+  assert.equal(ranFresh, false, 'на стопе задача не запускается');
+  assert.deepEqual(releaseHold(FRESH, { dir: path.join(tmp, 'state3') }), { released: true });
+  await ms3.task('f3', async ({ see }) => { await see(); ranFresh = true; }, { site: FRESH });
+  assert.equal(ranFresh, true, 'после снятия стопа задача идёт: слот не был потрачен');
   await ms3.close();
 
   // Дыра 5: вкладку площадки закрыли прямо перед задачей (человек в зеркале или другой клиент CDP). Подключение

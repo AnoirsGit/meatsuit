@@ -81,10 +81,11 @@ const CODE = '482913';
   const sitesFile = path.join(tmp, 'sites.json');
   const declared = { path: '^/account/login' };
   fs.writeFileSync(sitesFile, JSON.stringify({
-    'code.test': { perDay: 100, codeLogin: declared },
-    'plain.test': { perDay: 100 },
-    'bad.test': { perDay: 100, codeLogin: { path: 'account/login' } },
-    '*': { perDay: 100, codeLogin: declared }, // из "*" codeLogin не берётся
+    // holdHours 0: страницу входа здесь показывают нарочно и много раз, стоп площадки проверяет task.test.js
+    'code.test': { perDay: 100, codeLogin: declared, holdHours: 0 },
+    'plain.test': { perDay: 100, holdHours: 0 },
+    'bad.test': { perDay: 100, codeLogin: { path: 'account/login' }, holdHours: 0 },
+    '*': { perDay: 100, codeLogin: declared, holdHours: 0 }, // из "*" codeLogin не берётся
   }));
   const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), { headless: true, args: ['--remote-debugging-port=0'] });
   const PORT = await cdpPort(path.join(tmp, 'profile'));
