@@ -205,8 +205,10 @@ async function settle(net, { quietMs = 500, maxMs = 10000, now = Date.now, sleep
  * Выбрать вариант в <select> настоящими событиями. selectOption у Playwright выставляет значение сам и шлёт
  * синтетические input и change (isTrusted: false), страница это видит. Поэтому: мышь подходит к списку, он
  * получает фокус, и вариант выбирается стрелками, как у человека, не раскрывая список (его окно у браузера
- * с экраном рисуется отдельно, и мышью до него не дотянуться). Если стрелки не привели к нужному варианту
- * (недоступные варианты в списке), вариант ставится через selectOption: верное значение важнее.
+ * с экраном рисуется отдельно, и мышью до него не дотянуться). Стрелки выбор не двигают (Chromium на macOS
+ * по стрелке раскрывает список) — набирается начало подписи, которое есть только у этого варианта, тоже
+ * настоящими клавишами. Если и так не привели к нужному варианту (недоступные варианты в списке), вариант
+ * ставится через selectOption: верное значение важнее.
  */
 async function chooseOption(page, el, index, hands) {
   const at = () => el.evaluate((s) => s.selectedIndex);
@@ -218,6 +220,21 @@ async function chooseOption(page, el, index, hands) {
   for (let i = Math.abs(index - from); i > 0; i--) {
     await hands.sleep(between(hands.rnd, 140, 380));
     await human.press(page, key, hands);
+  }
+  if (await at() !== index) {
+    // Кратчайшее начало подписи, с которого не начинается ни один другой вариант (поиск по буквам без учёта регистра).
+    const prefix = await el.evaluate((s, k) => {
+      const sq = (t) => (t || '').replace(/\s+/g, ' ').trim();
+      const lows = [...s.options].map((x) => sq(x.text).toLowerCase()), mine = [...sq(s.options[k].text)];
+      let n = 1;
+      while (n < mine.length && lows.some((x, j) => j !== k && x.startsWith(mine.slice(0, n).join('').toLowerCase()))) n++;
+      return mine.slice(0, n).join('');
+    }, index);
+    if (prefix) {
+      // По настоящим часам, не по hands: набранное раньше браузер помнит около секунды, иначе буквы допишутся к старым.
+      await human.sleep(between(hands.rnd, 1100, 1600));
+      await human.type(page, prefix, { ...hands, typoRate: 0 });
+    }
   }
   if (await at() !== index) await el.selectOption({ index });
 }
