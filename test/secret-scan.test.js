@@ -194,11 +194,22 @@ test('вне git-репозитория: код 2 и понятное сообщ
 
 // Скрипт разбирается всеми оболочками, какие есть под рукой: /bin/bash на macOS — это bash 3.2, он не терпел heredoc
 // с непарной кавычкой внутри $( ), и из-за этого pretest и хук падали на ноутбуке при зелёном dash на сервере.
+// dash и bash 5 на Linux такой скрипт разбирают, поэтому там -n регрессию не видит: ниже ещё и проверка по тексту.
 test('скрипт разбирается (-n) в /bin/sh, /bin/bash и dash, где они есть', () => {
   const shells = ['/bin/sh', '/bin/bash', '/usr/bin/dash', '/bin/dash'].filter((s) => fs.existsSync(s));
   assert.ok(shells.length > 0, 'нет ни одной оболочки');
   for (const sh of shells) {
     const r = spawnSync(sh, ['-n', SCAN], { encoding: 'utf8' });
     assert.equal(r.status, 0, `${sh} -n: ${r.stderr}`);
+  }
+});
+
+// То же на любой ОС: heredoc не начинается внутри незакрытой $( ) на той же строке (так было: RULES=$(cat <<'EOF').
+// Многострочную $( ) с heredoc внутри эта проверка не видит.
+test('в скриптах скана нет heredoc внутри $( ): bash 3.2 его не разбирает', () => {
+  for (const file of [SCAN, INSTALL, path.join(__dirname, '..', 'tools', 'hooks', 'pre-commit')]) {
+    fs.readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
+      assert.doesNotMatch(line, /\$\([^)]*<</, `${path.basename(file)}:${i + 1}: heredoc внутри $( ), вынесите его в функцию`);
+    });
   }
 });
