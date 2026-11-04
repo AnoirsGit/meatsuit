@@ -44,7 +44,7 @@ copy the owner's window bounds ([`window.js`](../extras/window.js)). `GET /view`
 
 Yellow marks of the container: **WebGL** — fixed for Brave (`--enable-unsafe-swiftshader`, measured below); Google
 Chrome, which the server runs, got the same change in `docker/chrome.conf` (`--disable-software-rasterizer` dropped,
-`--enable-unsafe-swiftshader` added) on 05.11.2026: made, **not measured, not deployed**, so run `selfcheck.js` on the
+`--enable-unsafe-swiftshader` added) on 04.11.2026: made, **not measured, not deployed**, so run `selfcheck.js` on the
 server's Chrome after the next deploy. **Notifications denied everywhere**
 (`DefaultNotificationsSetting: 2` in both policy files). **Few fonts** (install `fonts-liberation`, `fonts-dejavu`,
 `fonts-noto-core`, `fonts-roboto` in the image and re-check). Linux + 2 cores + 1280×720 is rare but self-consistent,

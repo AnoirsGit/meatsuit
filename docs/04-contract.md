@@ -264,7 +264,7 @@ changed: false }` и только пишет в журнал (`upload` пере�
 у `selectOption` в Playwright). Вариант уже выбран — ничего не делается.
 
 `BadCommand` до любого действия: цель не `<select>`, `multiple`, список или вариант недоступен (`disabled`, в том
-числе у `optgroup`), такого варианта нет. Проверено в headless Chromium (`test/forms.test.js`): на macOS 5 ноября, там работает путь с набором подписи; на
+числе у `optgroup`), такого варианта нет. Проверено в headless Chromium (`test/forms.test.js`): на macOS 4 ноября, там работает путь с набором подписи; на
 Linux, где работают стрелки, в тот день не гоняли; в Chrome под Neko живьём не проверено.
 
 ### Темп рук

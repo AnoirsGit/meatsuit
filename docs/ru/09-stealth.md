@@ -53,7 +53,7 @@
 
 Жёлтые отметки контейнера:
 - **WebGL.** У Brave исправлено (`--enable-unsafe-swiftshader`, `--disable-software-rasterizer` убран; измерено, см.
-  ниже). В Google Chrome, который стоит на сервере, ту же правку внесли в `docker/chrome.conf` 05.11.2026
+  ниже). В Google Chrome, который стоит на сервере, ту же правку внесли в `docker/chrome.conf` 04.11.2026
   (`--disable-software-rasterizer` убран, `--enable-unsafe-swiftshader` добавлен): внесено, **не измерено и не
   развёрнуто**; после деплоя прогнать `selfcheck.js` на Chrome.
 - **Уведомления запрещены для всех сайтов** (`DefaultNotificationsSetting: 2` в обоих файлах политик). У людей
