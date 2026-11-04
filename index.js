@@ -134,6 +134,7 @@ async function connect({
         if (e instanceof StaleWorld) { busy = busy || e; continue; }
         throw e;
       }
+      if (!onSite(snap.url)) continue; // вкладку только что увели с площадки, а подключение ещё помнит старый адрес
       const reason = guardCheck(snap, codeLogin ? { codeLogin: { site, path: codeLogin.path } } : {});
       seen.push({ page: found, ...info, url: snap.url, title: snap.title, reason, typed: tabs.typed(snap) });
     }

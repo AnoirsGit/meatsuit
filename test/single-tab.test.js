@@ -21,11 +21,12 @@ const FRESH = 'fresh.test';
 const GONE = 'gone.test';
 const STALE = 'stale.test';
 const OFF = 'off.test';
+const LEFT = 'left.test';
 
 (async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meatsuit-single-'));
   const sitesFile = path.join(tmp, 'sites.json');
-  fs.writeFileSync(sitesFile, JSON.stringify({ [SINGLE]: { perDay: 100, singleTab: true }, [MULTI]: { perDay: 100 }, [CAP]: { perDay: 100, singleTab: true, holdHours: 0 }, [HIDE]: { perDay: 1, singleTab: true }, [FRESH]: { perDay: 1, singleTab: true }, [GONE]: { perDay: 1, singleTab: true }, [STALE]: { perDay: 100, singleTab: true }, [OFF]: { perDay: 100, singleTab: true, staleTabHours: 0 } }));
+  fs.writeFileSync(sitesFile, JSON.stringify({ [SINGLE]: { perDay: 100, singleTab: true }, [MULTI]: { perDay: 100 }, [CAP]: { perDay: 100, singleTab: true, holdHours: 0 }, [HIDE]: { perDay: 1, singleTab: true }, [FRESH]: { perDay: 1, singleTab: true }, [GONE]: { perDay: 1, singleTab: true }, [STALE]: { perDay: 100, singleTab: true }, [OFF]: { perDay: 100, singleTab: true, staleTabHours: 0 }, [LEFT]: { perDay: 100, singleTab: true } }));
 
   const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), {
     headless: true, args: ['--remote-debugging-port=0'],
@@ -166,6 +167,26 @@ const OFF = 'off.test';
   assert.equal(own5.length, 1, 'открыта одна своя вкладка площадки');
   await own5[0].close();
   await ms4.close();
+
+  // Дыра 6: человек увёл вкладку с площадки прямо перед задачей. Подключение узнаёт новый адрес событием чуть позже
+  // и ещё показывает старый: по снимку вкладка уже не на площадке — её не берём, открываем своё окно.
+  await mine.goto(`https://${LEFT}/app`);
+  let pl;
+  chromium.connectOverCDP = async (u) => { pl = await orig.call(chromium, u); return pl; };
+  const ms6 = await connect({ cdpUrl: `http://127.0.0.1:${PORT}`, dir: path.join(tmp, 'state6'), sitesFile });
+  chromium.connectOverCDP = orig;
+  const lagging = pl.contexts()[0].pages().find((q) => q.url().includes(LEFT));
+  assert.ok(lagging, 'подключение видит вкладку площадки');
+  await mine.goto('about:blank');
+  lagging.url = () => `https://${LEFT}/app`; // событие о смене адреса ещё не дошло
+  const before6 = count();
+  await ms6.task('l1', async ({ act }) => { await act({ cmd: 'goto', url: `https://${LEFT}/app` }); }, { site: LEFT });
+  await settle();
+  assert.equal(mine.url(), 'about:blank', 'вкладку, уведённую с площадки, задача не трогает');
+  assert.equal(count(), before6 + 1, 'задача открывает своё окно');
+  delete lagging.url;
+  await ctx.pages().find((q) => q !== mine && q.url().includes(LEFT)).close();
+  await ms6.close();
 
   // Заброшенные вкладки: без активности дольше staleTabHours (по умолчанию 48 ч) закрываются, кроме рабочей,
   // вкладки на экране, вкладки с капчей и вкладки с набранным текстом; смена адреса — активность.
