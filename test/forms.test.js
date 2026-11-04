@@ -153,6 +153,11 @@ const idOf = (s, name) => s.elements.find((e) => e.name === name).id;
   assert.equal(f1.elements.find((e) => e.name === 'Город').value, 'Алматы');
   assert.ok(Date.now() - t0 < 25000, `далёкий вариант выбирался ${Date.now() - t0} мс`);
   assert.ok(await page.evaluate(() => window.changes) >= 1);
+  // Подпись — начало других («Город 1» у «Город 12»): где стрелки не двигают выбор (macOS), набирается «Город 12» целиком.
+  await page.evaluate(() => { document.getElementById('far').onchange = (e) => { document.title += `far:${e.target.value}:${e.isTrusted};`; }; document.title = ''; });
+  await sel.act({ cmd: 'select', id: idOf(f1, 'Город'), gen: f1.gen, label: 'Город 12' });
+  assert.equal(await page.inputValue('#far'), 'Город 12');
+  assert.ok((await page.title()).endsWith('far:Город 12:true;'), await page.title());
 
   // Больше 100 вариантов: в снимке первые 100 и общее число.
   await page.setContent(`<select aria-label="Много">${Array.from({ length: 130 }, (_, i) => `<option>v${i}</option>`).join('')}</select>`);

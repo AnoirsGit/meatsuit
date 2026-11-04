@@ -332,7 +332,9 @@ function hands(page, opts = {}) {
    * Вариант в <select>. Раскрытый список браузер с экраном рисует отдельным окном, мышью до него не дотянуться.
    * Поэтому как у человека с клавиатурой: рука подходит к списку, он получает фокус, вариант выбирается стрелками,
    * не раскрывая список; далёкий вариант — первыми буквами подписи, потом стрелками. События настоящие.
-   * Не вышло (браузер не двигает выбор стрелками) — вариант ставится напрямую с событиями input и change.
+   * Стрелки выбор не двигают (Chromium на macOS по стрелке раскрывает список) — набирается начало подписи,
+   * которое есть только у этого варианта, тоже настоящими клавишами; не попал — ещё раз после паузы.
+   * Не вышло и так — вариант ставится напрямую с событиями input и change.
    */
   const choose = async (c) => {
     const el = await target(c.id, c.gen);
@@ -349,7 +351,11 @@ function hands(page, opts = {}) {
       if (k < 0) return { error: 'нет такого варианта' };
       const o = opts[k];
       if (o.disabled || (o.parentElement.tagName === 'OPTGROUP' && o.parentElement.disabled)) return { error: 'вариант недоступен' };
-      return { index: k, from: s.selectedIndex, word: (sq(o.label).match(/^[\p{L}\p{N}]+/u) || [''])[0].slice(0, 12) };
+      // Кратчайшее начало подписи, с которого не начинается ни один другой вариант (поиск по буквам без учёта регистра).
+      const lows = opts.map((x) => sq(x.label).toLowerCase()), mine = [...sq(o.label)];
+      let n = 1;
+      while (n < mine.length && lows.some((x, j) => j !== k && x.startsWith(mine.slice(0, n).join('').toLowerCase()))) n++;
+      return { index: k, from: s.selectedIndex, word: (sq(o.label).match(/^[\p{L}\p{N}]+/u) || [''])[0].slice(0, 12), prefix: mine.slice(0, n).join('') };
     }, [c.id, byLabel, byLabel ? c.label : c.value]);
     if (want.error) throw new BadCommand(`select: ${want.error}`);
     if (want.from === want.index) return; // уже выбран
@@ -369,6 +375,12 @@ function hands(page, opts = {}) {
       const next = await now();
       if (next === at) break; // стрелка выбор не двигает
       at = next;
+    }
+    for (let tries = 0; at !== want.index && want.prefix && tries < 2; tries++) {
+      await human.pause(1100, 1600); // набранное раньше браузер помнит около секунды: иначе буквы допишутся к старым
+      await focused(c.id);
+      await human.type(page, want.prefix, { typoRate: 0 });
+      at = await now();
     }
     if (at !== want.index) {
       await dom.run(world, ([i, k]) => {
