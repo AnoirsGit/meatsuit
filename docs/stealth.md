@@ -18,7 +18,7 @@ review were not the hands but the rhythm between actions and the container:
 
 | Layer | Before | Now (20.10) | Still open |
 |---|---|---|---|
-| Network | home exit, fail closed, ASN check | the server can switch between exit nodes by a list, with the exit checked in the Tailscale container | the exit node today is `anoir-pc`, which is not on around the clock (while it is off the browser has no network); the always-on helper phone has not arrived ([ru/09-phone-exit-node.md](ru/09-phone-exit-node.md)) |
+| Network | home exit, fail closed, ASN check | the server can switch between exit nodes by a list, with the exit checked in the Tailscale container | the exit node today is `home-pc`, which is not on around the clock (while it is off the browser has no network); the always-on helper phone has not arrived ([ru/09-phone-exit-node.md](ru/09-phone-exit-node.md)) |
 | Browser fingerprint | real Brave, Patchright, task window of its own default size | task and warm-up windows **sized like the owner's window**; `selfcheck.js` measures the tells | on the server's Chrome the WebGL fix (`--enable-unsafe-swiftshader` in `chrome.conf`) is made but not measured or deployed, notifications denied by policy, container fonts |
 | Behaviour | Fitts mouse, typing with typos, wheel notches of 100 px, actions back to back | **think pause** before every action, **53 px notches** like the owner's wheel under X11, **guard before an action**, `hover` | deep `goto` without referrer; owner and bot at the same time; warm-up unaware of bots |
 

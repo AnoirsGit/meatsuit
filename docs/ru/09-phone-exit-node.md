@@ -1,7 +1,7 @@
 # Телефон дома как exit node: первая настройка
 
 Записка для владельца, сверена 21.10.2026. Вспомогательный Android-телефон (модель ещё не выбрана) лежит дома на
-зарядке, в интернет ходит **только по Wi-Fi**, Google-аккаунта на нём нет. Он служит exit node Tailscale; `anoir-pc`
+зарядке, в интернет ходит **только по Wi-Fi**, Google-аккаунта на нём нет. Он служит exit node Tailscale; `home-pc`
 остаётся запасным: если телефон пропал, контейнер Tailscale на сервере сам переходит на ПК и возвращается, когда телефон
 снова в сети. Как это устроено — [egress.md](../egress.md#fallback-order), здесь только шаги. Основной телефон (iPhone) в
 автоматизации не участвует: на нём только VPN и Telegram.
@@ -75,7 +75,7 @@ git checkout -B main origin/main
 адрес, имя там не принимается):
 
 ```sh
-MEATSUIT_EXIT_NODES=home-phone,anoir-pc
+MEATSUIT_EXIT_NODES=home-phone,home-pc   # имена узлов, как в админке Tailscale
 MEATSUIT_EXIT_COUNTRY=<страна>      # с домашнего Wi-Fi открыть https://ipinfo.io/json: поле country
 MEATSUIT_EXIT_ASN=<номер>           # там же: число из поля org после «AS»; несколько — через запятую
 ```
@@ -118,7 +118,7 @@ docker ps -q | xargs docker inspect --format '{{.Name}} {{.HostConfig.NetworkMod
    `ok <страна> <номер>`, внизу `gate: open`.
 2. В зеркале открыть <https://ipinfo.io>: страна и провайдер домашние.
 3. Учебная тревога: на телефоне выключить Wi-Fi. Через несколько минут `docker/up.sh logs --tail 20 tailscale` пишет
-   `exit-picker: exit node: anoir-pc (…)`, в зеркале ipinfo по-прежнему домашний. Включить Wi-Fi: минуты через две после
+   `exit-picker: exit node: home-pc (…)`, в зеркале ipinfo по-прежнему домашний. Включить Wi-Fi: минуты через две после
    того, как телефон снова в сети, выход вернётся на него.
 4. Скорость: шаг 5 «Verify» в [egress.md](../egress.md#verify) — через телефон, потом через ПК; записать обе цифры.
 5. Если `gate: closed` и браузер без сети: ни один узел не прошёл проверку. Смотреть `status` (колонка probe) и логи:

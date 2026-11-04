@@ -62,10 +62,10 @@ The full deploy sequence, including binding the mirror to a private address, is 
 One exit node is a single point of failure. With `MEATSUIT_EXIT_NODES` in the deploy file the Tailscale container picks the exit node itself, from an ordered list of names:
 
 ```sh
-MEATSUIT_EXIT_NODES=home-phone,anoir-pc     # first = preferred; names as in the admin console, no spaces
+MEATSUIT_EXIT_NODES=home-phone,home-pc     # first = preferred; names as in the admin console, no spaces
 MEATSUIT_EXIT_COUNTRY=KZ                    # optional: the right exit, from https://ipinfo.io/json at home
 MEATSUIT_EXIT_ASN=64500                     # optional: your home ISP's number(s), comma separated, without "AS"
-TS_EXTRA_ARGS="--exit-node=<100.x of anoir-pc> --exit-node-allow-lan-access=true"   # still needed at boot, see below
+TS_EXTRA_ARGS="--exit-node=<100.x of home-pc> --exit-node-allow-lan-access=true"   # still needed at boot, see below
 ```
 
 `docker/egress/exit-picker.sh` runs next to `containerboot` and every 30 seconds reads `tailscale status --json`:
@@ -141,7 +141,7 @@ Callers should treat `503` as "postpone and retry later"; meatsuit does not retr
 1. In the mirror open `https://ipinfo.io`. It should show your home country and ISP. Only then start warm-up or bots.
 2. Look at the Tailscale container: its healthcheck passes only when it is logged in and the chosen exit node is online.
 3. Stop the exit node (or disable it in the console) and confirm that the browser has no network and does not fall back to the server. Run once on the owner's server on 8 October 2026 (see [What is verified](#what-is-verified-and-what-is-not)).
-4. With the fallback list: `docker/up.sh exec tailscale sh /exit-picker.sh status` shows the chosen node and `gate: open`. Then the failover drill: switch the phone's Wi-Fi off; within a few minutes (Tailscale has to mark the phone offline, then two checks) the logs show `exit node: anoir-pc`, and `https://ipinfo.io` in the mirror still shows home. Switch Wi-Fi back on; about two minutes after the phone shows online it is back on the phone. Not run yet: the phone has not arrived.
+4. With the fallback list: `docker/up.sh exec tailscale sh /exit-picker.sh status` shows the chosen node and `gate: open`. Then the failover drill: switch the phone's Wi-Fi off; within a few minutes (Tailscale has to mark the phone offline, then two checks) the logs show `exit node: home-pc`, and `https://ipinfo.io` in the mirror still shows home. Switch Wi-Fi back on; about two minutes after the phone shows online it is back on the phone. Not run yet: the phone has not arrived.
 5. Measure the path. In the Tailscale container run `tailscale ping -c 10 --until-direct <home-node>`: you want a direct path, not "via DERP" (Tailscale's relay). Then measure speed from inside the browser's network, where traffic really goes through the tunnel, for example `docker/up.sh exec neko curl -s -o /dev/null -w 'down %{speed_download} B/s\n' 'https://speed.cloudflare.com/__down?bytes=50000000'` (the image has curl). Pages and video travel home to server, so your home upload speed is the cap. About 5 to 8 Mbit/s for watching video in the browser is the author's estimate, not a measurement. None of this was run in the egress setup.
 
 ## SSH safety warning

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Выбор exit node по списку с запасным: телефон дома → anoir-pc. Работает в контейнере tailscale рядом с containerboot
+# Выбор exit node по списку с запасным: телефон дома → home-pc. Работает в контейнере tailscale рядом с containerboot
 # (docker-compose.yml: command = exit-picker.sh launch containerboot). Без MEATSUIT_EXIT_NODES ничего не делает:
 # launch просто запускает команду, выход задаёт TS_EXTRA_ARGS, как раньше.
 #
@@ -9,7 +9,7 @@
 #   exit-picker.sh status             таблица узлов из списка: адрес, в сети ли, выбран ли, ворота
 #
 # Настройки (файл деплоя → compose → окружение контейнера):
-#   MEATSUIT_EXIT_NODES    имена по порядку предпочтения через запятую, без пробелов: home-phone,anoir-pc.
+#   MEATSUIT_EXIT_NODES    имена по порядку предпочтения через запятую, без пробелов: home-phone,home-pc.
 #                          Имя — первая часть имени MagicDNS, полное имя, HostName или 100.x-адрес узла.
 #   MEATSUIT_EXIT_COUNTRY  ожидаемая страна выхода (KZ); MEATSUIT_EXIT_ASN — номера провайдера через запятую (64500).
 #                          Хотя бы одно задано — после каждой смены и раз в MEATSUIT_EXIT_PROBE_EVERY шагов выход

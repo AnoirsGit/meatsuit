@@ -19,7 +19,7 @@ const TOOLS = ['cat', 'tr', 'awk', 'sed', 'head', 'cut', 'mkdir', 'rm', 'sleep']
 
 // Адреса узлов — TEST-NET-1 (RFC 5737): разбору всё равно, а настоящие 100.x тут были бы похожи на утечку.
 const PHONE = { ip: '192.0.2.2', dns: 'home-phone.tailnet.example.', host: 'OPPO-A57', online: true, opt: true };
-const PC = { ip: '192.0.2.3', dns: 'anoir-pc.tailnet.example.', host: 'anoir-pc', online: true, opt: true };
+const PC = { ip: '192.0.2.3', dns: 'home-pc.tailnet.example.', host: 'home-pc', online: true, opt: true };
 const LAPTOP = { ip: '192.0.2.4', dns: 'laptop.tailnet.example.', host: 'laptop', online: true, opt: false };
 // Документационные номера (RFC 5398): домашний провайдер и мобильный оператор
 const HOME = { ipinfo: { ip: '203.0.113.7', country: 'KZ', org: 'AS64500 Home ISP' }, ipwho: { success: true, country_code: 'KZ', connection: { asn: 64500 } } };
@@ -90,7 +90,7 @@ function sandbox(t, world, { ip6 = false } = {}) {
   fs.writeFileSync(files.log, '');
   const base = {
     PATH: bin, FAKE_WORLD: files.world, FAKE_LOG: files.log, FAKE_RULES: files.rules, FAKE_LIB: lib,
-    EXIT_PICKER_STATE: files.state, EXIT_PICKER_SETTLE: '0', MEATSUIT_EXIT_NODES: 'home-phone,anoir-pc',
+    EXIT_PICKER_STATE: files.state, EXIT_PICKER_SETTLE: '0', MEATSUIT_EXIT_NODES: 'home-phone,home-pc',
   };
   const sb = {
     dir, files,
@@ -125,11 +125,11 @@ test('без проверки: берёт первый узел из списк�
 test('имена: первая часть MagicDNS, полное имя, HostName и 100.x без учёта регистра; узел без exit node и Self не берутся', (t) => {
   for (const name of ['HOME-PHONE', 'home-phone.tailnet.example', 'oppo-a57', '192.0.2.2']) {
     const sb = sandbox(t, { peers: [PC, PHONE] });
-    once(sb, { MEATSUIT_EXIT_NODES: `${name},anoir-pc` });
+    once(sb, { MEATSUIT_EXIT_NODES: `${name},home-pc` });
     assert.equal(sb.world().selected, PHONE.ip, name);
   }
   const sb = sandbox(t, { peers: [LAPTOP, PC] });
-  const r = once(sb, { MEATSUIT_EXIT_NODES: 'laptop,meatsuit,anoir-pc' });
+  const r = once(sb, { MEATSUIT_EXIT_NODES: 'laptop,meatsuit,home-pc' });
   assert.equal(sb.world().selected, PC.ip);
   assert.match(r.stderr, /laptop: не предлагает себя как exit node/);
   assert.match(r.stderr, /meatsuit: нет такого узла/);
@@ -142,7 +142,7 @@ test('Tailscale ещё не вошёл: ничего не делает', (t) => 
   assert.equal(sb.gate(), null);
 });
 
-test('телефон пропал: уходит на anoir-pc только после MEATSUIT_EXIT_DOWN_AFTER шагов, возвращается после RETURN_AFTER', (t) => {
+test('телефон пропал: уходит на home-pc только после MEATSUIT_EXIT_DOWN_AFTER шагов, возвращается после RETURN_AFTER', (t) => {
   const sb = sandbox(t, { peers: [PHONE, PC] });
   const env = { MEATSUIT_EXIT_DOWN_AFTER: '2', MEATSUIT_EXIT_RETURN_AFTER: '3' };
   once(sb, env);
@@ -185,7 +185,7 @@ test('с проверкой: ворота закрыты до проверки, 
   assert.equal(log[iClose], `iptables -I OUTPUT 1 ${GATE4}`);
 });
 
-test('телефон на мобильных данных (чужой AS): бракуется, выход через anoir-pc; без ASN в списке — тоже ok по стране', (t) => {
+test('телефон на мобильных данных (чужой AS): бракуется, выход через home-pc; без ASN в списке — тоже ok по стране', (t) => {
   const sb = sandbox(t, { peers: [PHONE, PC], egress: { [PHONE.ip]: MOBILE, [PC.ip]: HOME } });
   const r = once(sb, PROBE);
   assert.equal(sb.world().selected, PC.ip);
@@ -208,7 +208,7 @@ test('ни один узел не прошёл проверку: ворота з
   assert.deepEqual(sb.rules(), [GATE4]);
   assert.deepEqual(sb.rules('ip6tables'), [GATE4.replace('100.64.0.0/10', 'fd7a:115c:a1e0::/48')]);
   assert.match(r.stderr, /годного exit node нет/);
-  assert.match(r.stderr, /anoir-pc: wrong \(страна DE/);
+  assert.match(r.stderr, /home-pc: wrong \(страна DE/);
 });
 
 test('сервис-эхо: ipinfo молчит — ipwho.is; оба молчат или нет провайдера при заданном ASN — unknown, ворота закрыты', (t) => {
@@ -265,7 +265,7 @@ test('status: таблица узлов, выбранный и ворота', (t
   assert.equal(r.status, 0, r.stderr);
   const lines = r.stdout.trim().split('\n');
   assert.match(lines[1], /^1\s+home-phone\s+192\.0\.2\.2\s+yes\s+-\s+wrong KZ 64501 ipinfo/);
-  assert.match(lines[2], /^2\s+anoir-pc\s+192\.0\.2\.3\s+yes\s+yes\s+ok KZ 64500 ipinfo/);
+  assert.match(lines[2], /^2\s+home-pc\s+192\.0\.2\.3\s+yes\s+yes\s+ok KZ 64500 ipinfo/);
   assert.equal(lines[3], 'gate: open');
   assert.match(sb.run(['status'], { MEATSUIT_EXIT_NODES: '' }).stdout, /TS_EXTRA_ARGS/);
 });

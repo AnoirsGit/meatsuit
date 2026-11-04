@@ -161,9 +161,9 @@ test('Tailscale — необязательный профиль: MEATSUIT_EGRESS
   // и из окружения, как остальные переменные compose
   assert.ok(model(envFile(t), { MEATSUIT_EGRESS: 'tailscale' }).services.tailscale);
   // список exit node и ожидаемый выход доходят до контейнера из файла деплоя
-  const listed = model(envFile(t, {}, 'MEATSUIT_EGRESS=tailscale\nMEATSUIT_EXIT_NODES=home-phone,anoir-pc\nMEATSUIT_EXIT_COUNTRY=KZ\nMEATSUIT_EXIT_ASN=64500\n'));
+  const listed = model(envFile(t, {}, 'MEATSUIT_EGRESS=tailscale\nMEATSUIT_EXIT_NODES=home-phone,home-pc\nMEATSUIT_EXIT_COUNTRY=KZ\nMEATSUIT_EXIT_ASN=64500\n'));
   const env = listed.services.tailscale.environment;
-  assert.deepEqual([env.MEATSUIT_EXIT_NODES, env.MEATSUIT_EXIT_COUNTRY, env.MEATSUIT_EXIT_ASN], ['home-phone,anoir-pc', 'KZ', '64500']);
+  assert.deepEqual([env.MEATSUIT_EXIT_NODES, env.MEATSUIT_EXIT_COUNTRY, env.MEATSUIT_EXIT_ASN], ['home-phone,home-pc', 'KZ', '64500']);
   // тонкая настройка, описанная в egress.md, тоже доходит; без неё — пусто, и скрипт берёт свои значения
   const tuned = model(envFile(t, {}, 'MEATSUIT_EGRESS=tailscale\nMEATSUIT_EXIT_RETURN_AFTER=6\nMEATSUIT_EXIT_PROBE_EVERY=20\n')).services.tailscale.environment;
   assert.deepEqual([tuned.MEATSUIT_EXIT_RETURN_AFTER, tuned.MEATSUIT_EXIT_PROBE_EVERY, tuned.MEATSUIT_EXIT_INTERVAL, tuned.MEATSUIT_EXIT_DOWN_AFTER], ['6', '20', '', '']);
