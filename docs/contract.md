@@ -267,13 +267,16 @@ allowed). Exactly one of the two, a string up to 200 characters. The target is a
 As a human with a keyboard does it: the hand reaches the list, it gets focus, and the option is chosen with the arrow
 keys without opening it (the browser draws an open list as a separate window the mouse cannot reach); an option more
 than 25 positions away is first reached by typing the first letters of its label (type-ahead on a closed list), then
-by arrows. The `input` and `change` events are real (`isTrusted`). If the browser did not move the selection with
-the keys, the option is set directly with `input` and `change` events (these are synthetic, as with Playwright's
-`selectOption`). If the option is already selected, nothing happens.
+by arrows. The `input` and `change` events are real (`isTrusted`). If the arrow keys do not move the selection
+(Chromium on macOS opens the list on an arrow key instead), the shortest start of the label that no other option
+begins with is typed, with real keys too. If the browser still did not move the selection, the option is set directly
+with `input` and `change` events (these are synthetic, as with Playwright's `selectOption`). If the option is already
+selected, nothing happens.
 
 `BadCommand` before any action: the target is not a `<select>`, it has `multiple`, the list or the option is not
 available (`disabled`, including on an `optgroup`), or there is no such option. Verified in headless Chromium
-(`test/forms.test.js`). On macOS (seen 5 November) the arrow keys do not change a closed list in Chromium, so the fallback to synthetic events runs there and that test fails (open item, [ROADMAP](ROADMAP.md), in Russian); not re-run on Linux that day; not verified live in Chrome under Neko.
+(`test/forms.test.js`): on macOS on 5 November, where the typed-label path runs; not re-run on Linux that day, where
+the arrow path runs; not verified live in Chrome under Neko.
 
 ### The hands' pace
 
