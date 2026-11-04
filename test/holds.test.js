@@ -65,6 +65,7 @@ assert.equal(r.status, 0, r.stderr);
 assert.match(r.stdout, /tinder\.com: стоп снят/);
 assert.equal(holds.holdState('tinder.com', { dir }), null);
 assert.match(cli('--dir', dir, 'tinder.com').stdout, /стопа не было/);
+assert.ok(cli('--dir', dir, 'tinder.com').stdout.includes(`стопа не было (${dir}; `), 'папка видна: стоп мог лежать в другой');
 r = cli('--dir');
 assert.equal(r.status, 1);
 // Без --dir — MEATSUIT_DIR (так команду печатает сообщение о стопе).

@@ -2,7 +2,7 @@
 /**
  * Снять стоп площадки раньше срока (стоп ставит task() после NeedsHuman, см. holds.js):
  *   node tools/release.js tinder.com [--dir /meatsuit/state]
- * Без --dir — MEATSUIT_DIR, иначе ~/.meatsuit (как у connect()). Без браузера. Без площадки — показать стоп всех.
+ * Без --dir — MEATSUIT_DIR, иначе ~/.meatsuit. connect() MEATSUIT_DIR не читает: команду с --dir печатает сообщение о стопе. Без браузера. Без площадки — показать стоп всех.
  */
 const fs = require('node:fs');
 const os = require('node:os');
@@ -25,4 +25,4 @@ if (!site) {
   process.exit(0);
 }
 const { released } = releaseHold(site, { dir });
-console.log(released ? `${site}: стоп снят` : `${site}: стопа не было`);
+console.log(released ? `${site}: стоп снят` : `${site}: стопа не было (${dir}; стоп в другой папке — укажите её в --dir)`);

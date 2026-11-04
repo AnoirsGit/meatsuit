@@ -195,10 +195,11 @@ async function connect({
     const holdFor = holds.holdHours(rule); // кривой holdHours — тоже
     // Стоп площадки после прошлого NeedsHuman: в браузер не идём, очередь не ждём, слот не тратим, notify не шлём
     // (о стопе уже сообщили, когда его ставили).
+    // В команде снятия — --dir этой задачи: release.js без него берёт MEATSUIT_DIR, а connect() эту переменную не читает.
     const onHold = () => {
       const held = holds.holdState(site, { dir });
       if (!held) return null;
-      const e = new NeedsHuman(`${site} на стопе до ${holds.clock(held.until)} после «${held.reason}»; снять раньше — releaseHold('${site}') или node tools/release.js ${site}`, held.url);
+      const e = new NeedsHuman(`${site} на стопе до ${holds.clock(held.until)} после «${held.reason}»; снять раньше — releaseHold('${site}') или node tools/release.js ${site} --dir ${JSON.stringify(dir)}`, held.url);
       e.hold = held;
       e.onHold = true;
       return e;

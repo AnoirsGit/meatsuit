@@ -81,7 +81,8 @@ const CAPTCHA = '<p>Verify you are human</p>';
   const limitsBefore = fs.readFileSync(path.join(tmp, 'state', 'limits.json'), 'utf8');
   let ran = false;
   await assert.rejects(ms.task('t3b', async () => { ran = true; }, { site: SITE }),
-    (e) => e instanceof NeedsHuman && e.onHold === true && e.hold.until === held.until && /на стопе до .*капча.*release/.test(e.message));
+    (e) => e instanceof NeedsHuman && e.onHold === true && e.hold.until === held.until && /на стопе до .*капча.*release/.test(e.message)
+      && e.message.endsWith(`release.js ${SITE} --dir ${JSON.stringify(path.join(tmp, 'state'))}`)); // dir задачи: release.js без --dir берёт MEATSUIT_DIR
   await assert.rejects(ms.task('t3c', async () => { ran = true; }, { site: SITE, dryRun: true }), (e) => e.onHold === true, 'репетиция тоже стоит');
   await settle();
   assert.equal(ran, false, 'задача на стопе не должна запускаться');

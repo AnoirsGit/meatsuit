@@ -125,7 +125,8 @@ const { released } = releaseHold(site, { dir? }); // lift it early; released —
 ```
 
 No browser and no queue; `dir` is the same as for `connect` (`~/.meatsuit` by default). From a shell:
-`node tools/release.js <site> [--dir …]` (without a site it lists the holds; `--dir` defaults to `MEATSUIT_DIR`).
+`node tools/release.js <site> [--dir …]` (without a site it lists the holds; `--dir` defaults to `MEATSUIT_DIR`, else `~/.meatsuit`; `connect` does not read that variable,
+so the `NeedsHuman` message of a held task prints the command with its own `--dir`).
 The `NeedsHuman` that set the hold carries `.hold` as well, with the time the site is held until (`until`). The files
 are `<dir>/holds/<site>.json`; their format is not part of the contract.
 
