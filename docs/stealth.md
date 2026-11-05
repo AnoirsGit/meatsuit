@@ -109,7 +109,7 @@ Also done the same day: the service and the warm-up step aside while the owner h
 
 So the change gives Chrome WebGL, but it stays yellow: unlike Brave, Chrome names the real renderer, and SwiftShader is what virtual machines and containers show. The server still runs the old `chrome.conf` until the next deploy; not measured there.
 
-In four of the six runs the script printed its whole result and then did not exit, each time after the browser container had been re-created: the window was already closed and the CDP connection was closed, and it stayed in its last step, closing its local check page. The printed result is complete; stop such a run by hand. With Brave the same day it exited in 3 s. Not investigated further.
+In four of the six runs the script printed its whole result and then did not exit, each time after the browser container had been re-created (the two runs right after the first start exited). In the one run traced with `DEBUG=pw:api`, `page.close` and `browser.close` returned and nothing followed; the only step left is closing the script's local HTTP server for the check page, so it most likely waits there. The printed result is complete; stop such a run by hand. With Brave the same day, also after a re-create (by `verify.sh persistence`), it exited in 3 s. Not investigated further.
 
 ## Cases
 
