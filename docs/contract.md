@@ -149,7 +149,7 @@ are how many more are allowed (`null` means no limit, `0` means no such site). `
 | `NeedsHuman` (`.reason`, `.url`, `.before`) | a captcha, a sign-in page (except the declared path of a `codeLogin` task), a block, leaving the site's host (and not to `extraHosts`) | stop; the window is open for the human. The state is not cleared until the task ends. From `act()`: with `before: true` the stop came from the check before the command and **the command did not run**; without it the command ran and the stop is about the page after it (a message may be out, a form sent) |
 | `BudgetExceeded` | more than `maxCommands` commands or `maxMinutes` minutes | treat the task as failed |
 | `StaleElement` | `gen` is out of date, the element is gone, something other than the target is under the cursor before the press, focus moved | take a fresh snapshot |
-| `BadCommand` | a command outside the set or with bad fields | a bug in the caller's code or the model |
+| `BadCommand` | a command outside the set or with bad fields; a wrong `within`, `tree`, `items` or `textLimit` of `see()` | a bug in the caller's code or the model |
 
 ## Attaching to the mirror
 
@@ -170,6 +170,7 @@ const snap = await see();                                    // a full snapshot
 const snap = await see({ screenshot: true });                // + a JPEG q60 in base64
 const snap = await see({ settle: { minElements, quietMs, timeoutMs } }); // wait for an SPA to render (up to 15 s)
 const diff = await see({ since: prevSnap });                 // changes only
+const snap = await see({ within, tree, items, textLimit });  // + reading on request, see below
 ```
 
 The snapshot: `{ gen, url, title, text (up to 6000), textParts?, elements[{ id, role, name, inView, value?, checked?,
@@ -192,6 +193,57 @@ sign-in page (except a code sign-in, see "Code sign-in") or a block → `NeedsHu
 command that touches the page (`click`, `fill`, `type`, `press`, `select`, `upload`) the page is checked once more on a
 fresh snapshot: a captcha, a block, a sign-in page or another host that appeared while the caller was thinking stops
 the task before the command runs, not after it. That snapshot is not returned and does not change `id`/`gen`.
+
+### Reading on request: `within`, `tree`, `items`
+
+```js
+const s = await see({
+  within: { role: 'region', name: 'Message history' },  // or { css: '#column-center' }
+  tree: true,                                            // a pruned tree of within (or of the page)
+  textLimit: 12000,                                      // for within.text and tree: 6000 by default, at most 20000
+  items: { css: '[role=article]', last: 20,              // or first: N; at most 50
+           flags: { out: '.is-out' },                    // name → a CSS selector the item itself matches
+           attrs: ['data-mid'],                          // data-*, datetime, alt, title, href, aria-label
+           textLimit: 600 },                             // per item: 600 by default, at most 2000
+});
+// s.within → { text, elements: [ids] } or null; s.tree → a string or null
+// s.items  → [{ text, inView, id?, flags?, attrs? }] or null; s.itemsTotal if more matched
+```
+
+These options only add fields. The rest of the snapshot (`text`, `elements`, `dialogs`, …) is the same as without
+them, and guard reads the rest, so a captcha outside `within` still stops the task. The options say what to read
+(selectors and attribute names); the reading runs in meatsuit's own isolated world, and no JavaScript of the caller
+is run.
+
+- `within` is the first visible element, open shadow roots included, that matches `css`, or that has this `role`
+  and `name` (as in the snapshot: `elements[].name`, `dialogs[].name`, or an `aria-label`; without `name`, the first
+  with the role). The role is the `role` attribute, the snapshot role of an interactive element, or by tag:
+  `heading`, `list`, `listitem`, `article`, `dialog`, `time`. `within.text` is its text up to `textLimit`, in lines:
+  a part at most two levels deep (a message with its time, a list row with its link, a paragraph with a link) is one
+  line, a bigger part is split into its children. `within.elements` are the ids of snapshot elements inside it. Not
+  found: `within`, `tree` and `items` are `null`.
+- `tree: true` is the content as YAML-like lines: text (`- Привет!`) and nodes with a role
+  (`- [button #7 "Send"] ➤`), where `#7` is the element's id in this snapshot and the name is given only when it
+  says what the text does not (a field's label, an icon button's `aria-label`, a `time`'s `datetime`). A wrapper
+  without a role disappears when empty, becomes its child when it has one, and stays a group (`- - …`) when it has
+  several, so a message keeps its text and time together. Inline wrappers do not split words. Not included: hidden
+  content (`display:none`, `visibility:hidden`, `content-visibility:hidden`, a closed `<details>` past its
+  `<summary>`), `<script>`, `<style>`, `<svg>`, iframes, and the contents of `input`, `textarea`, `select` and
+  `textbox` nodes (their values are in `elements`, a field's name is the same as there). Cut to `textLimit` with `…`.
+- `items` are the visible elements matching `css` (inside `within`, if given), the `first` or `last` N in document
+  order. Each has `text` (in lines as `within.text`, so a message or a row is one line) and `inView`; `id` if the
+  item is itself a snapshot element (a chat row link: click it); `flags`: for each name, whether the item matches
+  the selector (`{ out: '.is-out' }` for a Telegram Web K bubble, whose direction is only a class); `attrs`: those of the requested attributes the item has, values up to 200
+  characters, from a fixed list: `data-*`, `datetime`, `alt`, `title`, `href`, `aria-label`. Never `value`, and no
+  attributes of a password field. A selector does see attributes, so a flag can test what is written in one, a
+  `value` set in the HTML included; what a person types into a field is not an attribute, and no selector sees it.
+- Text in `within`, `tree` and `items` has an image's `alt` where the image is (emoji drawn as `<img alt>`). The
+  snapshot's `text` and element names stay as before.
+- With `since`, the diff carries `within`, `tree`, `items` and `itemsTotal` in full; `changed` does not consider
+  them, compare them yourself.
+- A wrong option (an unknown field in `within` or `items`, both or neither of `first` and `last`, an attribute
+  outside the list, `textLimit` without `within` or `tree`, a selector that does not parse) is a `BadCommand` before
+  the snapshot; the previous snapshot and its ids stay valid. Numbers above a ceiling are cut to it.
 
 ## Hands: `act(command)`
 
@@ -344,7 +396,9 @@ the bot has seen. For a human: `TELEGRAM_BOT_TOKEN=… node tools/telegram-chats
 
 Not verified live: the main line's hands, `upload`, `select` and multi-line `fill` in Chrome under Neko; all the tests
 run on fake pages in headless Chromium. The acceptance assumes one live `dryRun` task in the mirror
-([acceptance.md](acceptance.md)).
+([acceptance.md](acceptance.md)). Reading on request (`within`, `tree`, `items`) is tested on constructed pages
+only (`test/eyes-read.test.js`); its Telegram Web K page is built from what the integration plan read in the tweb
+sources, not from a dump of the live page.
 
 A known limitation: elements inside cross-origin iframes (an ATS form embedded on a company's site) do not get into
 the snapshot; go to the form's host directly.

@@ -211,7 +211,7 @@ function hands(page, opts = {}) {
   const observe = async (o) => {
     for (let attempt = 0; ; attempt++) {
       try { return await eyes.observe(page, o); } catch (err) {
-        if (attempt >= 3 || !/context was destroyed|navigat/i.test(err.message)) throw err;
+        if (attempt >= 3 || err instanceof eyes.BadRead || !/context was destroyed|navigat/i.test(err.message)) throw err;
         await page.waitForLoadState('domcontentloaded').catch(() => {});
       }
     }
@@ -229,7 +229,7 @@ function hands(page, opts = {}) {
     timeoutMs = Math.min(Number.isFinite(timeoutMs) ? timeoutMs : 10000, MAX_WAIT); // supervise проверяет срок только перед вызовом
     const key = (s) => JSON.stringify([s.url, s.text, s.elements.map((e) => [e.role, e.name])]);
     const start = Date.now();
-    let snap = await look();
+    let snap = await look({ ...rest, screenshot: false }); // с чтением: неверный селектор — отказ до замены прошлого снимка
     let prev = key(snap);
     let since = Date.now();
     while (Date.now() - start < timeoutMs && !(snap.elements.length >= minElements && Date.now() - since >= quietMs)) {
@@ -238,7 +238,7 @@ function hands(page, opts = {}) {
       const k = key(snap);
       if (k !== prev) { prev = k; since = Date.now(); }
     }
-    return rest.screenshot ? look(rest) : snap; // снимок с картинкой — один, в конце
+    return Object.keys(rest).length ? look(rest) : snap; // снимок с картинкой или чтением — один, в конце
   };
 
   const serial = (fn) => (...args) => {
@@ -487,7 +487,13 @@ function hands(page, opts = {}) {
   /** Глаза. Запоминает снимок: по его номерам работают руки. */
   const see = serial(async (o) => {
     const { since, settle, ...rest } = o || {};
-    const snap = settle ? await settled(settle, rest) : await look(rest);
+    let snap;
+    try {
+      eyes.readOpts(rest); // неверное чтение — сразу, а не после ожидания settle
+      snap = settle ? await settled(settle, rest) : await look(rest);
+    } catch (err) {
+      throw err instanceof eyes.BadRead ? new BadCommand(err.message) : err; // прошлый снимок и его номера остаются
+    }
     if (seq === 0) record(null, snap); // запись начинается с первого снимка
     await archived(snap, null);
     return since ? eyes.diff(since, snap) : snap;
