@@ -19,7 +19,7 @@ review were not the hands but the rhythm between actions and the container:
 | Layer | Before | Now (20.10) | Still open |
 |---|---|---|---|
 | Network | home exit, fail closed, ASN check | the server can switch between exit nodes by a list, with the exit checked in the Tailscale container | the exit node today is `home-pc`, which is not on around the clock (while it is off the browser has no network); the always-on helper phone has not arrived ([ru/09-phone-exit-node.md](ru/09-phone-exit-node.md)) |
-| Browser fingerprint | real Brave, Patchright, task window of its own default size | task and warm-up windows **sized like the owner's window**; `selfcheck.js` measures the tells | on the server's Chrome the WebGL fix (`--enable-unsafe-swiftshader` in `chrome.conf`) is made but not measured or deployed, notifications denied by policy, container fonts |
+| Browser fingerprint | real Brave, Patchright, task window of its own default size | task and warm-up windows **sized like the owner's window**; `selfcheck.js` measures the tells | on Chrome the WebGL fix (`--enable-unsafe-swiftshader` in `chrome.conf`) gives software WebGL, still yellow (measured in a local mirror on 05.11), and is not deployed to the server; notifications denied by policy, container fonts |
 | Behaviour | Fitts mouse, typing with typos, wheel notches of 100 px, actions back to back | **think pause** before every action, **53 px notches** like the owner's wheel under X11, **guard before an action**, `hover` | deep `goto` without referrer; owner and bot at the same time; warm-up unaware of bots |
 
 ## The three layers
@@ -44,8 +44,9 @@ copy the owner's window bounds ([`window.js`](../extras/window.js)). `GET /view`
 
 Yellow marks of the container: **WebGL** — fixed for Brave (`--enable-unsafe-swiftshader`, measured below); Google
 Chrome, which the server runs, got the same change in `docker/chrome.conf` (`--disable-software-rasterizer` dropped,
-`--enable-unsafe-swiftshader` added) on 04.11.2026: made, **not measured, not deployed**, so run `selfcheck.js` on the
-server's Chrome after the next deploy. **Notifications denied everywhere**
+`--enable-unsafe-swiftshader` added) on 04.11.2026; measured in a local mirror on 05.11.2026 (below): WebGL is there,
+but software (SwiftShader), so the mark stays yellow; **not deployed**, so run `selfcheck.js` on the server's Chrome after
+the next deploy. **Notifications denied everywhere**
 (`DefaultNotificationsSetting: 2` in both policy files). **Few fonts** (install `fonts-liberation`, `fonts-dejavu`,
 `fonts-noto-core`, `fonts-roboto` in the image and re-check). Linux + 2 cores + 1280×720 is rare but self-consistent,
 and the owner lives in the same browser.
@@ -96,6 +97,20 @@ Other readings: `navigator.languages` shows only `en-US` although the profile ha
 
 Also done the same day: the service and the warm-up step aside while the owner holds control in the mirror (`presence.js`, checked live against Neko with a real member session), and they share a browser lock so a task and a warm-up session never overlap (`lease.js`). See [http-api.md](http-api.md#owner-presence-and-the-browser-lock).
 
+## Measured on Google Chrome in the mirror (05.11.2026, a Linux desktop)
+
+`selfcheck.js --tz UTC` was run against the Neko stack from this repository with Google Chrome (Chrome 154, Neko 3.1.6), from the `server` container: once with `docker/chrome.conf` as it was before 04.11 and five times with the current one.
+
+| | `chrome.conf` before 04.11 (`--disable-software-rasterizer`) | Now (`--enable-unsafe-swiftshader`) |
+|---|---|---|
+| Red marks | none | none: `webdriver` false, no `Runtime.enable` trace (`cdpLeak` false), `window.chrome` present, 5 plugins, languages present |
+| Yellow | WebGL unavailable; notifications denied by policy | WebGL software; notifications denied by policy |
+| WebGL | `null` | present: vendor `Google Inc. (Google)`, renderer `ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)` |
+
+So the change gives Chrome WebGL, but it stays yellow: unlike Brave, Chrome names the real renderer, and SwiftShader is what virtual machines and containers show. The server still runs the old `chrome.conf` until the next deploy; not measured there.
+
+In four of the six runs the script printed its whole result and then did not exit, each time after the browser container had been re-created: the window was already closed and the CDP connection was closed, and it stayed in its last step, closing its local check page. The printed result is complete; stop such a run by hand. With Brave the same day it exited in 3 s. Not investigated further.
+
 ## Cases
 
 | Case | What happens now | Gap |
@@ -120,8 +135,8 @@ Also done the same day: the service and the warm-up step aside while the owner h
 ## What to check on the server
 
 1. `docker/up.sh --profile api run --rm server node extras/selfcheck.js --tz "<your exit zone>"`: on the author's machine this
-   gave no red marks and one yellow (notifications) with Brave; the server runs Chrome, so expect WebGL to be yellow
-   too (see above). Any red: stop and investigate before the first sign-in on a platform.
+   gave no red marks and one yellow (notifications) with Brave; the server runs Chrome, which in a local mirror on
+   05.11 gave two yellows, software WebGL and notifications (see above): expect the same after the deploy. Any red: stop and investigate before the first sign-in on a platform.
 2. In the mirror's DevTools console: `addEventListener('wheel', e => console.log(e.deltaY))`, then scroll by hand.
    Expect 53 (or a multiple). Otherwise adjust `NOTCH` in `human/mouse.js`.
 3. Detector sites by hand in the mirror, through the home exit: creepjs, browserleaks.com/webrtc (WebRTC leaks past

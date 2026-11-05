@@ -98,12 +98,12 @@ The owner's server runs the `ms-trunk` version (see Status). Switching it to `ma
 
 ## Status
 
-As of 4 November 2026.
+As of 5 November 2026.
 
 | | |
 |---|---|
 | **Verified** | The library in real headless Chromium on local pages (`npm test`: on macOS on 4 November, on Linux on 5 November); the deploy file, `npm run init`, `npm run config`, the secret scan; `docker compose config` for both browsers, with and without Tailscale. On the owner's server since 8 October (the `ms-trunk` version, reported by the owner, not re-checked since): Google Chrome, the profile in `meatsuit_profile`, traffic through a home Tailscale exit node, and with the exit node unset the browser has no network; `docker/verify.sh` and `verify.sh persistence` green; callers attached with `container:meatsuit-browser`, a sign-in made by hand holds |
-| **Built, not verified live** | The exit-node list with a fallback and the exit check (`docker/egress/exit-picker.sh`, tested on stand-ins only); code sign-in (`codeLogin`); since 21 October, tested on local pages only and not on the server: the check before a command (`NeedsHuman.before`), the stop of a hung task 15 minutes past its `maxMinutes`, `LimitReached` for a busy browser, `singleTab` with `staleTabHours`, `scroll` over an element; WebGL in Chrome (`--enable-unsafe-swiftshader` in `docker/chrome.conf`: not measured, not deployed); the stealth changes in `extras/` with Google Chrome (measured with Brave only, [docs/stealth.md](docs/stealth.md)); this compose file with Brave; Enter and shortcuts from a real keyboard in the mirror |
+| **Built, not verified live** | The exit-node list with a fallback and the exit check (`docker/egress/exit-picker.sh`, tested on stand-ins only); code sign-in (`codeLogin`); since 21 October, tested on local pages only and not on the server: the check before a command (`NeedsHuman.before`), the stop of a hung task 15 minutes past its `maxMinutes`, `LimitReached` for a busy browser, `singleTab` with `staleTabHours`, `scroll` over an element; WebGL in Chrome on the server (`--enable-unsafe-swiftshader` in `docker/chrome.conf`: measured in a local mirror on 5 November, WebGL present but software; not deployed); the stealth changes in `extras/` with Google Chrome on the server (`selfcheck.js` measured in a local mirror only: Brave on 20 October, Chrome on 5 November, [docs/stealth.md](docs/stealth.md)); this compose file with Brave; Enter and shortcuts from a real keyboard in the mirror |
 | **Not done** | An always-on exit node: today it is a PC that is not always on, and the helper phone has not arrived; a recorded row of [the acceptance](docs/acceptance.md) on the server; a license |
 
 The git history still contains personal data from earlier work and is going to be rewritten. Open items, by priority: [docs/ROADMAP.md](docs/ROADMAP.md).

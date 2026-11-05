@@ -202,7 +202,7 @@ Both get `MEATSUIT_NEKO_URL` and `NEKO_ADMIN_PASSWORD` from Compose: with them t
 docker/up.sh --profile api run --rm server node extras/selfcheck.js --tz "<your exit zone>"
 ```
 
-It opens a window in the browser, prints red and yellow marks (automation tells, container tells) and closes the window. What each mark means: [docs/stealth.md](../docs/stealth.md). Run with Brave on the author's machine on 20.10.2026: no red marks; WebGL needed `--enable-unsafe-swiftshader` in `neko/brave-start.sh` (now there, `--disable-software-rasterizer` dropped); the one yellow left is notifications denied by `policies.json`. **Not measured with Google Chrome:** `chrome.conf` got the same change on 04.11.2026 (`--disable-software-rasterizer` dropped, `--enable-unsafe-swiftshader` added), not deployed.
+It opens a window in the browser, prints red and yellow marks (automation tells, container tells) and closes the window. What each mark means: [docs/stealth.md](../docs/stealth.md). Run with Brave on the author's machine on 20.10.2026: no red marks; WebGL needed `--enable-unsafe-swiftshader` in `neko/brave-start.sh` (now there, `--disable-software-rasterizer` dropped); the one yellow left is notifications denied by `policies.json`. With Google Chrome in a local mirror on 05.11.2026, after the same change in `chrome.conf` (04.11.2026: `--disable-software-rasterizer` dropped, `--enable-unsafe-swiftshader` added): no red marks; WebGL is there but software (SwiftShader), so it stays yellow, and notifications are the other yellow. Not deployed to the server yet.
 
 ## Troubleshooting
 

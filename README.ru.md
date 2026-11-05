@@ -98,12 +98,12 @@ await ms.close();
 
 ## Состояние
 
-На 4 ноября 2026.
+На 5 ноября 2026.
 
 | | |
 |---|---|
 | **Проверено** | Библиотека в настоящем headless Chromium на локальных страницах (`npm test`: на macOS 4 ноября, на Linux 5 ноября); файл деплоя, `npm run init`, `npm run config`, скан секретов; `docker compose config` для обоих браузеров, с Tailscale и без. На сервере владельца с 8 октября (версия `ms-trunk`, со слов владельца, с тех пор не перепроверялось): Google Chrome, профиль в томе `meatsuit_profile`, трафик через домашний exit node Tailscale, при снятом exit node у браузера нет сети; `docker/verify.sh` и `verify.sh persistence` зелёные; вызывающие подключены через `container:meatsuit-browser`, вход, сделанный руками, держится |
-| **Сделано, вживую не проверено** | Список exit node с запасным и проверкой выхода (`docker/egress/exit-picker.sh`, проверен только на подставных командах); вход по коду (`codeLogin`); с 21 октября, проверено только на локальных страницах, не на сервере: проверка до команды (`NeedsHuman.before`), остановка зависшей задачи через 15 минут сверх её `maxMinutes`, `LimitReached` при занятом браузере, `singleTab` с `staleTabHours`, `scroll` над элементом; WebGL у Chrome (`--enable-unsafe-swiftshader` в `docker/chrome.conf`: не измерено, не развёрнуто); правки скрытности в `extras/` с Google Chrome (измерено только с Brave, [docs/ru/09-stealth.md](docs/ru/09-stealth.md)); этот compose с Brave; Enter и сочетания с настоящей клавиатуры в зеркале |
+| **Сделано, вживую не проверено** | Список exit node с запасным и проверкой выхода (`docker/egress/exit-picker.sh`, проверен только на подставных командах); вход по коду (`codeLogin`); с 21 октября, проверено только на локальных страницах, не на сервере: проверка до команды (`NeedsHuman.before`), остановка зависшей задачи через 15 минут сверх её `maxMinutes`, `LimitReached` при занятом браузере, `singleTab` с `staleTabHours`, `scroll` над элементом; WebGL у Chrome на сервере (`--enable-unsafe-swiftshader` в `docker/chrome.conf`: измерено в локальном зеркале 5 ноября, WebGL есть, но программный; не развёрнуто); правки скрытности в `extras/` с Google Chrome на сервере (`selfcheck.js` измерен только в локальном зеркале: Brave 20 октября, Chrome 5 ноября, [docs/ru/09-stealth.md](docs/ru/09-stealth.md)); этот compose с Brave; Enter и сочетания с настоящей клавиатуры в зеркале |
 | **Не сделано** | Круглосуточный exit node: сейчас это ПК, он включён не всегда, а вспомогательный телефон ещё не пришёл; записанная строка [приёмки](docs/acceptance.md) на сервере; лицензия |
 
 В истории git ещё есть личные данные прежней работы, её перепишут. Открытые пункты по приоритету: [docs/ROADMAP.md](docs/ROADMAP.md).

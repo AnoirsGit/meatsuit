@@ -152,7 +152,7 @@ HTTP-сервису нужны `profiles/clients.json`, `profiles/sites.json` и
 docker/up.sh --profile api run --rm server node extras/selfcheck.js --tz "<пояс страны выхода>"
 ```
 
-Откроет окно в браузере, напечатает красные и жёлтые отметки (признаки автоматизации и контейнера) и закроет окно. Что значит каждая отметка: [docs/ru/09-stealth.md](../docs/ru/09-stealth.md). С Brave на машине автора 20.10.2026: красных нет; WebGL потребовал `--enable-unsafe-swiftshader` в `neko/brave-start.sh` (теперь стоит, `--disable-software-rasterizer` убран); единственный жёлтый — уведомления, запрещённые в `policies.json`. **С Google Chrome не измерено:** в `chrome.conf` 04.11.2026 внесена та же правка (`--disable-software-rasterizer` убран, `--enable-unsafe-swiftshader` добавлен), деплоя не было.
+Откроет окно в браузере, напечатает красные и жёлтые отметки (признаки автоматизации и контейнера) и закроет окно. Что значит каждая отметка: [docs/ru/09-stealth.md](../docs/ru/09-stealth.md). С Brave на машине автора 20.10.2026: красных нет; WebGL потребовал `--enable-unsafe-swiftshader` в `neko/brave-start.sh` (теперь стоит, `--disable-software-rasterizer` убран); единственный жёлтый — уведомления, запрещённые в `policies.json`. С Google Chrome в локальном зеркале 05.11.2026, после той же правки в `chrome.conf` (04.11.2026: `--disable-software-rasterizer` убран, `--enable-unsafe-swiftshader` добавлен): красных нет; WebGL есть, но программный (SwiftShader), поэтому жёлтый остаётся, второй жёлтый — уведомления. На сервер ещё не развёрнуто.
 
 ## Неполадки
 
