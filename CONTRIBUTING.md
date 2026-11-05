@@ -31,7 +31,7 @@ npx playwright-core install --only-shell chromium   # once: the headless Chromiu
 npm test                                            # the secret scan, then each core suite one after another
 ```
 
-`npm test` is an explicit list of files in `package.json`: add a new suite there. The suites start a real headless Chromium through `playwright-core`; set `PLAYWRIGHT_BROWSERS_PATH` if your browsers live elsewhere. The Docker tests run `docker compose config` only (nothing is started) and skip themselves without Docker Compose.
+`npm test` is an explicit list of files in `package.json`: add a new suite there. The suites start a real headless Chromium through `playwright-core`; set `PLAYWRIGHT_BROWSERS_PATH` if your browsers live elsewhere. The Docker tests run `docker compose config` only (nothing is started) and skip themselves without Docker Compose. The exception is `test/migrate-profile.test.js`: it runs short-lived containers on throwaway volumes of its own (`msupgrade-test-*`, removed afterwards) and skips itself without Docker or without the mirror's image; it never pulls one (`MEATSUIT_MIGRATE_IMAGE` names another local image with GNU coreutils and findutils).
 
 `extras/` has its own dependencies (Patchright) and tests:
 
