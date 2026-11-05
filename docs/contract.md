@@ -275,7 +275,7 @@ selected, nothing happens.
 
 `BadCommand` before any action: the target is not a `<select>`, it has `multiple`, the list or the option is not
 available (`disabled`, including on an `optgroup`), or there is no such option. Verified in headless Chromium
-(`test/forms.test.js`): on macOS on 4 November, where the typed-label path runs; not re-run on Linux that day, where
+(`test/forms.test.js`): on macOS on 4 November, where the typed-label path runs, and on Linux on 5 November, where
 the arrow path runs; not verified live in Chrome under Neko.
 
 ### The hands' pace
