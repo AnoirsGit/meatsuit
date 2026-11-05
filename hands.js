@@ -537,7 +537,7 @@ function hands(page, opts = {}) {
    * Свежий снимок только для guard перед командой (supervise): капча, вход или уход с площадки могли появиться,
    * пока вызывающий думал. Последний снимок, его мир и номера не трогает: id и gen вызывающего остаются годными.
    */
-  const probe = serial(async () => (await observe({})).snap);
+  const probe = serial(async () => (await observe({ probe: true })).snap);
 
   return { see, act, probe };
 }

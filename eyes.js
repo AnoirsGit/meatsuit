@@ -80,7 +80,7 @@ function readOpts({ within, tree, items, textLimit } = {}) {
 }
 
 /** Выполняется внутри страницы, поэтому самодостаточна. */
-function collect({ textLimit, nameLimit, optionsLimit, gen, read }) {
+function collect({ textLimit, nameLimit, optionsLimit, gen, read, probe }) {
   // Селекторы чтения проверяем до всего: неверный — ответ без снимка, observe бросит BadRead.
   if (read) {
     const sels = [read.within && read.within.css, read.items && read.items.css, ...(read.items ? read.items.flags.map((f) => f[1]) : [])];
@@ -89,7 +89,8 @@ function collect({ textLimit, nameLimit, optionsLimit, gen, read }) {
     }
   }
   // Хранилище живёт в изолированном мире: страница его не видит. Мир с этим именем в документе один и тот же,
-  // поэтому в globalThis оно попадает, только когда снимок собран: упавший снимок не перепривязывает номера прошлого.
+  // поэтому в globalThis оно попадает, только когда снимок собран, и не от probe: ни упавший, ни проверочный снимок
+  // не перепривязывает номера прошлого.
   const norm = (el) => (el.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 60);
   const store = {
     els: [null], // els[id] = элемент; нулевой номер не используем
@@ -296,7 +297,7 @@ function collect({ textLimit, nameLimit, optionsLimit, gen, read }) {
     elements,
     dialogs,
   };
-  const done = () => { globalThis.__ms = store; return snap; };
+  const done = () => { if (!probe) globalThis.__ms = store; return snap; };
   if (!read) return done();
 
   // Чтение по запросу. Дерево: текст и смысловые узлы (роль, заголовок, список, статья, время, поля и кнопки
@@ -415,6 +416,7 @@ function collect({ textLimit, nameLimit, optionsLimit, gen, read }) {
  * opts.since      — прошлый снимок: вернуть только изменения (см. diff).
  * opts.gen        — номер поколения; hands держит монотонный счётчик.
  * opts.within, opts.tree, opts.items, opts.textLimit — чтение по запросу (readOpts).
+ * opts.probe      — проверочный снимок (guard перед командой): номера прошлого снимка в мире остаются.
  */
 let standaloneGen = 0;
 
@@ -436,7 +438,7 @@ async function observe(page, opts = {}) {
   const gen = opts.gen || ++standaloneGen;
   const world = await openWorld(page);
   const snap = await run(world, collect, { textLimit: TEXT_LIMIT, nameLimit: NAME_LIMIT, optionsLimit: OPTIONS_LIMIT, gen,
-    read: Object.keys(read).length ? read : undefined });
+    read: Object.keys(read).length ? read : undefined, probe: opts.probe === true });
   if (snap.badSelector !== undefined) throw new BadRead(`see: неверный CSS-селектор ${JSON.stringify(snap.badSelector)}`);
   // Чужие iframe (капча, Arkose) в DOM страницы не видны, поэтому отдаём их адреса.
   // page.frames() отдаёт все кадры, в том числе скрытые. Какие из них человек сейчас не видит,

@@ -306,6 +306,18 @@ const rejects = (c, hosts) => assert.throws(() => validate(c, hosts), BadCommand
     assert.ok(errs.some((m) => /журнал/.test(m)), 'сбой журнала должен уйти в stderr');
   }
 
+  // Проверочный снимок (probe, guard перед командой в task) не трогает номера прошлого: мир с этим именем в документе
+  // один, и probe не должен перепривязывать в нём id. Выше цели вставили кнопку — клик по старому id идёт в цель.
+  {
+    await page.setContent('<body style="margin:0"><div id="top"></div><button onclick="document.title=\'A\'">A</button></body>');
+    const hp = hands(page);
+    const p0 = await hp.see();
+    await page.evaluate(() => { document.getElementById('top').innerHTML = '<button onclick="document.title=\'X\'">X</button>'; });
+    await hp.probe();
+    await hp.act({ cmd: 'click', id: p0.elements.find((e) => e.name === 'A').id, gen: p0.gen });
+    assert.equal(await page.title(), 'A', 'после probe старый номер попал в другой элемент');
+  }
+
   await browser.close();
 
   // Воспроизведение: тот же интерфейс, без браузера.
