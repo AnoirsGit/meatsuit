@@ -69,15 +69,16 @@ volumes:
 
 ### Перенос готового профиля Chrome
 
-Если профиль Chrome уже лежит в другом томе (с тем же `chrome.conf`, смонтирован в `/home/neko/.config/chrome-meatsuit`), скопируйте его один раз при остановленных браузерах:
+Если профиль Chrome уже лежит в другом томе (с тем же `chrome.conf`, смонтирован в `/home/neko/.config/chrome-meatsuit`, как в прежних раскладках), `docker/migrate-profile.sh` один раз копирует его в `meatsuit_profile` при остановленных браузерах:
 
 ```sh
-docker run --rm -v <старый том>:/from:ro -v meatsuit_profile:/to ghcr.io/m1k1o/neko/google-chrome:3.1.6 \
-  sh -c 'cp -a /from/. /to/ && chown -R 1000:1000 /to && rm -f /to/SingletonLock /to/SingletonCookie /to/SingletonSocket'
+docker/up.sh create                              # пустой том meatsuit_profile с метками compose; ничего не запускается
+docker/migrate-profile.sh --plan <старый том>    # что будет сделано; ничего не меняет
+docker/migrate-profile.sh <старый том>
 docker/up.sh
 ```
 
-Потом проверьте входы в зеркале; старый том держите, пока не проверили. Не проверено.
+Источник подключается только для чтения. Скрипт отказывается, пока к любому из томов подключён работающий контейнер или пока целевой том не пуст (`--force` сначала его очищает). Он убирает замки профиля Chromium (`SingletonLock`, `SingletonCookie`, `SingletonSocket`: они помнят имя хоста прежнего контейнера, и Chrome 154 с замком другого хоста не стартует вовсе), отдаёт всё 1000:1000 и сверяет число записей. Второй аргумент — другой целевой том, например копия перед обновлением. Потом проверьте входы в зеркале; старый том держите, пока не проверили. Пошаговое обновление двух машин владельца — [docs/ru/10-upgrade.md](../docs/ru/10-upgrade.md).
 
 ## Выход через дом: Tailscale (по желанию)
 
@@ -113,12 +114,13 @@ docker/up.sh
 
 ## Что проверено, а что нет
 
-С 8 октября 2026 на сервере владельца работает этот compose в версии ветки `ms-trunk` (до `exit-picker.sh`) с **Google Chrome** и выходом через Tailscale (первая строка); перевод на `main` — шаг 5 [ru/09-phone-exit-node.md](../docs/ru/09-phone-exit-node.md). Почти все остальные прогоны ниже делались с **Brave**, до выбора браузера; с Brave этот compose ещё не запускался. Сейчас тестами проверено: `docker compose config` для обоих браузеров, с Tailscale и без, `docker/up.sh` (`test/docker.test.js`, `test/config.test.js`), `profile-init` вживую на образе Brave (том `meatsuit_profile` и `state/` — 1000:1000).
+С 8 октября 2026 на сервере владельца работает этот compose в версии ветки `ms-trunk` (до `exit-picker.sh`) с **Google Chrome** и выходом через Tailscale (первая строка); перевод на `main` — шаг 5 [ru/09-phone-exit-node.md](../docs/ru/09-phone-exit-node.md). Почти все остальные прогоны ниже делались с **Brave**, до выбора браузера; с Brave этот compose ещё не запускался. Сейчас тестами проверено: `docker compose config` для обоих браузеров, с Tailscale и без, `docker/up.sh` (`test/docker.test.js`, `test/config.test.js`), `docker/migrate-profile.sh` на одноразовых томах (`test/migrate-profile.test.js`), `profile-init` вживую на образе Brave (том `meatsuit_profile` и `state/` — 1000:1000).
 
 | Что | Как | Результат |
 |---|---|---|
 | Этот compose с Google Chrome на сервере владельца, выход через домашний exit node Tailscale | `docker/up.sh`, `verify.sh`, `verify.sh persistence`; стек вызывающего через `container:meatsuit-browser`, вход руками один раз | `verify.sh` зелёный; cookie и `localStorage` живы после перезапуска и пересоздания; трафик идёт через домашний exit node; вход вызывающего держится, его `dryRun` прошёл. По проверке сервера владельцем; строки в [приёмке](../docs/acceptance.md) пока нет |
 | Этот compose с Google Chrome (`3.1.6`) на ноутбуке, приёмка без аккаунта | `docker/up.sh` на новых томах, `verify.sh`, `restart`, `up -d --force-recreate`, `verify.sh persistence`, `tools/live-check.js` из соседнего контейнера, стек вызывающего (`deploy/` tinder-matcher) через `container:meatsuit-browser` | healthy за ~10 с; `profile-init` сделал `meatsuit_profile` и `state/` 1000:1000; verify и persistence — OK; окна «профиль занят» после пересоздания нет (снимок Neko); живая проверка — четыре `OK`, код 0; вызывающий достал CDP и записал журнал в `state/` (один прогон) |
+| Перенос профиля Chrome между томами (`migrate-profile.sh`), на `home-pc` 05.11.2026, только одноразовые тома | настоящий Chrome 154 (`3.1.6`) записал профиль под другим именем хоста с cookie и значением в `localStorage`; в нём оставлены замки; скопирован скриптом, затем Chrome поднят на копии под именем хоста `meatsuit-browser` | Chrome поднялся; cookie и значение `localStorage` те же. Контрольная копия с замками: тот же Chrome не стартует («The profile appears to be in use … on another computer»). Один прогон |
 | Neko и Brave поднимаются, порт CDP жив | healthcheck, `verify.sh` | за ~15 с, ~750 МБ из 3 ГБ, ~10% процессора в покое (одна машина, один прогон) |
 | Зеркало показывает живой браузер; мышь и набор из веб-клиента | вход через Chromium, клик по подсказке, буквы и точка | работает |
 | Enter, Ctrl+A, Ctrl+L из веб-клиента | синтетические события тестового клиента не доходят | **с настоящей клавиатурой не проверено** |
@@ -129,7 +131,7 @@ docker/up.sh
 
 Отдельно: библиотека работала у одного проекта-вызывающего с зеркалом Neko на Google Chrome с теми же `chrome.conf` и `chrome-policies.json`, поднятым его собственным compose.
 
-**Не проверено:** этот compose с Brave; записанная строка приёмки на сервере; перенос профиля; Enter и сочетания с настоящей клавиатуры; звук и видео на телефоне; нагрузка, когда зеркалом пользуются на слабом сервере.
+**Не проверено:** этот compose с Brave; записанная строка приёмки на сервере; перенос настоящего профиля владельца (пока только одноразовые тома); Enter и сочетания с настоящей клавиатуры; звук и видео на телефоне; нагрузка, когда зеркалом пользуются на слабом сервере.
 
 Почему у Brave свой скрипт запуска (`neko/brave-start.sh`) и что в нём неочевидного (cookie стирались при остановке, сигнал остановки не доходил через обёртку, «Brave quit unexpectedly», размер окна, потолки памяти), — в английской версии: [Brave: six fixes](README.md#brave-six-fixes-that-are-not-obvious).
 

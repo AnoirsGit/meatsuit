@@ -11,6 +11,7 @@ Start with the [project README](../README.md) ([Russian](../README.ru.md)). meat
 | [../docker/README.md](../docker/README.md) ([Russian](../docker/README.ru.md)) | running and deploying the mirror: the deploy file and every variable, Chrome or Brave, attaching another stack, troubleshooting |
 | [egress.md](egress.md) | sending the browser's traffic out through a home Tailscale exit node: the kill switch, the fallback list with the exit check, a phone as the exit node |
 | [ru/09-phone-exit-node.md](ru/09-phone-exit-node.md) (Russian) | the owner's runbook: the helper Android phone as the exit node, `home-pc` as the fallback, switching the server from `ms-trunk` to `main` |
+| [ru/10-upgrade.md](ru/10-upgrade.md) (Russian) | the owner's runbook: both machines to `main` without losing sign-ins, `home-pc` from the old `meatsuit-neko-chrome` container (profile moved with `docker/migrate-profile.sh`), the server from `ms-trunk` with a copy of the profile and a rollback |
 | [acceptance.md](acceptance.md) (Russian) | the live check on a real mirror: sign in once, restart, the session survives, a `dryRun` task from a sibling container |
 | [ROADMAP.md](ROADMAP.md) (Russian) | the one list of open items: priority, who does it, when it counts as done |
 

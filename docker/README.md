@@ -92,15 +92,16 @@ The container's host name is fixed too (`meatsuit-browser`): Chromium's profile 
 
 ### Moving an existing Chrome profile in
 
-If a Chrome profile already lives in another volume (made with the same `chrome.conf`, mounted at `/home/neko/.config/chrome-meatsuit`), copy it once while both browsers are stopped:
+If a Chrome profile already lives in another volume (made with the same `chrome.conf`, mounted at `/home/neko/.config/chrome-meatsuit`, as in the earlier layouts), `docker/migrate-profile.sh` copies it into `meatsuit_profile` once, while both browsers are stopped:
 
 ```sh
-docker run --rm -v <old volume>:/from:ro -v meatsuit_profile:/to ghcr.io/m1k1o/neko/google-chrome:3.1.6 \
-  sh -c 'cp -a /from/. /to/ && chown -R 1000:1000 /to && rm -f /to/SingletonLock /to/SingletonCookie /to/SingletonSocket'
+docker/up.sh create                              # the empty meatsuit_profile volume with Compose's labels; nothing starts
+docker/migrate-profile.sh --plan <old volume>    # what it will do; changes nothing
+docker/migrate-profile.sh <old volume>
 docker/up.sh
 ```
 
-Then check the sign-ins in the mirror. Keep the old volume until you have. Not verified yet.
+The source is mounted read-only. The script refuses while a running container has either volume mounted, or while the target is not empty (`--force` wipes it first). It removes Chromium's profile locks (`SingletonLock`, `SingletonCookie`, `SingletonSocket`: they remember the old container's host name, and Chrome 154 does not start at all with a lock from another host), makes everything 1000:1000 and compares the entry counts. A second argument names another target volume, for example a copy before an upgrade. Then check the sign-ins in the mirror, and keep the old volume until you have. The step-by-step upgrade of the owner's two machines: [docs/ru/10-upgrade.md](../docs/ru/10-upgrade.md) (Russian).
 
 ## Exit through home: Tailscale (optional)
 
@@ -136,12 +137,13 @@ It does not prove that a real keyboard in a real web client works, that video an
 
 ## What was verified, and what was not
 
-Since 8 October 2026 the owner's server runs this compose file as it was on the `ms-trunk` branch (before `exit-picker.sh`) with **Google Chrome** and the Tailscale exit (the first row); switching it to `main` is step 5 of [ru/09-phone-exit-node.md](../docs/ru/09-phone-exit-node.md). Most other runs below were made with **Brave**, before the browser became a choice; this compose file has not been started with Brave yet. What is tested now: `docker compose config` for both browsers, with and without the Tailscale overlay, and `docker/up.sh` (`test/docker.test.js`, `test/config.test.js`). `profile-init` was run for real with the Brave image on fresh volumes: `meatsuit_profile` and its `state/` came out owned by 1000:1000.
+Since 8 October 2026 the owner's server runs this compose file as it was on the `ms-trunk` branch (before `exit-picker.sh`) with **Google Chrome** and the Tailscale exit (the first row); switching it to `main` is step 5 of [ru/09-phone-exit-node.md](../docs/ru/09-phone-exit-node.md). Most other runs below were made with **Brave**, before the browser became a choice; this compose file has not been started with Brave yet. What is tested now: `docker compose config` for both browsers, with and without the Tailscale overlay, and `docker/up.sh` (`test/docker.test.js`, `test/config.test.js`); `docker/migrate-profile.sh` on throwaway volumes (`test/migrate-profile.test.js`). `profile-init` was run for real with the Brave image on fresh volumes: `meatsuit_profile` and its `state/` came out owned by 1000:1000.
 
 | What | How | Result |
 |---|---|---|
 | This compose file with Google Chrome on the owner's server, with the Tailscale exit through a home exit node | `docker/up.sh`, `verify.sh`, `verify.sh persistence`; a caller's stack attached with `container:meatsuit-browser`, signed in by hand once | `verify.sh` green; cookies and `localStorage` kept after a restart and a re-create; traffic leaves through the home exit node; the caller's sign-in holds and its `dryRun` passed. Reported by the owner's check of the server, no row in [the acceptance](../docs/acceptance.md) yet |
 | This compose file with Google Chrome (`3.1.6`) on a laptop, the acceptance procedure without an account | `docker/up.sh` on fresh volumes, `verify.sh`, `restart`, `up -d --force-recreate`, `verify.sh persistence`, `tools/live-check.js` from a sibling container, a caller's stack (tinder-matcher `deploy/`) attached with `container:meatsuit-browser` | Healthy within about 10 s; `profile-init` made `meatsuit_profile` and its `state/` 1000:1000; verify and persistence OK; no "profile in use" window after the re-create (Neko screenshot); live check four `OK`, exit 0; the caller reached CDP and wrote its journal to `state/` (one run) |
+| Moving a Chrome profile between volumes with `migrate-profile.sh`, on `home-pc` on 5 November 2026, throwaway volumes only | Real Chrome 154 (`3.1.6`) wrote a profile under another host name with a cookie and a `localStorage` value; stale locks were left in it; copied with the script, then Chrome started on the copy under the host name `meatsuit-browser` | Chrome started; the cookie and the `localStorage` value were the same. A control copy that kept the locks: the same Chrome did not start ("The profile appears to be in use … on another computer"). One run |
 | Neko and Brave start, CDP port alive | healthcheck, `verify.sh` | Healthy within about 15 s; about 750 MB of the 3 GB limit and about 10% CPU at idle (one machine, one run) |
 | The mirror shows the live browser | Signed in from a Chromium, screenshots | Video plays, the "You took the controls" note appears |
 | Mouse and typing from the web client | Clicked an address-bar suggestion, typed letters and a dot | Worked |
@@ -154,7 +156,7 @@ Since 8 October 2026 the owner's server runs this compose file as it was on the 
 
 Separately, the library ran for one caller project against a Neko mirror with Google Chrome using the same `chrome.conf` and `chrome-policies.json`, started from that project's own compose file.
 
-**Not verified:** this compose file with Brave; a recorded acceptance row on the server; moving a profile in; Enter and shortcuts from a real keyboard; sound, and video on a phone; load while someone uses the mirror on a weak server.
+**Not verified:** this compose file with Brave; a recorded acceptance row on the server; moving the owner's real profile in (only throwaway volumes so far); Enter and shortcuts from a real keyboard; sound, and video on a phone; load while someone uses the mirror on a weak server.
 
 ## Brave: six fixes that are not obvious
 
@@ -180,6 +182,7 @@ Other deliberate differences from the stock Neko Brave: no `--bwsi` (guest mode 
 | `docker-compose.egress.yml`, `egress/killswitch.sh`, `egress/exit-picker.sh` | The optional Tailscale exit, its kill switch, and the exit-node list with the exit check |
 | `up.sh` | `docker compose` with the deploy file, and the Tailscale overlay when asked |
 | `verify.sh`, `verify/` | The checks described above |
+| `migrate-profile.sh` | Copies a browser profile from one volume to another: moving in from an earlier layout, a copy before an upgrade |
 | `life/Dockerfile` | The image of the `extras/` services (Node and Patchright; the repository is mounted at `/app`) |
 | `.env.example` | The deploy file's template, with comments |
 
