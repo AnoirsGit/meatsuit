@@ -152,6 +152,11 @@ services:
     # ворота и фоном выбирает exit node по списку) отдаёт управление containerboot.
     entrypoint: ["/bin/sh", "/killswitch.sh"]
     command: ["/bin/sh", "/exit-picker.sh", "launch", "/usr/local/bin/containerboot"]
+    # PID 1 здесь — containerboot (exit-picker.sh делает ему exec), а он не подбирает чужих детей. Проверка здоровья
+    # раз в 10 с запускает tailscale, grep и awk; убитые по таймауту оставляли сирот-зомби, и за сутки на сервере
+    # (06.11) их набралось 251 при pids_limit 256: tailscale status уже не запускался, следом падал бы tailscaled.
+    # init: true ставит docker-init первым процессом — он и подбирает.
+    init: true
     cap_add: [NET_ADMIN]
     devices: ["/dev/net/tun:/dev/net/tun"]
     # IPv6 в общей сети закрыт совсем: выход идёт по IPv4, а открытый IPv6 был бы дырой мимо туннеля.

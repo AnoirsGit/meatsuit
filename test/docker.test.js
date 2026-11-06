@@ -148,6 +148,7 @@ test('Tailscale — необязательный профиль: MEATSUIT_EGRESS
     assert.equal(neko.container_name, 'meatsuit-browser');
     assert.ok(!neko.ports || neko.ports.length === 0);
     const ts = m.services.tailscale;
+    assert.equal(ts.init, true, `${name}: init подбирает сирот проверки здоровья (иначе зомби до pids_limit)`);
     assert.ok(ts.ports.some((p) => p.target === 8080) && !ts.ports.some((p) => p.target === 9222));
     for (const s of ['life', 'server']) assert.equal(m.services[s].network_mode, 'service:tailscale', s);
     assert.equal(m.services.neko.depends_on.tailscale.condition, 'service_healthy');
