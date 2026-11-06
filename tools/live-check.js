@@ -42,7 +42,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function run(opts, out = console.log) {
   const results = [];
   const report = (ok, what, detail = '') => { results.push(ok); out(`${ok ? 'OK  ' : 'FAIL'} ${what}${detail ? ` — ${detail}` : ''}`); };
-  const sites = { [opts.site]: { perDay: 5, perHour: 5 } };
+  const sites = { [opts.site]: { perDay: 5, perHour: 5, holdHours: 0 } }; // проба, а не бот: нарочная страница входа не ставит стоп площадке в общем dir
   const ms = await connect({ cdpUrl: opts.cdp, dir: opts.dir, sites });
   try {
     const before = await pages(opts.cdp);

@@ -10,7 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require('playwright-core');
 const { cdpPort } = require('./cdp-port.js');
-const { connect, NeedsHuman, LimitReached, BudgetExceeded } = require('../index.js');
+const { connect, NeedsHuman, LimitReached, BudgetExceeded, holdState, releaseHold } = require('../index.js');
 
 const SITE = 'example.test';
 const OK = '<button onclick="document.title=\'clicked\'">Like</button>';
@@ -19,7 +19,7 @@ const CAPTCHA = '<p>Verify you are human</p>';
 (async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'meatsuit-task-'));
   const sitesFile = path.join(tmp, 'sites.json');
-  fs.writeFileSync(sitesFile, JSON.stringify({ [SITE]: { perDay: 100 }, 'limited.test': { perDay: 1 } }));
+  fs.writeFileSync(sitesFile, JSON.stringify({ [SITE]: { perDay: 100 }, 'limited.test': { perDay: 1 }, 'other.test': { perDay: 100 } }));
 
   // «Мой браузер»: с профилем и портом отладки. Мою вкладку бот трогать не должен.
   const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), {
@@ -69,6 +69,30 @@ const CAPTCHA = '<p>Verify you are human</p>';
   assert.equal(byEvent('start').length + byEvent('done').length, 0, 'start/done по умолчанию не шлём');
   assert.equal(windows(), 2, 'окно с капчей должно остаться');
   await ctx.pages().find((p) => p !== mine).close();
+
+  // 3б. После капчи площадка на стопе (holdHours, по умолчанию 6 ч): задача не открывает окно, не тратит слот,
+  // не шлёт notify снова. Другая площадка работает. Снятый руками стоп пускает задачу.
+  html = OK;
+  const holdFile = path.join(tmp, 'state', 'holds', `${SITE}.json`);
+  const held = JSON.parse(fs.readFileSync(holdFile, 'utf8'));
+  assert.equal(held.reason, 'капча');
+  assert.ok(Math.abs(held.until - held.since - 6 * 3600e3) < 1, 'по умолчанию стоп на 6 часов');
+  assert.deepEqual(holdState(SITE, { dir: path.join(tmp, 'state') }), { site: SITE, ...held });
+  const limitsBefore = fs.readFileSync(path.join(tmp, 'state', 'limits.json'), 'utf8');
+  let ran = false;
+  await assert.rejects(ms.task('t3b', async () => { ran = true; }, { site: SITE }),
+    (e) => e instanceof NeedsHuman && e.onHold === true && e.hold.until === held.until && /на стопе до .*капча.*release/.test(e.message)
+      && e.message.endsWith(`release.js ${SITE} --dir ${JSON.stringify(path.join(tmp, 'state'))}`)); // dir задачи: release.js без --dir берёт MEATSUIT_DIR
+  await assert.rejects(ms.task('t3c', async () => { ran = true; }, { site: SITE, dryRun: true }), (e) => e.onHold === true, 'репетиция тоже стоит');
+  await settle();
+  assert.equal(ran, false, 'задача на стопе не должна запускаться');
+  assert.equal(windows(), 1, 'окно не открыто');
+  assert.equal(fs.readFileSync(path.join(tmp, 'state', 'limits.json'), 'utf8'), limitsBefore, 'слот не потрачен');
+  assert.equal(byEvent('needsHuman').length, 1, 'о стопе уже сообщили — повторно не шлём');
+  assert.equal(await ms.task('t3d', async () => 'other', { site: 'other.test' }).catch((e) => e.message), 'other', 'другая площадка работает');
+  assert.deepEqual(releaseHold(SITE, { dir: path.join(tmp, 'state') }), { released: true });
+  assert.equal(await ms.task('t3e', async () => 'free', { site: SITE }), 'free');
+  await settle();
 
   // 4. Бюджет команд: окно закрывается.
   html = OK;
