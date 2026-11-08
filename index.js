@@ -7,9 +7,11 @@
  *     await act({ cmd: 'click', id: 3, gen: snap.gen });
  *   }, { site: 'tinder.com' });
  *
- * task(): очередь → лимит площадки → отдельное окно → задача под присмотром
- * guard и бюджета → окно закрывается. На NeedsHuman окно остаётся открытым:
- * я решаю капчу в зеркале руками.
+ * task(): руль хозяина → очередь своей площадки → лимит площадки → своё окно (или своя вкладка площадки) →
+ * задача под присмотром guard и бюджета → окно закрывается. Очереди у площадок свои: задачи разных площадок
+ * (tinder-matcher, cvs, датчик Telegram — один браузер) идут одновременно, каждая в своём окне; задачи одной
+ * площадки — по одной. Руль один на все: пока хозяин у руля (wheel.js), не входит и не жмёт никто.
+ * На NeedsHuman окно остаётся открытым: я решаю капчу в зеркале руками.
  */
 const fs = require('node:fs');
 const os = require('node:os');
@@ -24,9 +26,13 @@ const { telegramNotifier, createTelegram, findChats, TelegramError } = require('
 const { openWindow } = require('./window.js');
 const { supervise, BudgetExceeded, HANG } = require('./supervise.js');
 const { signature, normalizeName, urlPattern } = require('./capture.js');
-const { ruleFor, reserve, charge, peek: peekLimit, status: limitStatus, lock, LimitReached } = require('./limits.js');
+const { ruleFor, reserve, charge, peek: peekLimit, status: limitStatus, lock, queueKey, queueFile, LimitReached } = require('./limits.js');
 const { loadPersona } = require('./human/persona-file.js');
 const holds = require('./holds.js');
+const { watcher: wheelWatcher, WHEEL } = require('./wheel.js');
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const minutes = (ms) => (ms >= 60e3 ? `${Math.round(ms / 60e3)} мин` : `${Math.round(ms / 1000)} с`);
 
 /**
  * Лимиты площадок принадлежат вызывающему проекту: путь к его sites.json (читается на каждую задачу,
@@ -92,9 +98,13 @@ async function connect({
   // Какие события отправлять в notify(text, event). По умолчанию только плохие: на каждую
   // задачу-матч писать «ок» значило бы засыпать группу. Проект сам шлёт итог запуска.
   notifyOn = ['needsHuman', 'limit', 'error'],
+  // Держит ли хозяин управление в зеркале: async () → true | false | { present } (например, check() из
+  // extras/presence.js с паролем админа Neko вызывающего). Ответ «да» ставит руль на всех вызывающих этого dir.
+  ownerPresent,
 } = {}) {
   if (!cdpUrl) throw new Error('connect: нужен cdpUrl');
   const loadSites = sitesSource({ sitesFile, sites }); // до подключения: без лимитов браузер не трогаем
+  const wheel = wheelWatcher({ dir, ownerPresent }); // кривой ownerPresent — ошибка до браузера
   const browser = await chromium.connectOverCDP(cdpUrl);
   fs.mkdirSync(dir, { recursive: true });
   loadPersona(dir); // повадки человека (темп руки и печати, опечатки) — в <dir>/persona.json: тот же человек после перезапуска
@@ -111,6 +121,51 @@ async function connect({
   };
 
   const hostOn = (u, site) => { try { const h = new URL(u).hostname; return h === site || h.endsWith('.' + site); } catch { return false; } };
+
+  // Чтение-правка-запись общих файлов dir (limits.json, tabs.json) — под коротким замком состояния: задачи разных
+  // площадок идут одновременно, в том числе из разных процессов, и без замка одна затёрла бы запись другой
+  // (пропавшая отметка лимита — лишняя задача сверх perDay).
+  const atomically = async (fn) => {
+    const release = await lock(path.join(dir, 'state.lock'), { pollMs: 10, heartbeatMs: 1000, staleMs: 10000, timeoutMs: 60e3 });
+    try { return await fn(); } finally { release(); }
+  };
+
+  // Руль у хозяина: ждать, пока отпустит, не дольше WHEEL.maxWaitMs, иначе LimitReached с полем wheel.
+  // what — хвост текста ошибки («команда не выполнена»); alive — задача ещё жива (сработал сторож — ждать нечего).
+  async function waitWheel({ what = '', before = false, alive = () => true } = {}) {
+    const until = Date.now() + WHEEL.maxWaitMs;
+    for (let w = await wheel.held(); w; w = await wheel.held()) {
+      if (!alive()) return;
+      if (Date.now() >= until) {
+        const who = w.by === 'mirror' ? 'хозяин у руля в зеркале' : `хозяин взял руль до ${holds.clock(w.until)}`;
+        const e = new LimitReached(`${who}, ждали ${minutes(WHEEL.maxWaitMs)}${what ? `: ${what}` : ''}`);
+        e.wheel = w;
+        if (before) e.before = true; // команда не выполнялась
+        throw e;
+      }
+      await sleep(Math.max(10, Math.min(WHEEL.pollMs, until - Date.now())));
+    }
+  }
+
+  // Очередь своей площадки (limits.queueFile: <dir>/queue/<ключ>.lock) — «один бот за раз на площадке».
+  // Порядок: руль → замок площадки → замок всего браузера прежней версии ядра, если он есть → руль ещё раз.
+  // Руль взяли, пока ждали замок, — замок отдаём (другие задачи площадки ждут руль так же) и ждём руль снаружи.
+  async function enterQueue(name, site) {
+    const holder = { name, site };
+    for (;;) {
+      await waitWheel();
+      const release = await lock(queueFile(dir, site), { holder, queue: queueKey(site) });
+      try {
+        // <dir>/queue.lock — замок всего браузера у вызывающего на прежней версии ядра: пока он держит браузер, эта
+        // версия не входит (пройти сквозь замок — взять и сразу отдать). Обратного прежняя версия не знает: её задача
+        // может войти, пока идут задачи этой. Обновлять всех вызывающих одного dir вместе.
+        const legacy = path.join(dir, 'queue.lock');
+        if (fs.existsSync(legacy)) (await lock(legacy, { holder }))();
+      } catch (e) { release(); throw e; }
+      if (!(await wheel.held())) return release;
+      release();
+    }
+  }
 
   // singleTab: ищем уже открытую вкладку площадки (по хосту); нет её — undefined, окно откроет task() после reserve.
   // Вкладку могли закрыть прямо перед задачей (человек в зеркале, другой клиент CDP): подключение узнаёт об этом
@@ -140,7 +195,8 @@ async function connect({
     }
     if (!alive()) return; // сработал сторож: очередь уже отдана, ничего не закрываем и не пишем
     const now = Date.now();
-    let state = tabs.update(tabs.load(tabsFile), seen, now);
+    const known = tabs.load(tabsFile);
+    const state = tabs.update(known, seen, now);
     const chosen = tabs.pick(seen, state);
     if (chosen) onExamine(chosen.page);
     for (const t of dryRun ? [] : tabs.stale(seen, state, chosen, hours, now)) {
@@ -152,8 +208,15 @@ async function connect({
     let targetInfos;
     try { ({ targetInfos } = await session.send('Target.getTargets')); }
     finally { await session.detach().catch(() => {}); }
-    state = tabs.prune(state, targetInfos.filter((t) => t.type === 'page').map((t) => t.targetId));
-    tabs.save(tabsFile, state);
+    // tabs.json общий: пока эта задача смотрела свои вкладки, задача другой площадки могла записать свои отметки.
+    // Поверх файла как он есть сейчас — только отметки своих вкладок; убираются записи вкладок, которых нет, но только
+    // те, что были в файле до проверки (новую отметку чужой задачи список целей, снятый раньше, ещё не знает).
+    const live = new Set(targetInfos.filter((t) => t.type === 'page').map((t) => t.targetId));
+    const mine = Object.fromEntries(seen.filter((t) => live.has(t.id)).map((t) => [t.id, state[t.id]]));
+    await atomically(() => {
+      const cur = tabs.load(tabsFile);
+      tabs.save(tabsFile, { ...tabs.prune(cur, Object.keys(cur).filter((id) => live.has(id) || !(id in known))), ...mine });
+    });
     if (chosen) {
       if (chosen.reason) throw new NeedsHuman(chosen.reason, chosen.url);
       return chosen.page;
@@ -162,13 +225,13 @@ async function connect({
     if (targetInfos.some((t) => t.type === 'page' && onSite(t.url))) throw new Error(`singleTab: вкладка ${site} есть, но Playwright её не видит`);
   }
 
-  // Отметить активность вкладки сейчас (под замком очереди). Сбой не роняет задачу: худшее — вкладка простоит дольше.
+  // Отметить активность вкладки сейчас (под замком состояния: tabs.json общий у всех площадок). Сбой не роняет задачу:
+  // худшее — вкладка простоит дольше.
   async function touchTab(page) {
     try {
       const file = path.join(dir, 'tabs.json');
-      const state = tabs.load(file);
       const id = await tabs.targetId(page);
-      tabs.save(file, { ...state, [id]: { ...state[id], at: Date.now() } });
+      await atomically(() => { const state = tabs.load(file); tabs.save(file, { ...state, [id]: { ...state[id], at: Date.now() } }); });
     } catch (e) { console.error('meatsuit: отметка вкладки не записана:', e.message); }
   }
 
@@ -207,10 +270,11 @@ async function connect({
     const heldBefore = onHold();
     if (heldBefore) throw heldBefore;
 
-    // Очередь «один бот за раз» на все вызывающие одного dir. Браузер занят дольше срока — LimitReached
-    // с тем, кто занял (повторить позже), а не ошибка: вызывающий не должен считать это своей поломкой.
+    // Очередь «один бот за раз» — своя у площадки (queueKey: поддомены вместе), общая у всех вызывающих одного dir.
+    // Задачи других площадок в это время идут. Площадка занята дольше срока или хозяин не отпускает руль —
+    // LimitReached с тем, кто занял (повторить позже), а не ошибка: вызывающий не должен считать это своей поломкой.
     let release;
-    try { release = await lock(path.join(dir, 'queue.lock'), { holder: { name, site } }); }
+    try { release = await enterQueue(name, site); }
     catch (e) {
       if (e instanceof LimitReached) await emit('limit', `meatsuit: «${name}» не запущена: ${e.message}`);
       throw e;
@@ -228,28 +292,35 @@ async function connect({
     let hung = null; // сработал сторож: BudgetExceeded «задача не закончилась»
     const started = Date.now();
     // Сторож. maxMinutes проверяется перед каждой командой, но зависшая страница (бесконечный цикл в её скрипте:
-    // CDP не отвечает) или зависшее ожидание в коде вызывающего держали бы задачу — и очередь всех вызывающих —
+    // CDP не отвечает) или зависшее ожидание в коде вызывающего держали бы задачу — и очередь её площадки —
     // вечно, замок при этом обновлялся бы. Через maxMinutes + HANG.graceMs задача кончается: окно закрывается
     // (зависшие вызовы на странице обрываются; после NeedsHuman окно остаётся человеку), следующие see/act бросают,
     // очередь свободна. Начатая длинная команда (fill до ~13 минут) в запас укладывается.
+    // Пока хозяин у руля, задача не зависла, а ждёт: срок сторожа сдвигается на время ожидания (run.state.pausedMs).
     const hangMs = Number.isFinite(maxMinutes) && maxMinutes > 0 ? maxMinutes * 60e3 + HANG.graceMs : null;
-    const watchdog = hangMs && setTimeout(() => {
+    let watchdog = null;
+    const onHang = () => {
+      const left = started + hangMs + (run ? run.state.pausedMs() : 0) - Date.now();
+      if (left > 0) { watchdog = setTimeout(onHang, left); watchdog.unref(); return; }
       const keep = !!(run && run.state.stopped);
-      const took = hangMs >= 60e3 ? `${Math.round(hangMs / 60e3)} мин` : `${Math.round(hangMs / 1000)} с`;
+      const took = minutes(hangMs);
       hung = new BudgetExceeded(`${name}: задача не закончилась за ${took} (страница или код вызывающего не отвечает), ${keep ? 'окно оставлено человеку' : 'окно закрыто'}`);
       if (run) run.state.finish();
       const p = page || examined;
       if (p && !keep) p.close().catch(() => {});
       unlock();
       emit('error', `meatsuit: «${name}» на ${site} зависла: ${hung.message}`);
-    }, hangMs);
-    if (watchdog) watchdog.unref();
+    };
+    if (hangMs) { watchdog = setTimeout(onHang, hangMs); watchdog.unref(); }
     try {
       const found = rule && rule.singleTab ? await siteTab(site, codeLogin, (p) => { examined = p; }, { hours: staleHours, dryRun, alive: () => !hung }) : null; // до reserve: сбой поиска не тратит слот
       if (hung) throw hung;
       const limitsFile = path.join(dir, 'limits.json');
       const slot = new Date();
-      try { (dryRun ? peekLimit : reserve)(site, rule, limitsFile, slot, { readOnly }); } // репетиция квоту не тратит
+      try { // репетиция квоту не тратит; запись отметки — под замком состояния (limits.json общий у всех площадок)
+        if (dryRun) peekLimit(site, rule, limitsFile, slot, { readOnly });
+        else await atomically(() => reserve(site, rule, limitsFile, slot, { readOnly }));
+      }
       catch (e) {
         if (e instanceof LimitReached) await emit('limit', `meatsuit: «${name}» не запущена: ${e.message}`);
         throw e;
@@ -261,8 +332,14 @@ async function connect({
       onPopup = (p) => { botPages.add(p); p.close().catch(() => {}); }; // новые вкладки бот не ведёт
       page.on('popup', onPopup);
       const h = hands(page, { dryRun, dryRunNavigation, logFile: path.join(dir, 'journal.jsonl'), allowedHosts: [site], uploadDirs, capture });
-      run = supervise(h, { name, site, extraHosts, notify: (t) => emit('needsHuman', t), maxCommands, maxMinutes, codeLogin,
-        onWrite: readOnly && !dryRun ? () => charge(site, rule, limitsFile, slot) : null }); // read-only задача записала: полный слот задним числом
+      // Хозяин взял руль посреди задачи: команда ждёт его (окно и очередь площадки остаются за задачей). Не дождались —
+      // LimitReached с before: true, команда не выполнялась.
+      const pause = async () => {
+        try { await waitWheel({ what: 'команда не выполнена', before: true, alive: () => !hung }); }
+        catch (e) { if (e instanceof LimitReached) await emit('limit', `meatsuit: «${name}» на ${site} остановлена: ${e.message}`); throw e; }
+      };
+      run = supervise(h, { name, site, extraHosts, notify: (t) => emit('needsHuman', t), maxCommands, maxMinutes, codeLogin, pause,
+        onWrite: readOnly && !dryRun ? () => atomically(() => charge(site, rule, limitsFile, slot)) : null }); // read-only задача записала: полный слот задним числом
       await emit('start', `meatsuit: «${name}» на ${site} запущена${dryRun ? ' (dryRun)' : ''}`);
       if (hung) throw hung;
       const result = await fn(run.api);

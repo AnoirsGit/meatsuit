@@ -1,5 +1,5 @@
 /**
- * Лимиты площадки, часы работы и очередь «один бот за раз».
+ * Лимиты площадки, часы работы и замок очереди площадки «один бот за раз на площадке».
  *
  * check() — чистая функция (test/limits.test.js). Площадки нет в sites.json
  * и нет правила "*" — значит нельзя: по умолчанию закрыто.
@@ -61,6 +61,16 @@ const readStamps = (file) => {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { if (e.code === 'ENOENT') return {}; throw e; }
 };
 
+// Файл счётчиков читают без замка (peek, status, другие процессы): пишем целиком через rename, чтобы читатель
+// не увидел половину. Чтение-правка-запись под замком состояния вызывающий берёт сам (index.js): задачи разных
+// площадок идут одновременно, а счётчики у них в одном файле.
+function writeStamps(file, all) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(all));
+  fs.renameSync(tmp, file);
+}
+
 /** Только проверить лимит, ничего не записывая (для dryRun: репетиция не должна съедать квоту). */
 function peek(site, rule, file, now = new Date(), opts) {
   const all = readStamps(file);
@@ -101,8 +111,7 @@ function reserve(site, rule, file, now = new Date(), { readOnly = false } = {}) 
   check(site, rule, stamps, now, { reads, readOnly });
   if (readOnly) all[READS + site] = [...reads, +now];
   else all[site] = [...stamps, +now];
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(all));
+  writeStamps(file, all);
 }
 
 /** Read-only задача собирается записать: засчитать полный слот ДО команды; дневной лимит исчерпан — LimitReached, команда не выполняется. */
@@ -116,7 +125,7 @@ function charge(site, rule, file, at) {
   if (i >= 0) reads.splice(i, 1);
   all[READS + site] = reads;
   all[site] = [...(all[site] || []), +at];
-  fs.writeFileSync(file, JSON.stringify(all));
+  writeStamps(file, all);
 }
 
 /** Кто держит замок: { token, pid, name?, site?, since } из файла или null (пусто, мусор, старая версия с одним PID). */
@@ -124,15 +133,34 @@ function lockHolder(file) {
   try { const v = JSON.parse(fs.readFileSync(file, 'utf8')); return v && typeof v === 'object' ? v : null; } catch { return null; }
 }
 
-/** Текст отказа «браузер занят»: чья задача, на какой площадке и с какого времени, сколько ждали. */
-function busyText(file, timeoutMs) {
+/**
+ * Очередь площадки: одна на ключ queueKey(site). Ключ — два последних звена хоста: web.telegram.org и telegram.org,
+ * www.linkedin.com и linkedin.com — одна очередь. Иначе задача singleTab на telegram.org взяла бы вкладку
+ * web.telegram.org, где в это время работает другая задача (вкладку площадки ищут по хосту и поддоменам).
+ * Площадки под общим суффиксом вроде co.uk тоже попадут в одну очередь: лишнее ожидание, но не две задачи в одной
+ * вкладке. Адрес IPv4 и одно звено (localhost) — ключ как есть. Лимиты и стопы считаются по самой площадке, не по ключу.
+ */
+function queueKey(site) {
+  const h = String(site).toLowerCase().replace(/\.+$/, '');
+  if (!h || /^\d{1,3}(\.\d{1,3}){3}$/.test(h) || h.includes(':')) return h;
+  const labels = h.split('.');
+  if (labels[labels.length - 1] === 'localhost') return 'localhost';
+  return labels.slice(-2).join('.');
+}
+
+/** Файл замка очереди площадки: <dir>/queue/<ключ>.lock. */
+const queueFile = (dir, site) => path.join(dir, 'queue', `${encodeURIComponent(queueKey(site))}.lock`);
+
+/** Текст отказа «очередь занята»: чья задача, на какой площадке и с какого времени, сколько ждали. */
+function busyText(file, timeoutMs, queue = null) {
   const h = lockHolder(file);
   const str = (v) => (typeof v === 'string' && v ? v.slice(0, 100) : null);
   const name = h && str(h.name), site = h && str(h.site);
   const since = h && Number.isFinite(h.since) ? ` с ${new Date(h.since).toTimeString().slice(0, 5)}` : '';
   const who = name ? `задачей «${name}»${site ? ` (${site})` : ''}${since}` : 'другой задачей';
   const waited = timeoutMs >= 60e3 ? `${Math.round(timeoutMs / 60e3)} мин` : `${Math.round(timeoutMs / 1000)} с`;
-  return `очередь: браузер занят ${who}, не дождались своей очереди за ${waited}`;
+  return queue ? `очередь ${queue}: занята ${who}, не дождались своей очереди за ${waited}`
+    : `очередь: браузер занят ${who}, не дождались своей очереди за ${waited}`;
 }
 
 /**
@@ -141,11 +169,11 @@ function busyText(file, timeoutMs) {
  * По PID нельзя: в контейнере после перезапуска PID тот же, и замок жил бы вечно.
  * В файле — кто держит: { token, pid, name, site, since } (holder — { name, site } задачи). release() снимает
  * только свой замок: держатель, который завис дольше staleMs, просыпается и не уносит замок того, кто его забрал.
- * Не дождались за timeoutMs — LimitReached «браузер занят …»: как исчерпанный лимит, задача не начинается,
- * браузер не тронут, повторить позже.
+ * Не дождались за timeoutMs — LimitReached «очередь <queue>: занята …» (без queue — «браузер занят …», так звучал
+ * замок всего браузера): как исчерпанный лимит, задача не начинается, браузер не тронут, повторить позже.
  * Возвращает release().
  */
-async function lock(file, { pollMs = 500, timeoutMs = 30 * 60e3, heartbeatMs = 5000, staleMs = 30000, holder = {} } = {}) {
+async function lock(file, { pollMs = 500, timeoutMs = 30 * 60e3, heartbeatMs = 5000, staleMs = 30000, holder = {}, queue = null } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const until = Date.now() + timeoutMs;
   const token = `${process.pid}-${randomUUID()}`;
@@ -179,10 +207,10 @@ async function lock(file, { pollMs = 500, timeoutMs = 30 * 60e3, heartbeatMs = 5
         }
         continue;
       }
-      if (Date.now() > until) throw new LimitReached(busyText(file, timeoutMs));
+      if (Date.now() > until) throw new LimitReached(busyText(file, timeoutMs, queue));
       await sleep(pollMs);
     }
   }
 }
 
-module.exports = { ruleFor, check, peek, status, reserve, charge, lock, LimitReached };
+module.exports = { ruleFor, check, peek, status, reserve, charge, lock, queueKey, queueFile, LimitReached };

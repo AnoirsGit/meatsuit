@@ -3,6 +3,8 @@
  *
  *   const { api, state } = supervise(h, { name, site, notify, maxCommands, maxMinutes, codeLogin? });
  *
+ * pause — async-функция перед каждой командой act(): ждёт, пока хозяин у руля (wheel.js; бросает LimitReached, если ждала
+ * дольше срока). Время ожидания в maxMinutes не входит: state.pausedMs(), его же сторож задачи (index.js) прибавляет к сроку.
  * codeLogin — { path: RegExp, maxMinutes? } из codeLoginRule (guard.js): задача входит по одноразовому коду.
  * Тогда guard не считает стопом страницу входа на этом пути площадки (если на ней нет поля пароля), а бюджет
  * задачи урезан: не больше CODE_LOGIN_MAX_COMMANDS команд и не дольше codeLogin.maxMinutes, если задано.
@@ -41,7 +43,7 @@ const isWrite = (c, els) => {
   return false;
 };
 
-function supervise(h, { name, site, extraHosts = [], notify, maxCommands, maxMinutes, onWrite, codeLogin = null }) {
+function supervise(h, { name, site, extraHosts = [], notify, maxCommands, maxMinutes, onWrite, codeLogin = null, pause = null }) {
   const guardOpts = codeLogin ? { codeLogin: { site, path: codeLogin.path } } : {};
   if (codeLogin) {
     maxCommands = Math.min(maxCommands, CODE_LOGIN_MAX_COMMANDS);
@@ -49,7 +51,10 @@ function supervise(h, { name, site, extraHosts = [], notify, maxCommands, maxMin
   }
   const hosts = [site, ...extraHosts]; // площадка и хосты, где страница может оказаться (extraHosts из task)
   let els = null; // последний виденный список элементов: по нему отличаем клик по вкладке
-  const state = { stopped: null, finished: false, commands: 0, maxCommands, maxMinutes, finish() { state.finished = true; } };
+  let paused = 0; // мс, которые задача простояла, пока хозяин у руля
+  let pausing = 0; // с какого момента стоит сейчас (0 — не стоит)
+  const state = { stopped: null, finished: false, commands: 0, maxCommands, maxMinutes, finish() { state.finished = true; },
+    pausedMs: () => paused + (pausing ? Date.now() - pausing : 0) };
   const deadline = Date.now() + maxMinutes * 60e3;
 
   // before: стоп из проверки до команды — команда не выполнялась (у NeedsHuman поле before: true). Без него стоп из
@@ -68,19 +73,29 @@ function supervise(h, { name, site, extraHosts = [], notify, maxCommands, maxMin
   const ensureOpen = () => {
     if (state.stopped) throw state.stopped;
     if (state.finished) throw new Error(`${name}: задача уже завершена`);
-    if (Date.now() > deadline) throw new BudgetExceeded(`${name}: вышло время (${maxMinutes} мин)`);
+    if (Date.now() > deadline + state.pausedMs()) throw new BudgetExceeded(`${name}: вышло время (${maxMinutes} мин)`);
+  };
+
+  // Хозяин у руля: команда ждёт, пока он не отпустит. Стоп или конец задачи за это время — как обычно, ensureOpen.
+  const waitWheel = async () => {
+    if (!pause) return;
+    pausing = Date.now();
+    try { await pause(); }
+    finally { paused += Date.now() - pausing; pausing = 0; }
+    ensureOpen();
   };
 
   const api = {
     async see(o) { ensureOpen(); const s = await h.see(o); await stopIfNeeded(s); if (s.elements) els = s; return s; },
     async act(c) {
       ensureOpen();
+      await waitWheel();
       if (++state.commands > maxCommands) throw new BudgetExceeded(`${name}: больше ${maxCommands} команд`);
       // Guard до команды: капча, блок, вход или чужой хост могли появиться, пока вызывающий думал после see(), и не
       // накрыть цель (проверка точки под курсором её не видит). Тогда стоп до нажатия, а не после (ревью скрытности
       // 20.10, как у сервиса из extras/). Свежий снимок не меняет id и gen вызывающего.
       if (TOUCHES.has(c && c.cmd) && h.probe) await stopIfNeeded(await h.probe(), { before: true });
-      if (onWrite && isWrite(c, els)) { const f = onWrite; onWrite = null; f(); } // до команды и один раз: слот один, дневной лимит может остановить запись
+      if (onWrite && isWrite(c, els)) { const f = onWrite; onWrite = null; await f(); } // до команды и один раз: слот один, дневной лимит может остановить запись
       const r = await h.act(c);
       if (!r.dryRun && r.elements) els = r;
       if (!r.dryRun) await stopIfNeeded(r); // результат dryRun — не снимок, у него нет url: страница не менялась

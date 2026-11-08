@@ -119,6 +119,15 @@ function createCapture({ dir, htmlPerSignature = 5, maxMB = 500, now = () => new
     seqs.set(day, n + 1);
     return String(n).padStart(5, '0');
   };
+  // Номер занимается созданием файла (wx): задачи разных площадок идут одновременно, в том числе из разных
+  // процессов, и с одним архивом вторая затёрла бы снимок первой. Номер занят — перечитать папку и взять следующий.
+  const claim = (day) => {
+    for (;;) {
+      const seq = nextSeq(day);
+      try { fs.writeFileSync(path.join(dir, day, `${seq}.json`), '', { flag: 'wx' }); return seq; }
+      catch (e) { if (e.code !== 'EEXIST') throw e; seqs.delete(day); }
+    }
+  };
 
   /** getHtml вызывается только когда HTML ещё нужен для этой подписи. */
   async function write(snapshot, cmd, getHtml) {
@@ -126,8 +135,8 @@ function createCapture({ dir, htmlPerSignature = 5, maxMB = 500, now = () => new
     const ts = now();
     const day = ts.toISOString().slice(0, 10);
     const sig = signature(snapshot);
-    const seq = nextSeq(day);
     fs.mkdirSync(path.join(dir, day), { recursive: true });
+    const seq = claim(day);
     const entry = { ts: ts.toISOString(), signature: sig.hash, shape: sig.shape, urlPattern: sig.urlPattern, title: snapshot.title };
     let html = null;
     if ((counts[sig.hash] || 0) < htmlPerSignature && getHtml) {

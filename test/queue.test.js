@@ -1,7 +1,8 @@
 /**
- * Очередь «один бот за раз» между вызывающими (tinder-matcher и cvs в одном браузере): браузер занят дольше
- * срока ожидания — LimitReached с задачей и площадкой того, кто держит, уведомление 'limit', браузер и слот
- * лимита не тронуты. Замок снимает только тот, кто его держит.
+ * Замок очереди (limits.lock) и очередь площадки в task(): занята дольше срока ожидания — LimitReached с задачей и
+ * площадкой того, кто держит, уведомление 'limit', браузер и слот лимита не тронуты. Замок снимает только тот, кто
+ * его держит. Замок всего браузера <dir>/queue.lock от прежней версии ядра задачи этой версии пропускают вперёд.
+ * Что очереди разных площадок не мешают друг другу, проверяет test/parallel.test.js.
  *
  *   node test/queue.test.js
  */
@@ -47,7 +48,8 @@ const settle = () => new Promise((r) => setTimeout(r, 300));
   b();
   assert.ok(!fs.existsSync(lf), 'B не снял свой замок');
 
-  // task(): браузер занят другим вызывающим — LimitReached до окна и до слота, notify('limit'); освободился — идёт.
+  // task(): браузер занят вызывающим на прежней версии ядра (замок всего браузера queue.lock) — LimitReached до окна
+  // и до слота, notify('limit'); освободился — идёт.
   const sitesFile = path.join(tmp, 'sites.json');
   fs.writeFileSync(sitesFile, JSON.stringify({ [SITE]: { perDay: 5 } }));
   const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), { headless: true, args: ['--remote-debugging-port=0'] });
@@ -87,8 +89,10 @@ const settle = () => new Promise((r) => setTimeout(r, 300));
     }, { site: 'hang.test', maxMinutes: 0.05 });
     hung.catch(() => {});
     const t0 = Date.now();
-    const other = await realLock(path.join(state, 'queue.lock'), { pollMs: 20, timeoutMs: 20000 }); // другой вызывающий
+    while (!fs.existsSync(limits.queueFile(state, 'hang.test'))) await new Promise((r) => setTimeout(r, 10)); // зависшая задача заняла очередь
+    const other = await realLock(limits.queueFile(state, 'hang.test'), { pollMs: 20, timeoutMs: 20000 }); // другой вызывающий той же площадки
     other();
+    assert.ok(Date.now() - t0 > 2000, 'очередь площадки была занята зависшей задачей');
     assert.ok(Date.now() - t0 < 15000, 'очередь освободилась только по сроку ожидания');
     await assert.rejects(hung, (e) => e instanceof BudgetExceeded && /не закончилась/.test(e.message), 'зависшая задача кончается BudgetExceeded');
     await settle();
