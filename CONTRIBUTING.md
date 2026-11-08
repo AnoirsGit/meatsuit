@@ -7,7 +7,7 @@ Thanks for looking at meatsuit. It is a small project with a narrow purpose, so 
 meatsuit is three things: launching one browser, remembering its session, and eyes and hands for a caller's code. Concretely, the library in the repository root (`connect` / `task` / `see` / `act`), the mirror in `docker/`, and the deploy file with `npm run init` and `npm run config`.
 
 - Credentials belong to the caller. The library must not read the environment, must not send anything anywhere by itself, and must not keep site passwords, model keys or bot tokens (`test/api.test.js` checks the first two).
-- `extras/` holds the maintained services around the core library: the HTTP service, warm-up, egress check, queue, notifications, owner presence, the browser lock and the self-check. New features there are welcome, with tests (`npm run test:extras`). One rule stays: the core must not load anything from `extras/` (`test/api.test.js` checks it).
+- `extras/` holds the maintained services around the core library: the HTTP service, warm-up, egress check, queue, notifications, owner presence, the wheel from the mirror, the browser lock and the self-check. New features there are welcome, with tests (`npm run test:extras`). One rule stays: the core must not load anything from `extras/` (`test/api.test.js` checks it).
 - Changes that push meatsuit toward account farms, captcha solving, fingerprint spoofing or "undetectable" claims are out of scope. Making it stop earlier and more reliably (a captcha, a block, an unexpected page) is always in scope.
 
 ## Never commit

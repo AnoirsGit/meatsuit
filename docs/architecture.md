@@ -34,7 +34,7 @@ meatsuit holds no secrets of the callers and talks to nobody by itself:
 | site limits | the caller's `sites.json` (`connect({ sitesFile })`) or an object (`connect({ sites })`); the repository has only `sites.example.json` |
 | notifications | `connect({ notify })`, an async function of the caller. `telegram.js` is a helper the caller may use; the token and chat are its arguments |
 | state (per-site queue locks, counters, journal, the owner's wheel) | `connect({ dir })`. **All callers of one browser use one `dir`**, otherwise two bots enter one site at once and the wheel stops only some of them |
-| whether the owner holds the mirror | optional `connect({ ownerPresent })`, the caller's function (it holds the Neko admin password, not meatsuit) |
+| whether the owner holds the mirror | with the mirror from `docker/`, its `wheel` service (`extras/wheel-watch.js`) asks Neko and writes the wheel in the shared `dir`, so callers need nothing; otherwise optional `connect({ ownerPresent })`, the caller's function (it holds the Neko admin password, not meatsuit) |
 | site passwords | never: a login page means `NeedsHuman`, and the person signs in through the mirror |
 
 The core reads no environment variables (`test/api.test.js` checks it). Only the mirror has secrets of its own — the Neko passwords — and they live in the deploy file, outside git.
