@@ -174,14 +174,18 @@ function heldTargets(dir, except = null, now = Date.now()) {
   return out;
 }
 
-/** Текст отказа «очередь занята»: чья задача, на какой площадке и с какого времени, сколько ждали. */
-function busyText(file, timeoutMs, queue = null) {
+/**
+ * Текст отказа «очередь занята»: чья задача, на какой площадке и с какого времени, сколько ждали. what — замок не
+ * очереди (state.lock, wheel.lock): тогда текст называет его, а не «браузер занят».
+ */
+function busyText(file, timeoutMs, queue = null, what = null) {
   const h = lockHolder(file);
   const str = (v) => (typeof v === 'string' && v ? v.slice(0, 100) : null);
   const name = h && str(h.name), site = h && str(h.site);
   const since = h && Number.isFinite(h.since) ? ` с ${new Date(h.since).toTimeString().slice(0, 5)}` : '';
   const who = name ? `задачей «${name}»${site ? ` (${site})` : ''}${since}` : 'другой задачей';
   const waited = timeoutMs >= 60e3 ? `${Math.round(timeoutMs / 60e3)} мин` : `${Math.round(timeoutMs / 1000)} с`;
+  if (what) return `${what}: занят ${who}, не освободился за ${waited}`;
   return queue ? `очередь ${queue}: занята ${who}, не дождались своей очереди за ${waited}`
     : `очередь: браузер занят ${who}, не дождались своей очереди за ${waited}`;
 }
@@ -193,10 +197,10 @@ function busyText(file, timeoutMs, queue = null) {
  * В файле — кто держит: { token, pid, name, site, since } (holder — { name, site } задачи). release() снимает
  * только свой замок: держатель, который завис дольше staleMs, просыпается и не уносит замок того, кто его забрал.
  * Не дождались за timeoutMs — LimitReached «очередь <queue>: занята …» (без queue — «браузер занят …», так звучал
- * замок всего браузера): как исчерпанный лимит, задача не начинается, браузер не тронут, повторить позже.
+ * замок всего браузера; с what — «<what>: занят …»): как исчерпанный лимит, задача не начинается, повторить позже.
  * Возвращает release(); release.update({ targetId }) дописывает в файл, какую страницу держит задача (heldTargets).
  */
-async function lock(file, { pollMs = 500, timeoutMs = 30 * 60e3, heartbeatMs = 5000, staleMs = STALE_MS, holder = {}, queue = null } = {}) {
+async function lock(file, { pollMs = 500, timeoutMs = 30 * 60e3, heartbeatMs = 5000, staleMs = STALE_MS, holder = {}, queue = null, what = null } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const until = Date.now() + timeoutMs;
   const token = `${process.pid}-${randomUUID()}`;
@@ -241,7 +245,7 @@ async function lock(file, { pollMs = 500, timeoutMs = 30 * 60e3, heartbeatMs = 5
         }
         continue;
       }
-      if (Date.now() > until) throw new LimitReached(busyText(file, timeoutMs, queue));
+      if (Date.now() > until) throw new LimitReached(busyText(file, timeoutMs, queue, what));
       await sleep(pollMs);
     }
   }

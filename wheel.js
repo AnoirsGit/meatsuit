@@ -38,7 +38,7 @@ const WHEEL = {
 const fileOf = (dir) => path.join(dir, 'wheel.json');
 
 // Держится на одно чтение и одну запись; брошенный (процесс умер посередине) забирается через staleMs.
-const LOCK = { pollMs: 10, heartbeatMs: 1000, staleMs: 10e3, timeoutMs: 30e3 };
+const LOCK = { pollMs: 10, heartbeatMs: 1000, staleMs: 10e3, timeoutMs: 30e3, what: 'замок руля wheel.lock' };
 async function locked(dir, fn) {
   const release = await lock(path.join(dir, 'wheel.lock'), LOCK);
   try { return fn(); } finally { release(); }

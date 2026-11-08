@@ -103,7 +103,8 @@ one): **the queue is per site**, shared by all callers of one `dir`.
   stay per site.
 - The shared files of `dir` (`limits.json`, `tabs.json`) are read, changed and written under a short lock
   `state.lock`, so tasks of different sites writing at once lose nothing; `limits.json` is replaced as a whole, a
-  reader never sees half of it. Several tasks may share one `capture.dir`: each snapshot takes its number by creating
+  reader never sees half of it. If `state.lock` is not free within 60 seconds (a process hung while holding it and
+  still refreshes it), `task` throws `LimitReached` whose text names `state.lock`. Several tasks may share one `capture.dir`: each snapshot takes its number by creating
   the file (`html-counts.json` may then count a little less than was saved).
 - Tested in headless Chromium and with two to four Node processes on one browser (`test/parallel.test.js`), and
   measured once in a throwaway local Neko mirror on 8 November 2026 (image `google-chrome:3.1.6`, Chrome 154, openbox;
@@ -265,7 +266,7 @@ are how many more are allowed (`null` means no limit, `0` means no such site). `
 
 | Error | When | What the caller should do |
 |---|---|---|
-| `LimitReached` (`.wheel`, `.before`) | the site is not in `sites.json` (and there is no `"*"`), `perDay: 0`, outside hours, day or hour limit; the site's queue stayed busy with another task for 30 minutes (the text names that task and site); the owner held the wheel for 30 minutes (`.wheel`; from `act()` with `before: true`, the command did not run); the owner took the wheel in the middle of a `fill` or `type` (`.wheel` without `.before`: part of the text was typed) | do not start the task, retry later; after a cut `fill`, fill the field again rather than pressing Enter |
+| `LimitReached` (`.wheel`, `.before`) | the site is not in `sites.json` (and there is no `"*"`), `perDay: 0`, outside hours, day or hour limit; the site's queue stayed busy with another task for 30 minutes (the text names that task and site); the owner held the wheel for 30 minutes (`.wheel`; from `act()` with `before: true`, the command did not run); the owner took the wheel in the middle of a `fill` or `type` (`.wheel` without `.before`: part of the text was typed); the short lock `state.lock` or `wheel.lock` stayed busy (the text names it) | do not start the task, retry later; after a cut `fill`, fill the field again rather than pressing Enter |
 | `NeedsHuman` (`.reason`, `.url`, `.before`, `.hold`, `.onHold`) | a captcha, a sign-in page (except the declared path of a `codeLogin` task), a block, leaving the site's host (and not to `extraHosts`); the site is on hold (`onHold: true`) | stop; the window is open for the human. The site goes on hold (`.hold.until`); `onHold: true` means the task never started: not a failure, and no reason to retry before `until`. The state is not cleared until the task ends. From `act()`: with `before: true` the stop came from the check before the command and **the command did not run**; without it the command ran and the stop is about the page after it (a message may be out, a form sent) |
 | `BudgetExceeded` | more than `maxCommands` commands or `maxMinutes` minutes | treat the task as failed |
 | `StaleElement` | `gen` is out of date, the element is gone, something other than the target is under the cursor before the press, focus moved | take a fresh snapshot |

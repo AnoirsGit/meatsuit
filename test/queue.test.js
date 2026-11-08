@@ -71,6 +71,26 @@ const settle = () => new Promise((r) => setTimeout(r, 300));
     hold();
     assert.equal(await ms.task('t2', async () => 'ok', { site: SITE }), 'ok');
 
+    // Стоп площадки проверяется ещё раз, когда очередь уже взята. Чтение стопа бросило не ENOENT (здесь — каталог
+    // вместо файла, EISDIR): очередь отдаётся, а не держится вечно (сердцебиение замка обновляло бы его), задача
+    // падает этой ошибкой, notify('error'). Первая проверка, до очереди, идёт синхронно в task(): каталог появляется
+    // сразу после неё.
+    notes.length = 0;
+    const holdFile = path.join(state, 'holds', `${encodeURIComponent(SITE)}.json`);
+    const broken = ms.task('t-hold-read', async () => 'не должна начаться', { site: SITE });
+    fs.mkdirSync(holdFile, { recursive: true });
+    await assert.rejects(broken, (e) => e.code === 'EISDIR', 'сбой чтения стопа после очереди');
+    assert.ok(!fs.existsSync(limits.queueFile(state, SITE)), 'замок очереди остался после сбоя чтения стопа');
+    assert.ok(notes.some((n) => n.event === 'error' && /t-hold-read/.test(n.text)), JSON.stringify(notes));
+    fs.rmSync(holdFile, { recursive: true });
+    assert.equal(await ms.task('t-after', async () => 'ok', { site: SITE }), 'ok', 'после сбоя площадка не освободилась');
+
+    // Замок общих файлов state.lock не дождались: LimitReached, текст называет state.lock, а не «браузер занят».
+    const st = await realLock(path.join(state, 'state.lock'), { pollMs: 20 });
+    await assert.rejects(ms.task('t-state', async () => 'ok', { site: SITE }),
+      (e) => e instanceof LimitReached && /state\.lock/.test(e.message) && !/браузер занят/.test(e.message), 'таймаут state.lock');
+    st();
+
     // Зависшая задача не держит очередь вечно. maxMinutes проверяется перед командой, а see() на странице
     // с зависшим главным потоком (бесконечный цикл в её скрипте) не возвращается никогда, и замок очереди всё это
     // время обновляется. Сторож: через maxMinutes + запас задача кончается BudgetExceeded, окно закрывается

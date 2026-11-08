@@ -135,7 +135,8 @@ async function connect({
   // (пропавшая отметка лимита — лишняя задача сверх perDay). Порядок замков: площадка → state.lock или wheel.lock
   // (wheel.js); под state.lock ничего не берётся, с wheel.lock вместе он не держится.
   const atomically = async (fn) => {
-    const release = await lock(path.join(dir, 'state.lock'), { pollMs: 10, heartbeatMs: 1000, staleMs: 10000, timeoutMs: 60e3 });
+    const release = await lock(path.join(dir, 'state.lock'), { pollMs: 10, heartbeatMs: 1000, staleMs: 10000, timeoutMs: 60e3,
+      what: 'замок общих файлов state.lock (limits.json, tabs.json)' });
     try { return await fn(); } finally { release(); }
   };
 
@@ -299,9 +300,6 @@ async function connect({
       if (e instanceof LimitReached) await emit('limit', `meatsuit: «${name}» не запущена: ${e.message}`);
       throw e;
     }
-    // Пока ждали очередь, задача другого процесса на этой площадке могла упереться в капчу и поставить стоп.
-    const heldNow = onHold();
-    if (heldNow) { release(); throw heldNow; }
     let released = false;
     const unlock = () => { if (!released) { released = true; release(); } };
     let page;
@@ -333,6 +331,10 @@ async function connect({
     };
     if (hangMs) { watchdog = setTimeout(onHang, hangMs); watchdog.unref(); }
     try {
+      // Пока ждали очередь, задача другого процесса на этой площадке могла упереться в капчу и поставить стоп. Внутри
+      // try: сбой чтения стопа (не ENOENT) отдаёт очередь в finally, а не оставляет её занятой навсегда.
+      const heldNow = onHold();
+      if (heldNow) throw heldNow;
       const found = rule && rule.singleTab ? await siteTab(site, codeLogin, (p) => { examined = p; }, { hours: staleHours, dryRun, alive: () => !hung }) : null; // до reserve: сбой поиска не тратит слот
       if (hung) throw hung;
       const limitsFile = path.join(dir, 'limits.json');
@@ -387,6 +389,8 @@ async function connect({
       await emit('done', `meatsuit: «${name}» на ${site} завершена за ${Math.round((Date.now() - started) / 1000)} с, команд: ${run.state.commands}`);
       return result;
     } catch (err) {
+      // Площадка уже на стопе (поставлен, пока ждали очередь): о нём сообщили, когда ставили; не продлевать и не слать.
+      if (err instanceof NeedsHuman && err.onHold) throw err;
       // Любой NeedsHuman (guard ядра или проект) ставит стоп площадки на holdHours: cron не заходит на капчу снова.
       const stop = err instanceof NeedsHuman ? err : run && run.state.stopped;
       if (stop) {
