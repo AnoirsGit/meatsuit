@@ -20,7 +20,8 @@ const limits = require('../limits.js');
 const LOCK = { timeoutMs: 8000 };
 const realLock = limits.lock;
 limits.lock = (file, o = {}) => realLock(file, { ...o, timeoutMs: Math.min(o.timeoutMs ?? Infinity, LOCK.timeoutMs), pollMs: 20 });
-const { connect, LimitReached, BudgetExceeded } = require('../index.js');
+const { connect, LimitReached, BudgetExceeded, FieldMismatch } = require('../index.js');
+const human = require('../human.js');
 const { takeWheel, releaseWheel, wheelState, WHEEL } = require('../wheel.js');
 const { HANG } = require('../supervise.js');
 const { chromium } = require('playwright-core');
@@ -134,6 +135,52 @@ const PAGE = (host) => `<title>${host}</title><textarea aria-label="Сообще
     await assert.rejects(ms.task('budget', async ({ act }) => { await sleep(3500); await act({ cmd: 'wait', ms: 10 }); }, { site: 'a.test', maxMinutes: 0.05 }), BudgetExceeded);
     HANG.graceMs = 15 * 60e3;
     await sleep(300);
+
+    // 4б. Руль взяли посреди fill: печать смотрит руль между клавишами не чаще раза в WHEEL.pollMs и обрывается за это
+    // окно — LimitReached с .wheel и без before (часть текста набрана), notify 'limit'; поле так и остаётся набранным не
+    // целиком, и Enter в него руки не нажимают (FieldMismatch) — недописанное сообщение не уйдёт.
+    WHEEL.pollMs = 400;
+    human.usePersona({ speed: 1.4, tremor: 0.5, twitch: 0.1, wpm: 60, typoRate: 0 }); // ~200 мс на знак
+    const LONG = 'Привет! Это длинное сообщение, его печатают долго';
+    let stopped, gate4, stoppedAt;
+    const stoppedP = new Promise((r) => { stopped = r; });
+    const gate4P = new Promise((r) => { gate4 = r; });
+    notes.length = 0;
+    const typing = ms.task('mid-type', async ({ see, act }) => {
+      await act({ cmd: 'goto', url: 'https://a.test/' });
+      const s = await see();
+      const err = await act({ cmd: 'fill', id: s.elements.find((e) => e.role === 'textbox').id, gen: s.gen, text: LONG }).then(() => null, (e) => e);
+      stoppedAt = Date.now();
+      stopped();
+      await gate4P; // тест смотрит, что печать стоит, и отдаёт руль
+      const s2 = await see();
+      const enter = await act({ cmd: 'press', key: 'Enter', id: s2.elements.find((e) => e.role === 'textbox').id, gen: s2.gen }).then(() => null, (e) => e);
+      return { err, enter, after: (await see()).elements.find((e) => e.role === 'textbox').value };
+    }, { site: 'a.test' });
+    let field;
+    for (let t = Date.now(); !field && Date.now() - t < 10000; await sleep(20)) field = ctx.pages().find((p) => p.url() === 'https://a.test/');
+    assert.ok(field, 'окно задачи не нашлось');
+    const valueNow = () => field.inputValue('textarea');
+    while ((await valueNow()).length < 5) await sleep(20);
+    takeWheel({ dir: state, minutes: 1 });
+    const tookAt = Date.now();
+    await stoppedP;
+    const v1 = await valueNow();
+    await sleep(1000);
+    const v2 = await valueNow();
+    releaseWheel({ dir: state });
+    gate4();
+    const { err: midErr, enter, after } = await typing;
+    assert.ok(midErr instanceof LimitReached && midErr.wheel && midErr.wheel.by === 'owner' && midErr.before === undefined
+      && /ввод остановлен/.test(midErr.message), `печать не остановилась рулём: ${midErr}`);
+    assert.ok(stoppedAt - tookAt < WHEEL.pollMs + 600, `печать шла ещё ${stoppedAt - tookAt} мс после руля (окно ${WHEEL.pollMs} мс)`);
+    assert.equal(v2, v1, 'после остановки бот печатал дальше');
+    assert.ok(v1.length >= 5 && v1.length < LONG.length && LONG.startsWith(v1), `в поле ${v1.length} из ${LONG.length}`);
+    assert.ok(enter instanceof FieldMismatch && enter.before === true, `Enter в недописанное поле: ${enter}`);
+    assert.equal(after, v1, 'Enter дошёл до поля');
+    assert.ok(notes.some((n) => n.event === 'limit' && /mid-type.*ввод остановлен/.test(n.text)), JSON.stringify(notes));
+    human.usePersona(null);
+    WHEEL.pollMs = 50;
 
     // 5. Хозяин не отпускает руль дольше срока: до входа — LimitReached с полем wheel, окна и слота нет, notify 'limit';
     // посреди задачи — LimitReached с before: true, команда не выполнялась.

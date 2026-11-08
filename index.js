@@ -10,7 +10,8 @@
  * task(): руль хозяина → очередь своей площадки → лимит площадки → своё окно (или своя вкладка площадки) →
  * задача под присмотром guard и бюджета → окно закрывается. Очереди у площадок свои: задачи разных площадок
  * (tinder-matcher, cvs, датчик Telegram — один браузер) идут одновременно, каждая в своём окне; задачи одной
- * площадки — по одной. Руль один на все: пока хозяин у руля (wheel.js), не входит и не жмёт никто.
+ * площадки — по одной. Руль один на все: пока хозяин у руля (wheel.js), не входит и не начинает команду никто, а
+ * начатая печать (fill, type) обрывается за WHEEL.pollMs.
  * На NeedsHuman окно остаётся открытым: я решаю капчу в зеркале руками.
  */
 const fs = require('node:fs');
@@ -130,6 +131,8 @@ async function connect({
     try { return await fn(); } finally { release(); }
   };
 
+  const wheelWho = (w) => (w.by === 'mirror' ? 'хозяин у руля в зеркале' : `хозяин взял руль до ${holds.clock(w.until)}`);
+
   // Руль у хозяина: ждать, пока отпустит, не дольше WHEEL.maxWaitMs, иначе LimitReached с полем wheel.
   // what — хвост текста ошибки («команда не выполнена»); alive — задача ещё жива (сработал сторож — ждать нечего).
   async function waitWheel({ what = '', before = false, alive = () => true } = {}) {
@@ -137,8 +140,7 @@ async function connect({
     for (let w = await wheel.held(); w; w = await wheel.held()) {
       if (!alive()) return;
       if (Date.now() >= until) {
-        const who = w.by === 'mirror' ? 'хозяин у руля в зеркале' : `хозяин взял руль до ${holds.clock(w.until)}`;
-        const e = new LimitReached(`${who}, ждали ${minutes(WHEEL.maxWaitMs)}${what ? `: ${what}` : ''}`);
+        const e = new LimitReached(`${wheelWho(w)}, ждали ${minutes(WHEEL.maxWaitMs)}${what ? `: ${what}` : ''}`);
         e.wheel = w;
         if (before) e.before = true; // команда не выполнялась
         throw e;
@@ -331,7 +333,22 @@ async function connect({
       botPages.add(page);
       onPopup = (p) => { botPages.add(p); p.close().catch(() => {}); }; // новые вкладки бот не ведёт
       page.on('popup', onPopup);
-      const h = hands(page, { dryRun, dryRunNavigation, logFile: path.join(dir, 'journal.jsonl'), allowedHosts: [site], uploadDirs, capture });
+      // Хозяин взял руль посреди fill или type: печать смотрит руль между клавишами не чаще раза в WHEEL.pollMs и
+      // обрывается — LimitReached с .wheel и без before (часть текста набрана; Enter в такое поле руки не нажмут:
+      // FieldMismatch). Сработал сторож — печать тоже кончается.
+      let wheelSeen = 0;
+      const shouldStop = async () => {
+        if (hung) return hung;
+        if (Date.now() - wheelSeen < WHEEL.pollMs) return null;
+        wheelSeen = Date.now();
+        const w = await wheel.held();
+        if (!w) return null;
+        const e = new LimitReached(`${wheelWho(w)}: ввод остановлен посреди текста, поле набрано не целиком`);
+        e.wheel = w;
+        await emit('limit', `meatsuit: «${name}» на ${site} остановлена: ${e.message}`);
+        return e;
+      };
+      const h = hands(page, { dryRun, dryRunNavigation, logFile: path.join(dir, 'journal.jsonl'), allowedHosts: [site], uploadDirs, capture, shouldStop });
       // Хозяин взял руль посреди задачи: команда ждёт его (окно и очередь площадки остаются за задачей). Не дождались —
       // LimitReached с before: true, команда не выполнялась.
       const pause = async () => {

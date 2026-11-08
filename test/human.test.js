@@ -169,6 +169,37 @@ test('type: перевод строки — Shift+Enter (в чате это но
   }
 });
 
+test('type: shouldStop обрывает печать посреди текста, нажатые клавиши отпускаются', async () => {
+  const { page, env, log } = fakePage();
+  const stop = new Error('руль');
+  let asked = 0;
+  // Остановить посреди текста (после десяти нажатий) в тот момент, когда клавиша нажата и ещё не отпущена.
+  const isDown = (e) => e.op === 'kdown' || (e.op === 'cdp' && e.params.type === 'keyDown');
+  const shouldStop = async () => {
+    asked++;
+    const last = log.filter((e) => e.op === 'kdown' || e.op === 'kup' || e.op === 'cdp').pop();
+    return log.filter(isDown).length >= 10 && last && isDown(last) ? stop : null;
+  };
+  const text = 'Привет, Мир! Как ДЕЛА? Всё ХОРОШО у Тебя, НАДЕЮСЬ.';
+  await assert.rejects(human.type(page, text, { ...env, typoRate: 0, shouldStop }), (e) => e === stop);
+  const plan = planTyping(text, { typoRate: 0, rnd: seeded(7) });
+  assert.ok(asked > 3 && asked < plan.length, `shouldStop спрашивали ${asked} раз из ${plan.length} событий`);
+  // Каждой нажатой клавише — отпускание: и playwright-клавишам, и сырым событиям CDP.
+  const down = new Map();
+  for (const e of log) {
+    const key = e.op === 'kdown' || e.op === 'kup' ? `pw:${e.k}` : e.op === 'cdp' ? `cdp:${e.params.code}` : null;
+    if (!key) continue;
+    down.set(key, (down.get(key) || 0) + (isDown(e) ? 1 : -1));
+  }
+  assert.deepEqual([...down].filter(([, n]) => n !== 0), [], 'после обрыва осталась зажатая клавиша');
+  const typed = log.filter(isDown).length;
+  assert.ok(typed > 0 && typed < [...text].length, `набрано ${typed} из ${[...text].length}: печать не оборвалась посередине`);
+  // Без shouldStop — как раньше, текст целиком.
+  const full = fakePage();
+  await human.type(full.page, 'да', { ...full.env, typoRate: 0 });
+  assert.equal(full.log.filter((e) => e.op === 'cdp' && e.params.type === 'keyDown').length, 2);
+});
+
 test('press: одна клавиша с удержанием, как нажимает человек', async () => {
   const { page, env, log } = fakePage();
   await human.press(page, 'Escape', env);

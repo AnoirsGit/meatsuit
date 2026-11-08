@@ -95,8 +95,9 @@ one): **the queue is per site**, shared by all callers of one `dir`.
   including while your own code waits for a model: put timeouts on your own awaits inside `fn` (`maxMinutes` is checked
   before each `see`/`act`, not while your code is waiting). A task still running 15 minutes after its `maxMinutes` is
   ended by meatsuit, so one hung task cannot hold its site forever.
-- **The owner's wheel is one for the whole browser** (below): while the owner holds it, no task of any site starts and
-  no command runs. Site holds and limits stay per site.
+- **The owner's wheel is one for the whole browser** (below): while the owner holds it, no task of any site starts, no
+  command starts, and a `fill` or `type` that is already typing stops within about 2 seconds. Site holds and limits
+  stay per site.
 - The shared files of `dir` (`limits.json`, `tabs.json`) are read, changed and written under a short lock
   `state.lock`, so tasks of different sites writing at once lose nothing; `limits.json` is replaced as a whole, a
   reader never sees half of it. Several tasks may share one `capture.dir`: each snapshot takes its number by creating
@@ -151,6 +152,11 @@ const ms = await connect({ cdpUrl, dir, sitesFile, ownerPresent: () => presence.
 - In a running task: `act()` waits before each command; `see()` does not wait (it presses nothing). The window and
   the site's queue stay with the task. Time at the wheel does not count towards `maxMinutes`, nor towards the hang
   guard.
+- In a running command: a `fill` or `type` that is already typing looks at the wheel between keys, at most every 2
+  seconds, and stops when it is taken: `LimitReached` with `.wheel` and **without** `.before` (part of the text is in
+  the field), `notify('limit')`. Enter into that field is then refused with `FieldMismatch` until it holds what the bot
+  typed (see "The field after typing"), so half a message is not sent. Any other command already started (a click with
+  its mouse path, a scroll, a `wait` up to 15 s) finishes first; it takes seconds.
 - At most 30 minutes per wait, then `LimitReached` with `.wheel` (the wheel's state): before the queue the task did
   not start (no window, no slot), from `act()` with `.before = true`, the command did not run. `notify('limit')` both
   times.
@@ -247,7 +253,7 @@ are how many more are allowed (`null` means no limit, `0` means no such site). `
 
 | Error | When | What the caller should do |
 |---|---|---|
-| `LimitReached` (`.wheel`, `.before`) | the site is not in `sites.json` (and there is no `"*"`), `perDay: 0`, outside hours, day or hour limit; the site's queue stayed busy with another task for 30 minutes (the text names that task and site); the owner held the wheel for 30 minutes (`.wheel`; from `act()` with `before: true`, the command did not run) | do not start the task, retry later |
+| `LimitReached` (`.wheel`, `.before`) | the site is not in `sites.json` (and there is no `"*"`), `perDay: 0`, outside hours, day or hour limit; the site's queue stayed busy with another task for 30 minutes (the text names that task and site); the owner held the wheel for 30 minutes (`.wheel`; from `act()` with `before: true`, the command did not run); the owner took the wheel in the middle of a `fill` or `type` (`.wheel` without `.before`: part of the text was typed) | do not start the task, retry later; after a cut `fill`, fill the field again rather than pressing Enter |
 | `NeedsHuman` (`.reason`, `.url`, `.before`, `.hold`, `.onHold`) | a captcha, a sign-in page (except the declared path of a `codeLogin` task), a block, leaving the site's host (and not to `extraHosts`); the site is on hold (`onHold: true`) | stop; the window is open for the human. The site goes on hold (`.hold.until`); `onHold: true` means the task never started: not a failure, and no reason to retry before `until`. The state is not cleared until the task ends. From `act()`: with `before: true` the stop came from the check before the command and **the command did not run**; without it the command ran and the stop is about the page after it (a message may be out, a form sent) |
 | `BudgetExceeded` | more than `maxCommands` commands or `maxMinutes` minutes | treat the task as failed |
 | `StaleElement` | `gen` is out of date, the element is gone, something other than the target is under the cursor before the press, focus moved | take a fresh snapshot |
@@ -411,8 +417,8 @@ input, `contenteditable` or anything else it is a `BadCommand` before any action
 A line break is typed as **Shift+Enter**: in a plain `textarea` that is the same new line, while in a chat a bare
 Enter would send half a message. Typing follows the persona's pace (150–475 characters a minute, with typos and
 corrections): 2000 characters take 4–13 minutes. The task's `maxMinutes` (and the site's ceiling in `sites.json`)
-must allow for that: the deadline is checked before each command, so a long `fill` is not cut off, but the next
-command gets `BudgetExceeded`.
+must allow for that: the deadline is checked before each command, so a long `fill` is not cut off by it, but the next
+command gets `BudgetExceeded`. The owner's wheel does cut it (see "The owner at the wheel").
 
 ### upload
 

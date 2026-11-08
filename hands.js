@@ -1,7 +1,7 @@
 /**
  * Руки: закрытый набор команд по номерам из снимка глаз (eyes.js).
  *
- *   const h = hands(page, { dryRun, logFile, recordDir, allowedHosts, uploadDirs });
+ *   const h = hands(page, { dryRun, logFile, recordDir, allowedHosts, uploadDirs, shouldStop });
  *   const snap = await h.see();
  *   const res  = await h.act({ cmd: 'click', id: 7, gen: snap.gen }); // diff снимка после действия
  *
@@ -276,7 +276,9 @@ function validate(c, allowedHosts = [], { uploadDirs = [] } = {}) {
 }
 
 function hands(page, opts = {}) {
-  const { dryRun = false, logFile, recordDir, allowedHosts = [], uploadDirs = [], capture, dryRunNavigation = false } = opts;
+  // shouldStop — async () → ошибка или null: печать fill и type спрашивает его между клавишами и обрывается ошибкой
+  // (task(): хозяин взял руль посреди ввода). Сам решает, как часто смотреть по-настоящему.
+  const { dryRun = false, logFile, recordDir, allowedHosts = [], uploadDirs = [], capture, dryRunNavigation = false, shouldStop = null } = opts;
   const archive = capture && createCapture(capture); // { dir, htmlPerSignature, maxMB }
   let last = null;
   let world = null; // изолированный мир, где лежат элементы последнего снимка
@@ -586,7 +588,7 @@ function hands(page, opts = {}) {
         if (!pin.focus) throw new StaleElement(`в фокусе не поле ${c.id}: очистка и ввод отменены`);
         await page.keyboard.press('ControlOrMeta+A');
         await page.keyboard.press('Backspace');
-        await human.type(page, text);
+        await human.type(page, text, { shouldStop });
         return verify(c);
       }
       case 'type': {
@@ -594,7 +596,7 @@ function hands(page, opts = {}) {
         const pin = await field('pinAt', null, c.text);
         if (pin.stale) throw new StaleElement('страница сменилась перед вводом');
         if (pin.was) throw mismatch(c, pin.was, 'ввод не начат', true);
-        await human.type(page, c.text);
+        await human.type(page, c.text, { shouldStop });
         if (pin.editable) return verify(c); // фокус не в поле ввода (кнопка, страница): сверять нечего, как раньше
         return;
       }

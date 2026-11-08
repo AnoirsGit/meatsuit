@@ -14,7 +14,7 @@
  *   курсором (оверлей, сдвиг вёрстки); бросил — нажатия нет.
  *
  * Что зовёт ядро (hands.js), и это не меняется без него:
- *   click(page, el, { verifyAt? })  hover(page, el)  type(page, text)  press(page, key)
+ *   click(page, el, { verifyAt? })  hover(page, el)  type(page, text, { shouldStop? })  press(page, key)
  *   scroll(page, px)  pause(a, b)  sleep(ms)
  * el — всё, у чего есть boundingBox() и scrollIntoViewIfNeeded() (локатор playwright, dom.handle).
  *
@@ -29,14 +29,22 @@ const rand = (a, b) => a + Math.random() * (b - a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const pause = (a = 300, b = 1200) => sleep(rand(a, b));
 
-const envOf = (o = {}) => ({ sleep: o.sleep || sleep, now: o.now || Date.now, rnd: o.rnd || Math.random });
+const envOf = (o = {}) => ({ sleep: o.sleep || sleep, now: o.now || Date.now, rnd: o.rnd || Math.random, shouldStop: o.shouldStop || null });
 
-/** Проиграть план: каждое событие в своё время от начала. */
+/**
+ * Проиграть план: каждое событие в своё время от начала. env.shouldStop — async () → ошибка или null: спрашивается
+ * перед каждым событием (сколько он стоит — забота вызывающего, руль смотрится не чаще раза в 2 с); вернул ошибку —
+ * план обрывается ею.
+ */
 async function play(events, env, fire) {
   const t0 = env.now();
   for (const ev of events) {
     const wait = ev.t - (env.now() - t0);
     if (wait > 0) await env.sleep(wait);
+    if (env.shouldStop) {
+      const stop = await env.shouldStop();
+      if (stop) throw stop instanceof Error ? stop : new Error('остановлено');
+    }
     await fire(ev);
   }
 }
@@ -231,12 +239,24 @@ async function pressEvent(page, ev, state) {
 /**
  * Печать в сфокусированное поле. Темп и доля опечаток — из повадок (persona.json);
  * opts.wpm и opts.typoRate их переопределяют. Перевод строки — Shift+Enter.
+ * opts.shouldStop — как у play: печать обрывается посреди текста (хозяин взял руль); нажатые клавиши отпускаются,
+ * чтобы в странице не остался зажатый Shift.
  */
 async function type(page, text, opts = {}) {
   const env = envOf(opts), me = personaOf(env.rnd);
   const plan = planTyping(text, { wpm: opts.wpm || me.wpm, typoRate: opts.typoRate ?? me.typoRate, rnd: env.rnd });
   const state = { shift: false };
-  await play(plan, env, (ev) => pressEvent(page, ev, state));
+  const held = new Map(); // код клавиши → событие нажатия, пока не отпущена
+  try {
+    await play(plan, env, async (ev) => {
+      await pressEvent(page, ev, state);
+      if (ev.op === 'down') held.set(ev.entry.code, ev);
+      else if (ev.op === 'up') held.delete(ev.entry.code);
+    });
+  } catch (err) {
+    for (const ev of held.values()) await pressEvent(page, { ...ev, op: 'up' }, state).catch(() => {});
+    throw err;
+  }
 }
 
 /** Одна клавиша целиком (Escape, Enter, Tab…): нажал, подержал, отпустил. */
