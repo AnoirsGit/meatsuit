@@ -74,3 +74,12 @@ test('окно так и не нашлось: ошибка, созданное �
   assert.equal(f.ctx.listenerCount('page'), 0, 'слушатель page остался');
   assert.ok(f.calls.some(([m, a]) => m === 'Target.closeTarget' && a.targetId === 'BOT'), 'брошенное окно не закрыто');
 });
+
+// Окно задачи — отдельное и в фоне: в зеркале Neko без background каждое новое окно забирало фокус экрана, и буквы,
+// которые хозяин набирал в своём окне, уходили в поле бота (замер 08.11.2026, docs/contract.md).
+test('окно задачи открывается отдельным и в фоне', async () => {
+  const f = fakeBrowser();
+  await openWindow(f.browser);
+  const [, params] = f.calls.find(([m]) => m === 'Target.createTarget');
+  assert.deepEqual(params, { url: 'about:blank', newWindow: true, background: true });
+});

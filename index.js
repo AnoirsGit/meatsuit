@@ -354,6 +354,12 @@ async function connect({
         try { stop.hold = holds.hold(site, { dir, reason: stop.reason ?? stop.message, url: stop.url, hours: holdFor }) || undefined; }
         catch (e) { console.error(`meatsuit: не удалось поставить стоп ${site}:`, e.message); }
       }
+      // Окно (вкладка) остаётся человеку — вывести его вперёд: окна задач открываются в фоне, и в зеркале его пришлось бы
+      // искать. Не когда руль у хозяина: он работает в своём окне. Командам других задач фокус экрана не мешает.
+      const leftOpen = run && run.state.stopped ? page : !run && err instanceof NeedsHuman ? examined : null;
+      if (leftOpen && !hung && !leftOpen.isClosed()) {
+        try { if (!(await wheel.held())) await leftOpen.bringToFront(); } catch { /* вкладку уже закрыли: выводить нечего */ }
+      }
       if (hung) throw hung; // сторож уже сообщил; зависший вызов оборвался закрытием окна — причина в зависании
       // NeedsHuman уже отправлен из supervise; остальное (бюджет, сбой в проекте) сообщаем здесь.
       if (err instanceof NeedsHuman && !run) await emit('needsHuman', `meatsuit: «${name}» на ${site} остановлен: ${err.message}`); // при взятии вкладки supervise ещё не создан
