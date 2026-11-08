@@ -273,13 +273,13 @@ const rejects = (c, hosts) => assert.throws(() => validate(c, hosts), BadCommand
     const valueOf = (sel) => page.evaluate((s) => { const e = document.querySelector(s); return e.isContentEditable ? e.innerText : e.value; }, sel);
     const private_ = (e) => {
       for (const part of [SECRET, ...SECRET.split(' '), 'oo']) assert.ok(!e.message.includes(part), `в сообщении FieldMismatch текст поля: ${e.message}`);
-      assert.deepEqual(Object.keys(e).sort(), ['actualLength', 'cmd', 'diffAt', 'expectedLength', 'id', ...(e.before ? ['before'] : [])].sort());
+      assert.deepEqual(Object.keys(e).sort(), ['actualLength', 'cmd', 'diffAt', 'expectedLength', 'id', 'reason', ...(e.before ? ['before'] : [])].sort());
     };
     // «Хозяин» вставляет свои буквы, когда бот набрал не меньше трёх (в поле было from знаков).
-    const interleave = async (sel, run, from = 0) => {
+    const interleave = async (sel, run, from = 0, extra = 'oo') => {
       const pending = run.then(() => null, (e) => e);
       while ((await valueOf(sel)).length < from + 3) await sleep(10);
-      await page.keyboard.insertText('oo');
+      await page.keyboard.insertText(extra);
       return pending;
     };
     const hm = hands(page);
@@ -305,6 +305,7 @@ const rejects = (c, hosts) => assert.throws(() => validate(c, hosts), BadCommand
     assert.equal(err.actualLength, (await valueOf('#m')).length);
     assert.ok(err.diffAt >= 3 && err.diffAt < SECRET.length, `diffAt ${err.diffAt}`);
     assert.equal(err.before, undefined, 'fill выполнялся: before не ставится');
+    assert.equal(err.reason, 'text');
     private_(err);
     const m1 = await hm.see();
     const pe = await hm.act({ cmd: 'press', key: 'Enter', id: idOf(m1, 'Чат'), gen: m1.gen }).then(() => null, (e) => e);
@@ -379,6 +380,75 @@ const rejects = (c, hosts) => assert.throws(() => validate(c, hosts), BadCommand
     const x2 = await hm.act({ cmd: 'press', key: 'Backspace', id: idOf(x1, 'Чат'), gen: x1.gen });
     await assert.rejects(hm.act({ cmd: 'press', key: 'Enter', id: idOf(x2, 'Чат'), gen: x2.gen }), FieldMismatch, 'Backspace «отмыл» чужие буквы');
     assert.equal(await enters(), 0);
+
+    // Поля, которые сами меняют ввод. Маска телефона (type=tel, префикс +7 ставит сама, цифры — в шаблон): по умолчанию
+    // сверяются цифры — цифры поля = цифры текста (или префикс поля после очистки + цифры текста). Не те цифры — ошибка
+    // (reason 'digits'): «+77012345678» в маску с готовым +7 даёт «+7 (770) 123-45-67». Буквы хозяина в такое поле —
+    // тоже ошибка. maxlength — reason 'maxlength'. Код из ячеек с автопереходом фокуса: ячейки вместе = текст —
+    // принято. verify: false — не сверять и не помнить (Enter в это поле не сверяется); verify: 'exact' — без поблажек.
+    const MASKED = `<body style="margin:0">
+      <input id="tel" type="tel" aria-label="Телефон" style="width:300px">
+      <input id="ml" aria-label="Короткое" maxlength="5">
+      <input id="up" aria-label="Заглавные" oninput="this.value=this.value.toUpperCase()">
+      <div id="otp">${[1, 2, 3, 4, 5, 6].map((n) => `<input class="c" inputmode="numeric" maxlength="1" aria-label="Цифра ${n}" style="width:30px">`).join('')}</div>
+      <script>(() => { // setContent не меняет window: без обёртки второй раз const упал бы, и маски не было бы
+        window.keys = []; addEventListener('keydown', (e) => keys.push(e.key), true);
+        const tel = document.getElementById('tel');
+        const fmt = () => {
+          let d = tel.value.replace(/\\D/g, '');
+          if (tel.value.startsWith('+7')) d = d.slice(1);
+          d = d.slice(0, 10);
+          const p = [d.slice(0, 3), d.slice(3, 6), d.slice(6, 8), d.slice(8, 10)];
+          tel.value = '+7 ' + (d ? '(' + p[0] + (d.length > 3 ? ') ' + p[1] : '') + (d.length > 6 ? '-' + p[2] : '') + (d.length > 8 ? '-' + p[3] : '') : '');
+        };
+        tel.addEventListener('focus', () => { if (!tel.value) tel.value = '+7 '; });
+        tel.addEventListener('input', fmt);
+        const cells = [...document.querySelectorAll('.c')];
+        cells.forEach((c, i) => c.addEventListener('input', () => { if (c.value && cells[i + 1]) cells[i + 1].focus(); }));
+      })();</script>
+    </body>`;
+    const reasonOf = (p) => p.then(() => null, (e) => e);
+    await page.setContent(MASKED);
+    const k0 = await hm.see();
+    const k1 = await hm.act({ cmd: 'fill', id: idOf(k0, 'Телефон'), gen: k0.gen, text: '7012345678' });
+    assert.equal(await page.inputValue('#tel'), '+7 (701) 234-56-78');
+    await hm.act({ cmd: 'press', key: 'Enter', id: idOf(k1, 'Телефон'), gen: k1.gen });
+    assert.equal(await enters(), 1, 'Enter в принятое по цифрам поле не нажат');
+    const k3 = await hm.see();
+    const wrong = await reasonOf(hm.act({ cmd: 'fill', id: idOf(k3, 'Телефон'), gen: k3.gen, text: '+77012345678' }));
+    assert.ok(wrong instanceof FieldMismatch && wrong.reason === 'digits', `не те цифры в маске приняты: ${wrong}`);
+    private_(wrong);
+    const k4 = await hm.see();
+    await assert.rejects(hm.act({ cmd: 'press', key: 'Enter', id: idOf(k4, 'Телефон'), gen: k4.gen }), FieldMismatch, 'Enter после не тех цифр');
+    const k5 = await hm.see();
+    const exact = await reasonOf(hm.act({ cmd: 'fill', id: idOf(k5, 'Телефон'), gen: k5.gen, text: '7012345678', verify: 'exact' }));
+    assert.ok(exact instanceof FieldMismatch && exact.reason === 'text', `verify: 'exact' сверил по цифрам: ${exact}`);
+    await page.setContent(MASKED); // поле пустое: «хозяин» вклинивается, когда бот уже набрал часть номера
+    const k6 = await hm.see();
+    // Цифры хозяина посреди ввода в маску (буквы маска сама выбросит) — цифры уже не те.
+    const owner = await interleave('#tel', hm.act({ cmd: 'fill', id: idOf(k6, 'Телефон'), gen: k6.gen, text: '7012345678' }), 7, '55');
+    assert.ok(owner instanceof FieldMismatch && owner.reason === 'digits', `цифры хозяина в поле с маской приняты: ${owner}`);
+    // maxlength: текст не поместился — reason 'maxlength'.
+    const m2 = await hm.see();
+    const ml = await reasonOf(hm.act({ cmd: 'fill', id: idOf(m2, 'Короткое'), gen: m2.gen, text: '1234567' }));
+    assert.ok(ml instanceof FieldMismatch && ml.reason === 'maxlength' && ml.expectedLength === 7 && ml.actualLength === 5, `maxlength: ${ml}`);
+    assert.match(ml.message, /maxlength 5/);
+    // Ячейки кода с автопереходом: fill в первую, фокус уходит дальше, вместе ячейки дают код — принято.
+    const o0 = await hm.see();
+    await hm.act({ cmd: 'fill', id: idOf(o0, 'Цифра 1'), gen: o0.gen, text: '123456' });
+    assert.deepEqual(await page.$$eval('.c', (cs) => cs.map((c) => c.value).join('')), '123456');
+    // Страница меняет ввод сама (заглавные): по умолчанию — ошибка; verify: false — нет, и Enter в это поле не сверяется.
+    const q0 = await hm.see();
+    const up = await reasonOf(hm.act({ cmd: 'fill', id: idOf(q0, 'Заглавные'), gen: q0.gen, text: 'abc' }));
+    assert.ok(up instanceof FieldMismatch && up.reason === 'text', String(up));
+    const q1 = await hm.see();
+    const q2 = await hm.act({ cmd: 'fill', id: idOf(q1, 'Заглавные'), gen: q1.gen, text: 'abc', verify: false });
+    await hm.act({ cmd: 'press', key: 'Enter', id: idOf(q2, 'Заглавные'), gen: q2.gen });
+    assert.equal(await enters(), 1, 'verify: false — Enter всё равно сверялся'); // счёт с последней загрузки страницы
+    rejects({ cmd: 'fill', id: 1, gen: 1, text: 'x', verify: 'loose' });
+    rejects({ cmd: 'fill', id: 1, gen: 1, text: 'x', verify: true });
+    validate({ cmd: 'fill', id: 1, gen: 1, text: 'x', verify: false });
+    validate({ cmd: 'type', text: 'x', verify: 'digits' });
 
     // fill сверяет фокус перед Ctrl+A и Backspace: страница увела фокус в другое поле — StaleElement, чужое поле цело.
     await page.setContent('<body style="margin:0"><input id="a" aria-label="A" onfocus="document.getElementById(\'o\').focus()"><input id="o" aria-label="Другое" value="чужой текст"></body>');

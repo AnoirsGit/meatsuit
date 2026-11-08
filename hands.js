@@ -23,11 +23,13 @@ class StaleElement extends Error {}
  * Так бывает, когда кто-то печатает вместе с ботом (хозяин в зеркале: клик бота активирует окно бота, и буквы
  * хозяина уходят в его поле) или страница сама меняет ввод (маска, обрезка по длине, код из нескольких полей).
  * В сообщении и полях — только длины и место первого расхождения: тексты — личные сообщения, ошибка идёт в журнал.
+ * reason: 'text' (не то после нормализации), 'digits' (поле сверялось по цифрам, цифры не те), 'maxlength' (не
+ * поместилось: в поле начало текста длиной maxlength).
  */
 class FieldMismatch extends Error {
-  constructor(message, { cmd, id, expectedLength, actualLength, diffAt, before = false }) {
+  constructor(message, { cmd, id, reason = 'text', expectedLength, actualLength, diffAt, before = false }) {
     super(message);
-    Object.assign(this, { cmd, id, expectedLength, actualLength, diffAt });
+    Object.assign(this, { cmd, id, reason, expectedLength, actualLength, diffAt });
     if (before) this.before = true;
   }
 }
@@ -36,7 +38,8 @@ class FieldMismatch extends Error {
  * Поле, куда идут клавиши fill, type и Enter, и что в нём должно быть. Выполняется в изолированном мире снимка
  * (dom.run): текстом, без замыканий. Ожидание лежит там же, в WeakMap элемент → текст: переживает новые снимки
  * (номера меняются, элемент тот же) и умирает с документом; страница его не видит, на диск оно не попадает.
- *   pin    [id, text] — fill после клика: фокус в цели (или внутри неё); запомнить поле и ждать в нём text.
+ *   pin    [id, text, verify] — fill после клика: фокус в цели (или внутри неё); запомнить поле и ждать в нём text.
+ *   cleared           — fill очистил поле: что в нём осталось (префикс маски «+7 ») — для сверки по цифрам.
  *   pinAt  [_, text]  — type: поле в фокусе; ждать в нём «что было + text» с места курсора. Если бот уже печатал
  *                       в это поле, а в нём теперь другое, — { was } с расхождением, ввод не начинается.
  *   check             — сверить запомненное поле с ожиданием (после ввода).
@@ -45,9 +48,14 @@ class FieldMismatch extends Error {
  *   key / keyed       — до и после другой клавиши (Backspace, стрелки): если в поле было ровно набранное, ожидание
  *                       становится тем, что в поле после клавиши бота; если уже не было — остаётся, Enter не пройдёт.
  * Сравнение — после нормализации: \r\n → \n, неразрывный пробел → пробел, NFC, без пробелов по краям.
+ * verify у fill и type: 'exact' — только так; 'digits' — по цифрам (цифры поля = цифры текста или префикс поля после
+ * очистки + цифры текста); false — не сверять и не помнить (Enter в это поле не сверяется); без него — 'exact', а где
+ * поле само меняет ввод, ещё два случая: поле для номера (type=tel, inputmode tel|numeric|decimal) или со знаками
+ * маски, которых нет в тексте, и текст и поле — только цифры и знаки маски, — по цифрам; ячейки кода, где фокус ушёл
+ * дальше, — ячейки подряд от этой вместе дают текст. Расхождение — reason: 'text', 'digits' или 'maxlength'.
  */
-function fieldOp([op, i, text]) {
-  const st = globalThis.__msInput || (globalThis.__msInput = { pin: null, want: new WeakMap(), view: new WeakMap() });
+function fieldOp([op, i, text, verify]) {
+  const st = globalThis.__msInput || (globalThis.__msInput = { pin: null, want: new WeakMap(), view: new WeakMap(), mode: new WeakMap(), pre: new WeakMap() });
   const deep = () => { let a = document.activeElement; while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement; return a; };
   const editable = (e) => !!e && (e.isContentEditable || e.tagName === 'TEXTAREA'
     || (e.tagName === 'INPUT' && !/^(button|checkbox|color|file|hidden|image|radio|range|reset|submit)$/i.test(e.type)));
@@ -63,23 +71,65 @@ function fieldOp([op, i, text]) {
   };
   const compare = (e) => {
     if (!e || !e.isConnected) return { gone: true };
-    return diff(st.want.get(e), norm(read(e, st.view.get(e))));
+    return { ...diff(st.want.get(e), norm(read(e, st.view.get(e)))), reason: 'text' };
+  };
+  // Режим сверки поля: verify команды; false — поле не помнится вовсе.
+  const remember = (a, want) => {
+    st.mode.set(a, verify === 'exact' || verify === 'digits' ? verify : 'auto');
+    st.pre.delete(a);
+    if (verify === false) { st.want.delete(a); st.mode.set(a, 'off'); } else st.want.set(a, norm(want));
+  };
+  const MASK = /[()\-_./+ ]/g;
+  const NUMBERISH = /^[\d\s()+\-._/*#]*$/;
+  const digitsOf = (x) => String(x || '').replace(/\D/g, '');
+  // Ячейки кода: фокус ушёл из a дальше, а a и поля ввода подряд после него (в той же форме или корне) по 1–2 знака
+  // вместе дают текст.
+  const cells = (a, want) => {
+    if (a.tagName !== 'INPUT' || want.length < 2 || deep() === a) return false;
+    const all = [...(a.form || a.getRootNode()).querySelectorAll('input')].filter(editable);
+    let k = all.indexOf(a), got = '', n = 0;
+    if (k < 0) return false;
+    for (; k < all.length && got.length < want.length; k++, n++) {
+      const v = norm(all[k].value);
+      if (v.length > 2) return false;
+      got += v;
+    }
+    return n >= 2 && got === want;
+  };
+  const settle = (a) => {
+    if (!a || !a.isConnected) return { gone: true };
+    const mode = st.mode.get(a) || 'auto';
+    if (mode === 'off') return { ok: true };
+    const want = st.want.get(a), have = norm(read(a, st.view.get(a)));
+    const r = { ...diff(want, have), reason: 'text' };
+    if (r.ok || mode === 'exact') return r;
+    const tel = a.type === 'tel' || /^(tel|numeric|decimal)$/i.test(a.inputMode || a.getAttribute('inputmode') || '');
+    const masked = (have.match(MASK) || []).length > (want.match(MASK) || []).length;
+    if (mode === 'digits' || ((tel || masked) && NUMBERISH.test(want) && NUMBERISH.test(have) && /\d/.test(want))) {
+      const dh = digitsOf(have), dw = digitsOf(want);
+      if (dh && (dh === dw || dh === digitsOf(st.pre.get(a)) + dw)) return { ...r, ok: true };
+      r.reason = 'digits';
+    }
+    if (mode === 'auto' && cells(a, want)) { st.want.delete(a); return { ...r, ok: true, cells: true }; }
+    if (a.maxLength > 0 && want.length > a.maxLength && want.startsWith(have)) { r.reason = 'maxlength'; r.maxLength = a.maxLength; }
+    return r;
   };
   switch (op) {
     case 'pin': {
       const el = globalThis.__ms.els[i], a = deep();
       if (!el || !a || !(a === el || inside(el, a) || (el.isContentEditable && a.isContentEditable && inside(a, el)))) return { focus: false };
       st.pin = a;
-      st.want.set(a, norm(text));
+      remember(a, text);
       st.view.delete(a);
       return { focus: true };
     }
+    case 'cleared': if (st.pin && st.pin.isConnected) st.pre.set(st.pin, norm(read(st.pin))); return true;
     case 'pinAt': {
       const a = deep();
       if (!editable(a)) { st.pin = null; return { editable: false }; }
       st.pin = a;
-      // Бот уже печатал в это поле: дописывать можно, только если в нём всё ещё набранное им.
-      if (st.want.has(a)) { const was = compare(a); if (!was.ok) return { editable: true, was }; }
+      // Бот уже печатал в это поле: дописывать можно, только если в нём всё ещё набранное им (verify: false — не сверяем).
+      if (verify !== false && st.want.has(a)) { const was = compare(a); if (!was.ok) return { editable: true, was }; }
       let pre, post, view;
       if (a.isContentEditable) {
         const sel = document.getSelection();
@@ -99,14 +149,15 @@ function fieldOp([op, i, text]) {
         if (s == null || e == null) s = e = a.value.length;
         pre = a.value.slice(0, s); post = a.value.slice(e);
       }
-      st.want.set(a, norm(pre + text + post));
+      remember(a, pre + text + post);
       if (view) st.view.set(a, view); else st.view.delete(a);
       return { editable: true };
     }
     case 'check': {
-      const r = compare(st.pin);
-      // Дальше Enter сверяет с тем, что в поле сейчас и как видит человек (после type с середины — тоже).
-      if (r.ok) { st.want.set(st.pin, norm(read(st.pin))); st.view.delete(st.pin); }
+      const a = st.pin;
+      const r = settle(a);
+      // Дальше Enter сверяет с тем, что в поле сейчас и как видит человек (после type с середины, после маски — тоже).
+      if (r.ok && !r.gone && st.want.has(a)) { st.want.set(a, norm(read(a))); st.view.delete(a); }
       return r;
     }
     case 'enter': {
@@ -152,7 +203,7 @@ const INTERACTIVE = [
 
 // Журнал хранит, что сделано и где, но не что набрано: текст и значения — длиной, адреса — без query и hash
 // (там бывают токены входа, коды подтверждения и набранный поиск), файл — только типом. Лишние поля команды не пишутся.
-const JOURNAL_KEEP = ['cmd', 'id', 'gen', 'key', 'px', 'ms'];
+const JOURNAL_KEEP = ['cmd', 'id', 'gen', 'key', 'px', 'ms', 'verify'];
 const JOURNAL_LENGTH = ['text', 'value', 'label'];
 const journalUrl = (u) => {
   try {
@@ -242,13 +293,15 @@ function validate(c, allowedHosts = [], { uploadDirs = [] } = {}) {
   const bad = (m) => { throw new BadCommand(`${c && c.cmd}: ${m}`); };
   if (!c || typeof c !== 'object') throw new BadCommand('команда не объект');
   const optTarget = () => { if (hasTarget(c) && (!isId(c.id) || !isGen(c.gen))) bad('id и gen из снимка — вместе или ни одного'); };
+  const optVerify = () => { if (c.verify !== undefined && !['exact', 'digits', false].includes(c.verify)) bad("verify — 'exact', 'digits' или false"); };
   switch (c.cmd) {
     case 'click': if (!isId(c.id) || !isGen(c.gen)) bad('нужны id и gen из снимка'); break;
     case 'fill':
       if (!isId(c.id) || !isGen(c.gen)) bad('нужны id и gen из снимка');
       if (!isLongText(c.text)) bad(`нужен text до ${MAX_TEXT} символов в одну строку, в textarea — до ${MAX_LONG_TEXT} и с переводами строк`);
+      optVerify();
       break;
-    case 'type': if (!isText(c.text)) bad('нужен text до ' + MAX_TEXT); optTarget(); break;
+    case 'type': if (!isText(c.text)) bad('нужен text до ' + MAX_TEXT); optTarget(); optVerify(); break;
     case 'press': if (!KEYS.has(c.key)) bad('клавиша не из списка'); optTarget(); break;
     case 'upload':
       if (!isId(c.id) || !isGen(c.gen)) bad('нужны id и gen из снимка');
@@ -429,17 +482,25 @@ function hands(page, opts = {}) {
   };
 
   // Поле ввода и ожидание в нём (fieldOp). Документ сменился — { stale: true }: решает вызывающая команда.
-  const field = async (op, i = null, text = null) => {
-    try { return await dom.run(world, fieldOp, [op, i, text]); }
+  const field = async (op, i = null, text = null, verify = undefined) => {
+    try { return await dom.run(world, fieldOp, [op, i, text, verify ?? null]); }
     catch (err) { if (err instanceof dom.StaleWorld) return { stale: true }; throw err; }
   };
 
   // Сообщение без текста поля: только длины и место расхождения (журнал, notify).
-  const mismatch = (c, r, tail, before = false) => new FieldMismatch(
-    `${c.cmd === 'press' ? 'press Enter' : c.cmd}: в поле${c.id ? ` ${c.id}` : ''} не тот текст, что ${c.cmd === 'fill' ? 'заказан' : 'набрал бот'} `
-    + `(ждали ${r.expectedLength} знаков, в поле ${r.actualLength}, первое расхождение — знак ${r.diffAt + 1}): `
-    + `кто-то печатал вместе с ботом или страница поменяла ввод; ${tail}`,
-    { cmd: c.cmd, id: c.id, expectedLength: r.expectedLength, actualLength: r.actualLength, diffAt: r.diffAt, before });
+  const WHY = {
+    text: 'кто-то печатал вместе с ботом или страница поменяла ввод',
+    digits: 'цифры в поле не те, что в тексте (поле для номера или с маской сверяется по цифрам)',
+    maxlength: 'текст не поместился',
+  };
+  const mismatch = (c, r, tail, before = false) => {
+    const reason = WHY[r.reason] ? r.reason : 'text';
+    const why = reason === 'maxlength' ? `${WHY.maxlength}: поле берёт не больше ${r.maxLength} знаков (maxlength ${r.maxLength})` : WHY[reason];
+    return new FieldMismatch(
+      `${c.cmd === 'press' ? 'press Enter' : c.cmd}: в поле${c.id ? ` ${c.id}` : ''} не тот текст, что ${c.cmd === 'fill' ? 'заказан' : 'набрал бот'} `
+      + `(ждали ${r.expectedLength} знаков, в поле ${r.actualLength}, первое расхождение — знак ${r.diffAt + 1}): ${why}; ${tail}`,
+      { cmd: c.cmd, id: c.id, reason, expectedLength: r.expectedLength, actualLength: r.actualLength, diffAt: r.diffAt, before });
+  };
 
   // После fill и type: в поле то, что заказано? Поля уже нет или документ сменился (страница сама приняла ввод:
   // код с проверкой по последней цифре, отправка формы) — сверять не с чем, команда выполнена, как раньше.
@@ -591,17 +652,18 @@ function hands(page, opts = {}) {
         await human.pause(150, 500);
         // Ctrl+A и Backspace стёрли бы то поле, где фокус: страница могла увести его после клика. Ожидание — до печати:
         // прерванный fill (руль, сбой) тоже оставляет поле «не тем», и Enter в него не нажмётся.
-        const pin = await field('pin', c.id, text);
+        const pin = await field('pin', c.id, text, c.verify);
         if (pin.stale) throw new StaleElement('страница сменилась перед вводом');
         if (!pin.focus) throw new StaleElement(`в фокусе не поле ${c.id}: очистка и ввод отменены`);
         await page.keyboard.press('ControlOrMeta+A');
         await page.keyboard.press('Backspace');
+        await field('cleared'); // префикс маски, который поле оставило себе («+7 »)
         await human.type(page, text, { shouldStop });
         return verify(c);
       }
       case 'type': {
         if (hasTarget(c)) { await target(c.id, c.gen); await focused(c.id); }
-        const pin = await field('pinAt', null, c.text);
+        const pin = await field('pinAt', null, c.text, c.verify);
         if (pin.stale) throw new StaleElement('страница сменилась перед вводом');
         if (pin.was) throw mismatch(c, pin.was, 'ввод не начат', true);
         await human.type(page, c.text, { shouldStop });

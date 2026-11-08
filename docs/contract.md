@@ -314,7 +314,7 @@ windows and no new tasks: `null` when a slot is free now (`ok: true`) or when ti
 | `NeedsHuman` (`.reason`, `.url`, `.before`, `.hold`, `.onHold`) | a captcha, a sign-in page (except the declared path of a `codeLogin` task), a block, leaving the site's host (and not to `extraHosts`); the site is on hold (`onHold: true`) | stop; the window is open for the human. The site goes on hold (`.hold.until`); `onHold: true` means the task never started: not a failure, and no reason to retry before `until`. The state is not cleared until the task ends. From `act()`: with `before: true` the stop came from the check before the command and **the command did not run**; without it the command ran and the stop is about the page after it (a message may be out, a form sent) |
 | `BudgetExceeded` | more than `maxCommands` commands or `maxMinutes` minutes | treat the task as failed |
 | `StaleElement` | `gen` is out of date, the element is gone, something other than the target is under the cursor before the press, focus moved | take a fresh snapshot |
-| `FieldMismatch` (`.cmd`, `.id`, `.expectedLength`, `.actualLength`, `.diffAt`, `.before`) | after `fill` or `type` the field does not hold the text (someone typed along with the bot, or the page changed the input); `type` or `Enter` into a field that no longer holds what the bot typed (`before: true`: nothing typed or pressed). Lengths only, never the text | do not retry blindly: tell the owner, or check the field with `see()`; see "The field after typing" |
+| `FieldMismatch` (`.cmd`, `.id`, `.reason`, `.expectedLength`, `.actualLength`, `.diffAt`, `.before`) | after `fill` or `type` the field does not hold the text (someone typed along with the bot, or the page changed the input); `type` or `Enter` into a field that no longer holds what the bot typed (`before: true`: nothing typed or pressed). Lengths only, never the text | do not retry blindly: tell the owner, or check the field with `see()`; see "The field after typing" |
 | `BadCommand` | a command outside the set or with bad fields; a wrong `within`, `tree`, `items` or `textLimit` of `see()` | a bug in the caller's code or the model |
 
 ## Attaching to the mirror
@@ -418,10 +418,10 @@ The set is closed; anything else is a `BadCommand` before it runs.
 | Command | Fields | Notes |
 |---|---|---|
 | `click` | `id`, `gen` | scrolls, moves the mouse along a curve, clicks a random point; before the press checks that the target is at that point. On a file field it is a `BadCommand` (it would open the system file dialog; use `upload` for files) |
-| `fill` | `id`, `gen`, `text` | click, check that the focus is in the field, clear, type, check that the field holds `text` (see "The field after typing"). `text` up to 1000 characters on one line; in a `<textarea>` up to 2000 with line breaks, see below. On a `<select>` or a file field it is a `BadCommand` (use `select` and `upload`) |
+| `fill` | `id`, `gen`, `text`, `verify?` | click, check that the focus is in the field, clear, type, check that the field holds `text` (see "The field after typing"). `text` up to 1000 characters on one line; in a `<textarea>` up to 2000 with line breaks, see below. On a `<select>` or a file field it is a `BadCommand` (use `select` and `upload`) |
 | `select` | `id`, `gen`, `value` or `label` | an option of a native `<select>`, see below |
 | `upload` | `id`, `gen`, `file` | a file from `uploadDirs` into the form, see below |
-| `type` | `text`, `id?`, `gen?` | types into the focused element, one line; with `id`/`gen` the focus is checked before the first key; afterwards the field must hold what it held plus `text` at the caret |
+| `type` | `text`, `id?`, `gen?`, `verify?` | types into the focused element, one line; with `id`/`gen` the focus is checked before the first key; afterwards the field must hold what it held plus `text` at the caret |
 | `press` | `key`, `id?`, `gen?` | `Enter` `Escape` `Tab` `Backspace` `ArrowDown` `ArrowUp` `PageDown` `PageUp`. `Enter` into a field these hands typed into goes only while the field still holds what they typed |
 | `scroll` | `px?`, `id?`, `gen?` | down, 0 to 5000; with `id`/`gen` the mouse first moves over the element (no click) and the wheel turns over it: this is how a nested scroll moves, such as a list in a side panel |
 | `wait` | `ms` (up to 15000) or `text` | a pause, or until the text appears |
@@ -453,19 +453,43 @@ button, field or label is above it, and `scroll` (it only moves the view; this i
   on its last digit, a form sent), there is nothing to compare with and the command succeeds as before.
 
 `FieldMismatch` carries `cmd` (`'fill'`, `'type'` or `'press'`), `id` (as in the command, possibly `undefined`),
-`expectedLength` and `actualLength` (after normalisation), `diffAt` (the 0-based index of the first character that
-differs) and `before: true` when nothing was typed or pressed. Neither the message nor the fields contain the text: it
+`reason` (below), `expectedLength` and `actualLength` (after normalisation), `diffAt` (the 0-based index of the first
+character that differs) and `before: true` when nothing was typed or pressed. Neither the message nor the fields contain the text: it
 is a private message, and the error goes to the journal and to `notify`. Without `before` the keys were typed, and the
 field holds something other than `text`.
 
 It happens when someone types along with the bot (the owner in the mirror: a bot's click activates the bot's window,
-and the letters the owner types land in the bot's field, see "Several bots in one browser"), and also when the page
-itself changes the input: a phone mask, a `maxlength` cut, code boxes that move the focus on after each digit (the
-first box then holds one digit). Do not retry blindly: tell the owner, or look at the field with `see()` (its `value`,
+and the letters the owner types land in the bot's field, see "Several bots in one browser"), or when the field does not
+take the text as typed. `verify` on `fill` and `type` says how to compare:
+
+- absent (the default): exactly, after normalisation, with two allowances for fields that reformat what is typed:
+  - **digits**: a field for a number (`type="tel"`, `inputmode` `tel`, `numeric` or `decimal`), or one that holds
+    more mask characters (`( ) - _ . / + space`) than the text, while both the text and the field hold only digits and
+    such characters, is compared by its digits: the digits of the field must equal the digits of the text, or the
+    digits the field kept after clearing (a mask's own `+7 `) followed by the digits of the text. `7012345678` into a
+    `+7 (___) ___-__-__` mask gives `+7 (701) 234-56-78` and is accepted; `+77012345678` into the same mask gives
+    `+7 (770) 123-45-67`, the digits differ, and that is a `FieldMismatch` with `reason: 'digits'`. Letters in such a
+    field, or digits someone else typed into it, are an error too;
+  - **code cells**: if the focus moved on from the target while typing (each cell takes one digit and passes the focus
+    on) and the target and the inputs right after it in the same form, one or two characters each, together hold the
+    text, it is accepted. Enter is not checked then (the focus is in the last cell);
+- `'exact'`: exactly, without those allowances;
+- `'digits'`: by digits as above, for any field;
+- `false`: no check, and the field is not remembered, so an Enter into it is not checked either, nor is a `type` into
+  it. **This is the caller's responsibility**: use it only for a field that is known to change the input and whose
+  result the caller checks itself (with `see()`, before pressing Enter or a submit button).
+
+`reason` is `'text'` (the field holds something else), `'digits'` (compared by digits, and they differ) or
+`'maxlength'` (the text did not fit: the field holds the start of the text as long as its `maxlength`, and the message
+names that length). `maxlength` stays an error because the text really did not get in.
+
+Do not retry blindly: tell the owner, or look at the field with `see()` (its `value`,
 the first 80 characters) and decide. Enter into that field stays refused until it holds what the bot typed; a `click`
 on a submit button is not checked. Verified in headless Chromium (`test/hands.test.js`: letters inserted in the middle
 of `fill` and `type` into a `textarea` and a `contenteditable`, a change between `fill` and Enter, a page that moves
-the focus after the click); not verified live in Chrome under Neko.
+the focus after the click, a `+7` phone mask with the right and the wrong digits and with digits typed by someone else,
+`maxlength`, six code cells with focus moving on, a field that upper-cases with and without `verify: false`); not
+verified live in Chrome under Neko or on real hh and ATS forms.
 
 ### fill in a textarea (a cover letter)
 
@@ -549,7 +573,7 @@ one process, the last one sets the human. The file lives outside the repository 
 
 - The journal `<dir>/journal.jsonl`, one line per command: `ts`, `dryRun`, `cmd`, `url`, `result: 'ok' | 'dry-run'`
   or `error`, `urlAfter`. The journal keeps what was done and where, but **not what was typed**: `cmd` holds only
-  `cmd`, `id`, `gen`, `key`, `px`, `ms`; instead of `text`, `value` and `label` it holds their lengths (`textLength`,
+  `cmd`, `id`, `gen`, `key`, `px`, `ms`, `verify`; instead of `text`, `value` and `label` it holds their lengths (`textLength`,
   `valueLength`, `labelLength`); for `upload` only the file type (`fileType: 'pdf'`), without the path or name.
   Addresses (`cmd.url`, `url`, `urlAfter`) are stored without query and hash: those can carry sign-in tokens, codes
   and typed searches. An error is the first line of the message, with the command's text and address removed. Other
