@@ -19,7 +19,7 @@ Start with the [project README](../README.md) ([Russian](../README.ru.md)). meat
 
 ## `extras/`: services around the core
 
-The HTTP service, warm-up, egress check, queue, notifications, owner presence, browser lock and self-check live in [`../extras/`](../extras/). They are maintained (`npm --prefix extras ci`, then `npm run test:extras`); the core library loads nothing from them (`test/api.test.js` enforces it).
+The HTTP service, warm-up, egress check, queue, notifications, owner presence, the wheel from the mirror ([docker/README.md](../docker/README.md#the-owners-wheel-from-the-mirror)), browser lock and self-check live in [`../extras/`](../extras/). They are maintained (`npm --prefix extras ci`, then `npm run test:extras`); the core library loads nothing from them (`test/api.test.js` enforces it).
 
 | Document | About |
 |---|---|

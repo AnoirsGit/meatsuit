@@ -47,3 +47,10 @@ services:
     depends_on:
       tailscale:
         condition: service_healthy
+
+  # Руль от зеркала: Neko для него — 127.0.0.1:8080 этой же сети. Наружу он не ходит.
+  wheel:
+    network_mode: "service:tailscale"
+    depends_on:
+      tailscale:
+        condition: service_healthy

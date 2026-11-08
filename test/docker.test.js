@@ -1,7 +1,8 @@
 /**
  * Зеркало в Docker без запуска контейнеров: docker/up.sh и то, что docker compose собирает из файлов.
  * Выбор браузера (chrome по умолчанию, brave), свои тома профиля, постоянные имена для вызывающих
- * (контейнер meatsuit-browser, том meatsuit_profile), CDP не публикуется, Tailscale — необязательный профиль.
+ * (контейнер meatsuit-browser, том meatsuit_profile), CDP не публикуется, Tailscale — необязательный профиль,
+ * руль от зеркала (сервис wheel) — всегда, с одной папкой state/ из тома вызывающих.
  * Части с docker compose пропускаются, если его нет; up.sh проверяется и на подставном docker.
  *
  *   node test/docker.test.js
@@ -88,6 +89,25 @@ for (const [name, b] of Object.entries(BROWSERS)) {
     const shared = init.volumes.find((v) => v.target === '/meatsuit');
     assert.deepEqual([shared.type, m.volumes[shared.source].name], ['volume', 'meatsuit_profile']);
     assert.equal(neko.depends_on['profile-init'].condition, 'service_completed_successfully');
+
+    // Руль от зеркала (extras/wheel-watch.js): без профиля, в сети браузера, пароль админа тот же, что у Neko;
+    // из тома вызывающих — только state/ (в корне тома у Chrome профиль со входами), пишет от uid 1000.
+    const wheel = m.services.wheel;
+    assert.ok(wheel, 'сервиса wheel нет в модели без профилей');
+    assert.equal(wheel.network_mode, 'service:neko');
+    assert.equal(wheel.depends_on.neko.condition, 'service_healthy');
+    assert.equal(wheel.user, '1000:1000');
+    assert.equal(wheel.init, true, 'SIGTERM доходит до Node');
+    assert.deepEqual(wheel.command, ['node', 'extras/wheel-watch.js', '--dir', '/meatsuit/state']);
+    assert.ok(fs.existsSync(path.join(ROOT, wheel.command[1])));
+    assert.equal(wheel.environment.MEATSUIT_NEKO_URL, 'http://127.0.0.1:8080');
+    assert.ok(wheel.environment.NEKO_ADMIN_PASSWORD);
+    assert.equal(wheel.environment.NEKO_ADMIN_PASSWORD, neko.environment.NEKO_MEMBER_MULTIUSER_ADMIN_PASSWORD, 'второй копии пароля нет');
+    const st = wheel.volumes.find((v) => v.target === '/meatsuit/state');
+    assert.deepEqual([st.type, m.volumes[st.source].name, st.volume && st.volume.subpath], ['volume', 'meatsuit_profile', 'state']);
+    assert.ok(wheel.volumes.every((v) => v.type !== 'volume' || (v.volume && v.volume.subpath)), 'том подключён целиком');
+    assert.ok(wheel.volumes.find((v) => v.target === '/app').read_only);
+    assert.equal(wheel.cpus, undefined, 'квота процессора: где её не дают (NEKO_CPUS=0), не поднялся бы весь стек');
   });
 }
 
@@ -131,6 +151,7 @@ test('папка на хосте вместо тома: у обоих брауз
     const init = m.services['profile-init'].volumes;
     assert.equal(init.find((v) => v.target === '/profile').source, '/srv/meatsuit/profile', name);
     assert.equal(m.volumes[init.find((v) => v.target === '/meatsuit').source].name, 'meatsuit_profile', 'том вызывающих есть и с папкой на хосте');
+    assert.equal(m.volumes[m.services.wheel.volumes.find((v) => v.target === '/meatsuit/state').source].name, 'meatsuit_profile', 'руль — в state/ тома вызывающих');
   }
 });
 
@@ -150,7 +171,8 @@ test('Tailscale — необязательный профиль: MEATSUIT_EGRESS
     const ts = m.services.tailscale;
     assert.equal(ts.init, true, `${name}: init подбирает сирот проверки здоровья (иначе зомби до pids_limit)`);
     assert.ok(ts.ports.some((p) => p.target === 8080) && !ts.ports.some((p) => p.target === 9222));
-    for (const s of ['life', 'server']) assert.equal(m.services[s].network_mode, 'service:tailscale', s);
+    for (const s of ['life', 'server', 'wheel']) assert.equal(m.services[s].network_mode, 'service:tailscale', s);
+    assert.equal(m.services.wheel.depends_on.tailscale.condition, 'service_healthy');
     assert.equal(m.services.neko.depends_on.tailscale.condition, 'service_healthy');
     // выключатель, затем выбор exit node по списку, затем containerboot
     assert.deepEqual(ts.entrypoint, ['/bin/sh', '/killswitch.sh']);

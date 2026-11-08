@@ -55,7 +55,7 @@ await ms.close();
 | `dir` | the per-site queue locks `queue/<key>.lock`, the counters `limits.json`, the journal `journal.jsonl`, the human's habits `persona.json`, the tab marks `tabs.json`, the site holds `holds/`, the owner's wheel `wheel.json` and the short locks `state.lock` around the shared files and `wheel.lock` around the wheel; `~/.meatsuit` by default. **All callers of one browser must pass the same `dir`**: otherwise their locks differ, two bots enter one site at once, and the owner's wheel stops only some of them. With the mirror from `docker/` this is the `state/` folder in the `meatsuit_profile` volume (see "Attaching to the mirror") |
 | `notify(text, event)` | the caller's async notification function. A failed send does not fail the task; it goes to stderr |
 | `notifyOn` | which events to send: `'start'`, `'done'`, `'limit'`, `'error'`, `'needsHuman'`; by default `['needsHuman', 'limit', 'error']` |
-| `ownerPresent` | optional: the caller's async function telling whether the owner holds the controls in the mirror, returning `true`, `false` or `{ present }` (the `check()` of `extras/presence.js` fits as is; the Neko admin password stays with the caller). Asked every 2 seconds while the connection lives. A "yes" puts the owner's wheel on for every caller of the same `dir`, see "The owner at the wheel". A function that throws counts as "no"; not a function is an error before the browser |
+| `ownerPresent` | optional: the caller's async function telling whether the owner holds the controls in the mirror, returning `true`, `false` or `{ present }` (the `check()` of `extras/presence.js` fits as is; the Neko admin password stays with the caller). Asked every 2 seconds while the connection lives. A "yes" puts the owner's wheel on for every caller of the same `dir`, see "The owner at the wheel". A function that throws counts as "no"; not a function is an error before the browser. With the mirror from `docker/` not needed: its `wheel` service does this for every caller |
 | `site` | the site's host, its key in `sites.json`; `goto` is limited to it as well |
 | `uploadDirs` | an array of absolute paths to directories `upload` may take files from (CVs, letters). Without it `upload` is a `BadCommand`. A wrong shape is an error before the queue and the browser |
 | `extraHosts` | an array of hosts (`['company.com']`, no scheme, path or `*`) where the page may end up without a stop: a "thank you" page on the company's own site after an ATS form. Subdomains too. `goto` there is not allowed; limits and counters go by `site`; guard (captcha, sign-in, block) works there too. A wrong shape is an error before the queue and the browser |
@@ -161,6 +161,13 @@ const { createPresence } = require('meatsuit/extras/presence.js'); // fetch only
 const presence = createPresence({ url: 'http://127.0.0.1:8080', password: nekoAdminPassword });
 const ms = await connect({ cdpUrl, dir, sitesFile, ownerPresent: () => presence.check() });
 ```
+
+With the mirror from `docker/` a caller needs neither `ownerPresent` nor the admin password: the `wheel` service of
+that stack (`extras/wheel-watch.js`) asks Neko every 2.5 seconds and keeps the wheel by the same rules — `by: 'mirror'` for 30 seconds, renewed while the owner
+holds control, removed when he does not, a wheel taken by hand never shortened or removed. When Neko does not answer it
+writes nothing, so its wheel lapses within 30 seconds. Callers pass only the shared `dir`; the admin password stays in
+the mirror's stack ([docker/README.md](../docker/README.md#the-owners-wheel-from-the-mirror)). `ownerPresent` remains
+for a browser without that service.
 
 - Before the queue: a task does not join its site's queue and opens no window while the wheel is held. The wheel
   taken while it waited for the lock: the lock is given back and it waits outside.
