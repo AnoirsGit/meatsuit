@@ -6,7 +6,7 @@
 
 Nothing more. meatsuit starts one browser, keeps its profile so a session signed in once stays signed in, and lets your code look at a page (eyes) and act on it like a person (hands). It has no accounts, no tasks and no schedule of its own: the caller brings the passwords, tokens, limits and the decision what to do. In practice that is two pieces:
 
-1. **A Node library** (`connect` / `task` / `see` / `act`). Your project connects to a running browser over CDP, takes it for one short task at a time, reads the page as a numbered list of elements and acts on it with human-paced mouse and keyboard. A captcha, a login page or a block stops the task with `NeedsHuman` and leaves the window to a person.
+1. **A Node library** (`connect` / `task` / `see` / `act`). Your project connects to a running browser over CDP, takes it for short tasks (one at a time per site; tasks on different sites and of different bots run at once, each in its own window), reads the page as a numbered list of elements and acts on it with human-paced mouse and keyboard. A captcha, a login page or a block stops the task with `NeedsHuman` and leaves the window to a person.
 2. **A browser mirror** in Docker ([Neko](https://github.com/m1k1o/neko)): one persistent browser, Google Chrome by default or Brave, that a person opens from an ordinary web page. The profile lives in a volume, so you sign in once by hand and every caller uses that session.
 
 Credentials always come from the caller. The library reads no environment variables and sends nothing anywhere by itself: site limits (`sitesFile`), the state directory (`dir`) and notifications (`notify`) are arguments of `connect()`. meatsuit never stores site passwords, model keys or bot tokens.
@@ -83,11 +83,12 @@ The owner's server runs the `ms-trunk` version (see Status). Switching it to `ma
 
 | Path | What it is |
 |---|---|
-| `index.js` | `connect()` and `task()`: queue, limits, budget, a window per task, supervision, `peek()` |
+| `index.js` | `connect()` and `task()`: the site's queue, the owner's wheel, limits, budget, a window per task, supervision, `peek()` |
 | `eyes.js`, `dom.js` | `see()`: the page as text and numbered elements, diffs between snapshots; on request a region, a pruned tree and a list of items |
 | `hands.js`, `human.js`, `human/` | `act()`: the closed command set, human-paced mouse, wheel and keyboard |
 | `guard.js`, `supervise.js` | captcha, sign-in and block pages turn into `NeedsHuman`; the optional code sign-in path |
-| `limits.js`, `window.js`, `capture.js` | per-site limits from the caller's `sites.json`, task windows, an optional screen archive |
+| `limits.js`, `window.js`, `capture.js` | per-site limits from the caller's `sites.json` and the site's queue lock, task windows, an optional screen archive |
+| `wheel.js` | the owner at the wheel: while he works in the mirror, every bot of the `dir` waits (`tools/wheel.js take`/`give`, `connect({ ownerPresent })`) |
 | `telegram.js` | a helper a caller may use for `notify`: the token and chat are passed in, never read from the environment |
 | `sites.example.json` | an example limits file; the real one belongs to each caller |
 | `config.js`, `tools/` | the deploy file (`init.js`, `config-ui.js`), `live-check.js` for the acceptance, `secret-scan.sh` and its hook, `save-tab.js`, `telegram-chats.js` |
@@ -98,12 +99,12 @@ The owner's server runs the `ms-trunk` version (see Status). Switching it to `ma
 
 ## Status
 
-As of 5 November 2026.
+As of 8 November 2026.
 
 | | |
 |---|---|
 | **Verified** | The library in real headless Chromium on local pages (`npm test`: on macOS on 4 November, on Linux on 5 November); the deploy file, `npm run init`, `npm run config`, the secret scan; `docker compose config` for both browsers, with and without Tailscale; this compose file with Brave, without Tailscale, in a local mirror on 5 November (`docker/up.sh` on fresh volumes, `verify.sh` and `verify.sh persistence` green). On the owner's server since 8 October (the `ms-trunk` version, reported by the owner, not re-checked since): Google Chrome, the profile in `meatsuit_profile`, traffic through a home Tailscale exit node, and with the exit node unset the browser has no network; `docker/verify.sh` and `verify.sh persistence` green; callers attached with `container:meatsuit-browser`, a sign-in made by hand holds |
-| **Built, not verified live** | The exit-node list with a fallback and the exit check (`docker/egress/exit-picker.sh`, tested on stand-ins only); code sign-in (`codeLogin`); since 21 October, tested on local pages only and not on the server: the check before a command (`NeedsHuman.before`), the stop of a hung task 15 minutes past its `maxMinutes`, `LimitReached` for a busy browser, `singleTab` with `staleTabHours`, `scroll` over an element; WebGL in Chrome on the server (`--enable-unsafe-swiftshader` in `docker/chrome.conf`: measured in a local mirror on 5 November, WebGL present but software; not deployed); the stealth changes in `extras/` with Google Chrome on the server (`selfcheck.js` measured in a local mirror only: Brave on 20 October, Chrome on 5 November, [docs/stealth.md](docs/stealth.md)); Enter and shortcuts from a real keyboard in the mirror; reading on request in `see()` (`within`, `tree`, `items`; since 5 November, constructed pages only) |
+| **Built, not verified live** | The exit-node list with a fallback and the exit check (`docker/egress/exit-picker.sh`, tested on stand-ins only); code sign-in (`codeLogin`); since 21 October, tested on local pages only and not on the server: the check before a command (`NeedsHuman.before`), the stop of a hung task 15 minutes past its `maxMinutes`, `LimitReached` for a busy browser, `singleTab` with `staleTabHours`, `scroll` over an element; WebGL in Chrome on the server (`--enable-unsafe-swiftshader` in `docker/chrome.conf`: measured in a local mirror on 5 November, WebGL present but software; not deployed); the stealth changes in `extras/` with Google Chrome on the server (`selfcheck.js` measured in a local mirror only: Brave on 20 October, Chrome on 5 November, [docs/stealth.md](docs/stealth.md)); Enter and shortcuts from a real keyboard in the mirror; reading on request in `see()` (`within`, `tree`, `items`; since 5 November, constructed pages only); since 8 November, in headless Chromium, with two to four processes on one browser and once in a throwaway local Neko mirror only: a queue per site (tasks on different sites at once, windows in the background) and the owner's wheel ([contract.md](docs/contract.md#several-bots-in-one-browser)) |
 | **Not done** | An always-on exit node: today it is a PC that is not always on, and the helper phone has not arrived; a recorded row of [the acceptance](docs/acceptance.md) on the server; a license |
 
 The git history still contains personal data from earlier work and is going to be rewritten. Open items, by priority: [docs/ROADMAP.md](docs/ROADMAP.md).

@@ -41,7 +41,7 @@ The export list is pinned by a test (`test/api.test.js`) and changes only togeth
 ## connect and task
 
 ```js
-const ms = await connect({ cdpUrl, sitesFile /* or sites */, dir?, notify?, notifyOn? });
+const ms = await connect({ cdpUrl, sitesFile /* or sites */, dir?, notify?, notifyOn?, ownerPresent? });
 const result = await ms.task(name, async ({ see, act }) => { ...; return value; },
   { site, extraHosts = [], uploadDirs = [], maxCommands = 60, maxMinutes = 10, dryRun = false,
     dryRunNavigation = false, readOnly = false, capture?, codeLogin = false });
@@ -52,9 +52,10 @@ await ms.close();
 |---|---|
 | `cdpUrl` | the CDP address of the shared browser; required |
 | `sitesFile` or `sites` | the **caller's** site limits: the path to its `sites.json` (read for every task, so an edit applies without a restart) or an object of the same shape. Exactly one of the two; with neither, with both, or with a missing file `connect` fails before it touches the browser. Sample: `sites.example.json` |
-| `dir` | the queue lock `queue.lock`, the counters `limits.json`, the journal `journal.jsonl`, the human's habits `persona.json`, the tab marks `tabs.json` and the site holds `holds/`; `~/.meatsuit` by default. **All callers of one browser must pass the same `dir`**: otherwise their locks differ and two bots enter the browser at once. With the mirror from `docker/` this is the `state/` folder in the `meatsuit_profile` volume (see "Attaching to the mirror") |
+| `dir` | the per-site queue locks `queue/<key>.lock`, the counters `limits.json`, the journal `journal.jsonl`, the human's habits `persona.json`, the tab marks `tabs.json`, the site holds `holds/`, the owner's wheel `wheel.json` and the short lock `state.lock` around the shared files; `~/.meatsuit` by default. **All callers of one browser must pass the same `dir`**: otherwise their locks differ, two bots enter one site at once, and the owner's wheel stops only some of them. With the mirror from `docker/` this is the `state/` folder in the `meatsuit_profile` volume (see "Attaching to the mirror") |
 | `notify(text, event)` | the caller's async notification function. A failed send does not fail the task; it goes to stderr |
 | `notifyOn` | which events to send: `'start'`, `'done'`, `'limit'`, `'error'`, `'needsHuman'`; by default `['needsHuman', 'limit', 'error']` |
+| `ownerPresent` | optional: the caller's async function telling whether the owner holds the controls in the mirror, returning `true`, `false` or `{ present }` (the `check()` of `extras/presence.js` fits as is; the Neko admin password stays with the caller). A "yes" puts the owner's wheel on for every caller of the same `dir`, see "The owner at the wheel". A function that throws counts as "no"; not a function is an error before the browser |
 | `site` | the site's host, its key in `sites.json`; `goto` is limited to it as well |
 | `uploadDirs` | an array of absolute paths to directories `upload` may take files from (CVs, letters). Without it `upload` is a `BadCommand`. A wrong shape is an error before the queue and the browser |
 | `extraHosts` | an array of hosts (`['company.com']`, no scheme, path or `*`) where the page may end up without a stop: a "thank you" page on the company's own site after an ATS form. Subdomains too. `goto` there is not allowed; limits and counters go by `site`; guard (captcha, sign-in, block) works there too. A wrong shape is an error before the queue and the browser |
@@ -64,18 +65,95 @@ await ms.close();
 | `capture` | the screen archive `{ dir, htmlPerSignature = 5, maxMB = 500 }`; nothing is written without it |
 | `codeLogin` | `true` means the task signs in with a one-time code (see "Code sign-in" below). The site also needs its own `sites.json` entry with `codeLogin`; without it, with a malformed rule, or with a value other than `true`/`false` it is an error before the queue and the browser |
 
-`task` in order: a site on hold throws `NeedsHuman` with `onHold: true` right away (see "Site hold") → joins the queue (one bot at a time; the lock file works across processes) → checks the site's limit
-and records the task (`dryRun` spends no slots) → opens a separate window → calls the function under guard and the
-budget → closes the window. On `NeedsHuman` the window stays open for the human to handle in the mirror. New tabs
-the page opens are closed. Returns what the function returned.
+`task` in order: a site on hold throws `NeedsHuman` with `onHold: true` right away (see "Site hold") → waits while
+the owner holds the wheel → joins **its site's** queue (one bot at a time per site; the lock file works across
+processes) → checks the site's limit and records the task (`dryRun` spends no slots) → opens a window of its own (with
+`singleTab`, takes the site's tab) → calls the function under guard and the budget → closes the window. On
+`NeedsHuman` the window stays open for the human to handle in the mirror. New tabs the page opens are closed. Returns
+what the function returned.
 
-The queue is one for all callers of one `dir` (tinder-matcher and cvs in one browser wait for each other). A task
-waits for it up to 30 minutes; if the browser is still busy, `task` throws `LimitReached` ("the browser is busy with
-task «…» (site) since HH:MM") without touching the browser or spending a slot, so the caller treats it like a limit and
-retries later, not as its own failure. While `fn` runs, every other caller waits, including while your own code waits
-for a model: put timeouts on your own awaits inside `fn` (`maxMinutes` is checked before each `see`/`act`, not while
-your code is waiting). A task still running 15 minutes after its `maxMinutes` is ended by meatsuit, so one hung task
-cannot hold the browser forever.
+### Several bots in one browser
+
+One warmed browser serves several bots at once (tinder-matcher, cvs, a Telegram sensor; in different processes or in
+one): **the queue is per site**, shared by all callers of one `dir`.
+
+- Tasks on **different sites run at the same time**, each in its own page: a new window of its own, opened in the
+  background (`Target.createTarget` with `newWindow` and `background`, so it does not take the screen focus), or with
+  `singleTab` the site's own tab, found by the task's host and its subdomains. A task never takes, snapshots or closes
+  another site's page; its commands go over CDP to its own page (keys into that document's focused element, the mouse
+  into that page), so they do not depend on which window has the focus on the screen. The core brings a page to the
+  front in one case only: the window or tab left to the human after `NeedsHuman`, so it need not be searched for in
+  the mirror, and only while the wheel is free.
+- Tasks on **one site run one at a time**, in the order they get the lock. A site and its subdomains share one queue:
+  the key is the last two labels of the host (`web.telegram.org` and `telegram.org`, `www.linkedin.com` and
+  `linkedin.com`), because a `singleTab` task finds tabs by subdomain too. Sites under a shared suffix such as `co.uk`
+  get one queue as well: more waiting, never two tasks in one tab. An IPv4 address or a single label (`localhost`) is
+  its own key. Limits and holds still go by the exact `site`.
+- A task waits for its site's queue up to 30 minutes; if the site is still busy, `task` throws `LimitReached` ("queue
+  <key>: busy with task «…» (site) since HH:MM") without touching the browser or spending a slot, so the caller treats
+  it like a limit and retries later, not as its own failure. While `fn` runs, the other tasks of that site wait,
+  including while your own code waits for a model: put timeouts on your own awaits inside `fn` (`maxMinutes` is checked
+  before each `see`/`act`, not while your code is waiting). A task still running 15 minutes after its `maxMinutes` is
+  ended by meatsuit, so one hung task cannot hold its site forever.
+- **The owner's wheel is one for the whole browser** (below): while the owner holds it, no task of any site starts and
+  no command runs. Site holds and limits stay per site.
+- The shared files of `dir` (`limits.json`, `tabs.json`) are read, changed and written under a short lock
+  `state.lock`, so tasks of different sites writing at once lose nothing; `limits.json` is replaced as a whole, a
+  reader never sees half of it. Several tasks may share one `capture.dir`: each snapshot takes its number by creating
+  the file (`html-counts.json` may then count a little less than was saved).
+- Tested in headless Chromium and with two to four Node processes on one browser (`test/parallel.test.js`), and
+  measured once in a throwaway local Neko mirror on 8 November 2026 (image `google-chrome:3.1.6`, Chrome 154, openbox;
+  no network, no volumes; the owner's typing simulated with `xdotool`): two tasks typed at once, each text arrived
+  whole in its own field whichever window had the focus. Without `background` every new task window took the screen
+  focus, and the letters the owner was typing went into a bot's field; with it, opening a window changed nothing, but
+  **a bot's click still activates its window** (Chrome does that on a mouse press), so the owner's letters again went
+  into a bot's field. With the wheel held, all 20 of the owner's letters stayed in his field and the active window
+  never changed; after he gave the wheel back both bots ran at once; a captcha stop brought its window to the front.
+  So: bots do not disturb each other, but they do disturb an owner who types — tell them with the wheel. **Not
+  verified:** a real keyboard through the Neko web client, the owner's server, and how several windows at once feel on
+  a weak CPU.
+
+**Updating from the version with one queue for the whole browser.** That version kept one lock `<dir>/queue.lock`. A
+task of this version waits while a live `queue.lock` exists (a caller not yet updated is running a task), but the old
+version knows nothing of the per-site locks: its task may start while tasks of this version run, on the same site
+too. Update all callers of one `dir` together (rebuild their images). Callers change nothing in their code: the same
+`connect` and `task`; tasks on different sites now simply overlap.
+
+### The owner at the wheel
+
+While the owner works in the mirror himself, bots wait: a bot's click activates the bot's window, and the letters the
+owner is typing then land in the bot's field (measured, see above); a site would also see two hands. The wheel is the
+file `<dir>/wheel.json` (`{ by, since, until }`, ms), in force while `until` is ahead; a damaged file counts as no
+wheel.
+
+```js
+const { wheelState, takeWheel, releaseWheel } = require('meatsuit/wheel.js');
+takeWheel({ dir, minutes = 60 });   // the owner takes it: → { by: 'owner', since, until }; a longer wheel is not shortened
+releaseWheel({ dir });              // → { released }
+wheelState({ dir });                // → { by, since, until } or null
+```
+
+From a shell: `node tools/wheel.js take [minutes] [--dir …]`, `give`, or without a command the state (`--dir` defaults
+to `MEATSUIT_DIR`, else `~/.meatsuit`). With `connect({ ownerPresent })` the core asks the caller's function at most
+every 2 seconds while a task waits or before a command; "yes" writes the wheel `by: 'mirror'` for 30 seconds and
+renews it while the answer is yes, "no" removes only a `mirror` wheel (never one the owner took by hand). So one caller
+that knows about Neko stops every caller of the same `dir`. A caller in the mirror's network reaches Neko at
+`127.0.0.1:8080`; the admin password is its own setting:
+
+```js
+const { createPresence } = require('meatsuit/extras/presence.js'); // fetch only, no dependencies of extras/
+const presence = createPresence({ url: 'http://127.0.0.1:8080', password: nekoAdminPassword });
+const ms = await connect({ cdpUrl, dir, sitesFile, ownerPresent: () => presence.check() });
+```
+
+- Before the queue: a task does not join its site's queue and opens no window while the wheel is held. The wheel
+  taken while it waited for the lock: the lock is given back and it waits outside.
+- In a running task: `act()` waits before each command; `see()` does not wait (it presses nothing). The window and
+  the site's queue stay with the task. Time at the wheel does not count towards `maxMinutes`, nor towards the hang
+  guard.
+- At most 30 minutes per wait, then `LimitReached` with `.wheel` (the wheel's state): before the queue the task did
+  not start (no window, no slot), from `act()` with `.before = true`, the command did not run. `notify('limit')` both
+  times.
 
 ### sites.json
 
@@ -169,7 +247,7 @@ are how many more are allowed (`null` means no limit, `0` means no such site). `
 
 | Error | When | What the caller should do |
 |---|---|---|
-| `LimitReached` | the site is not in `sites.json` (and there is no `"*"`), `perDay: 0`, outside hours, day or hour limit; the browser stayed busy with another caller's task for 30 minutes (the text names that task and site) | do not start the task, retry later |
+| `LimitReached` (`.wheel`, `.before`) | the site is not in `sites.json` (and there is no `"*"`), `perDay: 0`, outside hours, day or hour limit; the site's queue stayed busy with another task for 30 minutes (the text names that task and site); the owner held the wheel for 30 minutes (`.wheel`; from `act()` with `before: true`, the command did not run) | do not start the task, retry later |
 | `NeedsHuman` (`.reason`, `.url`, `.before`, `.hold`, `.onHold`) | a captcha, a sign-in page (except the declared path of a `codeLogin` task), a block, leaving the site's host (and not to `extraHosts`); the site is on hold (`onHold: true`) | stop; the window is open for the human. The site goes on hold (`.hold.until`); `onHold: true` means the task never started: not a failure, and no reason to retry before `until`. The state is not cleared until the task ends. From `act()`: with `before: true` the stop came from the check before the command and **the command did not run**; without it the command ran and the stop is about the page after it (a message may be out, a form sent) |
 | `BudgetExceeded` | more than `maxCommands` commands or `maxMinutes` minutes | treat the task as failed |
 | `StaleElement` | `gen` is out of date, the element is gone, something other than the target is under the cursor before the press, focus moved | take a fresh snapshot |
@@ -408,7 +486,9 @@ the bot has seen. For a human: `TELEGRAM_BOT_TOKEN=… node tools/telegram-chats
 
 ## The caller's duties
 
-- Keep its own `sites.json` and pass it to `connect`; one `dir` for all callers of one browser.
+- Keep its own `sites.json` and pass it to `connect`; one `dir` for all callers of one browser, and all of them on a
+  version with per-site queues.
+- Expect tasks on other sites to run alongside its own; nothing in its own process may assume it is the only bot.
 - Use only the latest `gen`; after `act`, take `gen` and `elements` from its answer.
 - Check the model's answer before `act` (`validate` from `meatsuit/hands.js`).
 - Keep other people's profile data out of the journal and the model beyond what is needed.
