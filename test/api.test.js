@@ -16,9 +16,10 @@ const NO_BROWSER = 'http://127.0.0.1:1'; // до подключения дело
 (async () => {
   // Список экспортов — контракт вызывающих (tinder-matcher импортирует имена из CommonJS): не меняется.
   assert.deepEqual(Object.keys(meatsuit), ['connect', 'hands', 'replay', 'signature', 'normalizeName', 'urlPattern',
-    'NeedsHuman', 'LimitReached', 'BudgetExceeded', 'BadCommand', 'StaleElement',
+    'NeedsHuman', 'LimitReached', 'BudgetExceeded', 'BadCommand', 'StaleElement', 'FieldMismatch',
     'telegramNotifier', 'createTelegram', 'findChats', 'TelegramError', 'peek', 'holdState', 'releaseHold']);
   assert.equal(typeof require('../hands.js').validate, 'function', 'meatsuit/hands.js отдаёт validate');
+  assert.equal(meatsuit.FieldMismatch, require('../hands.js').FieldMismatch, 'FieldMismatch — тот же класс, что бросают руки');
 
   // Лимиты площадок — у вызывающего: без sitesFile или sites connect падает внятно, браузер не трогает.
   const { connect } = meatsuit;

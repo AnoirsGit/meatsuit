@@ -18,6 +18,106 @@ const { createCapture } = require('./capture.js');
 class BadCommand extends Error {}
 class StaleElement extends Error {}
 
+/**
+ * В поле не тот текст, что заказан: после fill или type, или перед Enter (before: true — Enter не нажат).
+ * Так бывает, когда кто-то печатает вместе с ботом (хозяин в зеркале: клик бота активирует окно бота, и буквы
+ * хозяина уходят в его поле) или страница сама меняет ввод (маска, обрезка по длине, код из нескольких полей).
+ * В сообщении и полях — только длины и место первого расхождения: тексты — личные сообщения, ошибка идёт в журнал.
+ */
+class FieldMismatch extends Error {
+  constructor(message, { cmd, id, expectedLength, actualLength, diffAt, before = false }) {
+    super(message);
+    Object.assign(this, { cmd, id, expectedLength, actualLength, diffAt });
+    if (before) this.before = true;
+  }
+}
+
+/**
+ * Поле, куда идут клавиши fill, type и Enter, и что в нём должно быть. Выполняется в изолированном мире снимка
+ * (dom.run): текстом, без замыканий. Ожидание лежит там же, в WeakMap элемент → текст: переживает новые снимки
+ * (номера меняются, элемент тот же) и умирает с документом; страница его не видит, на диск оно не попадает.
+ *   pin    [id, text] — fill после клика: фокус в цели (или внутри неё); запомнить поле и ждать в нём text.
+ *   pinAt  [_, text]  — type: поле в фокусе; ждать в нём «что было + text» с места курсора. Если бот уже печатал
+ *                       в это поле, а в нём теперь другое, — { was } с расхождением, ввод не начинается.
+ *   check             — сверить запомненное поле с ожиданием (после ввода).
+ *   enter             — перед Enter: поле в фокусе, если бот в него печатал, держит то, что он набрал.
+ *   sent              — Enter нажат: ожидание этого поля снято.
+ * Сравнение — после нормализации: \r\n → \n, неразрывный пробел → пробел, NFC, без пробелов по краям.
+ */
+function fieldOp([op, i, text]) {
+  const st = globalThis.__msInput || (globalThis.__msInput = { pin: null, want: new WeakMap(), view: new WeakMap() });
+  const deep = () => { let a = document.activeElement; while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement; return a; };
+  const editable = (e) => !!e && (e.isContentEditable || e.tagName === 'TEXTAREA'
+    || (e.tagName === 'INPUT' && !/^(button|checkbox|color|file|hidden|image|radio|range|reset|submit)$/i.test(e.type)));
+  const norm = (s) => String(s ?? '').replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ').normalize('NFC').trim();
+  // contenteditable читается как видит человек (innerText); 'text' — textContent, когда type вставлял в середину.
+  const read = (e, view) => (e.isContentEditable ? (view === 'text' ? e.textContent : e.innerText) : e.value);
+  const up = (n) => n.assignedSlot || n.parentNode || n.host; // составное дерево, как в hitsTarget
+  const inside = (outer, n) => { for (; n; n = up(n)) if (n === outer) return true; return false; };
+  const diff = (want, have) => {
+    let k = 0;
+    while (k < want.length && k < have.length && want[k] === have[k]) k++;
+    return { ok: want === have, expectedLength: want.length, actualLength: have.length, diffAt: k };
+  };
+  const compare = (e) => {
+    if (!e || !e.isConnected) return { gone: true };
+    return diff(st.want.get(e), norm(read(e, st.view.get(e))));
+  };
+  switch (op) {
+    case 'pin': {
+      const el = globalThis.__ms.els[i], a = deep();
+      if (!el || !a || !(a === el || inside(el, a) || (el.isContentEditable && a.isContentEditable && inside(a, el)))) return { focus: false };
+      st.pin = a;
+      st.want.set(a, norm(text));
+      st.view.delete(a);
+      return { focus: true };
+    }
+    case 'pinAt': {
+      const a = deep();
+      if (!editable(a)) { st.pin = null; return { editable: false }; }
+      st.pin = a;
+      // Бот уже печатал в это поле: дописывать можно, только если в нём всё ещё набранное им.
+      if (st.want.has(a)) { const was = compare(a); if (!was.ok) return { editable: true, was }; }
+      let pre, post, view;
+      if (a.isContentEditable) {
+        const sel = document.getSelection();
+        const r = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
+        const tail = r && inside(a, r.endContainer) ? document.createRange() : null;
+        if (tail) { tail.selectNodeContents(a); tail.setStart(r.endContainer, r.endOffset); }
+        if (!tail || norm(tail.toString()) === '' || !inside(a, r.startContainer)) { pre = a.innerText; post = ''; } // курсор в конце
+        else {
+          const head = document.createRange();
+          head.selectNodeContents(a);
+          head.setEnd(r.startContainer, r.startOffset);
+          pre = head.toString(); post = tail.toString(); view = 'text';
+        }
+      } else {
+        let s = null, e = null;
+        try { s = a.selectionStart; e = a.selectionEnd; } catch { /* email, number: курсора нет */ }
+        if (s == null || e == null) s = e = a.value.length;
+        pre = a.value.slice(0, s); post = a.value.slice(e);
+      }
+      st.want.set(a, norm(pre + text + post));
+      if (view) st.view.set(a, view); else st.view.delete(a);
+      return { editable: true };
+    }
+    case 'check': {
+      const r = compare(st.pin);
+      // Дальше Enter сверяет с тем, что в поле сейчас и как видит человек (после type с середины — тоже).
+      if (r.ok) { st.want.set(st.pin, norm(read(st.pin))); st.view.delete(st.pin); }
+      return r;
+    }
+    case 'enter': {
+      const a = deep();
+      st.pin = a;
+      if (!a || !st.want.has(a)) return { ok: true, none: true };
+      return compare(a);
+    }
+    case 'sent': if (st.pin) { st.want.delete(st.pin); st.view.delete(st.pin); } return true;
+  }
+  return null;
+}
+
 const MAX_TEXT = 1000;
 const MAX_LONG_TEXT = 2000; // fill в textarea (сопроводительное письмо): ≈ 4–13 минут печати при темпе персоны
 const MAX_WAIT = 15000;
@@ -318,6 +418,27 @@ function hands(page, opts = {}) {
     if (!ok) throw new StaleElement(`в фокусе уже не элемент ${id}: ввод отменён`);
   };
 
+  // Поле ввода и ожидание в нём (fieldOp). Документ сменился — { stale: true }: решает вызывающая команда.
+  const field = async (op, i = null, text = null) => {
+    try { return await dom.run(world, fieldOp, [op, i, text]); }
+    catch (err) { if (err instanceof dom.StaleWorld) return { stale: true }; throw err; }
+  };
+
+  // Сообщение без текста поля: только длины и место расхождения (журнал, notify).
+  const mismatch = (c, r, tail, before = false) => new FieldMismatch(
+    `${c.cmd === 'press' ? 'press Enter' : c.cmd}: в поле${c.id ? ` ${c.id}` : ''} не тот текст, что ${c.cmd === 'fill' ? 'заказан' : 'набрал бот'} `
+    + `(ждали ${r.expectedLength} знаков, в поле ${r.actualLength}, первое расхождение — знак ${r.diffAt + 1}): `
+    + `кто-то печатал вместе с ботом или страница поменяла ввод; ${tail}`,
+    { cmd: c.cmd, id: c.id, expectedLength: r.expectedLength, actualLength: r.actualLength, diffAt: r.diffAt, before });
+
+  // После fill и type: в поле то, что заказано? Поля уже нет или документ сменился (страница сама приняла ввод:
+  // код с проверкой по последней цифре, отправка формы) — сверять не с чем, команда выполнена, как раньше.
+  const verify = async (c) => {
+    const r = await field('check');
+    if (r.stale || r.gone || r.ok) return;
+    throw mismatch(c, r, 'Enter в это поле не нажмётся, пока в нём не то, что набрано');
+  };
+
   // Что за элемент под номером: от этого зависит, какой командой его можно трогать.
   const kindOf = (id) => dom.run(world, (i) => {
     const e = globalThis.__ms.els[i];
@@ -458,18 +579,39 @@ function hands(page, opts = {}) {
         }
         await human.click(page, loc, { verifyAt: (pt) => hitsTarget(c.id, pt) });
         await human.pause(150, 500);
+        // Ctrl+A и Backspace стёрли бы то поле, где фокус: страница могла увести его после клика. Ожидание — до печати:
+        // прерванный fill (руль, сбой) тоже оставляет поле «не тем», и Enter в него не нажмётся.
+        const pin = await field('pin', c.id, text);
+        if (pin.stale) throw new StaleElement('страница сменилась перед вводом');
+        if (!pin.focus) throw new StaleElement(`в фокусе не поле ${c.id}: очистка и ввод отменены`);
         await page.keyboard.press('ControlOrMeta+A');
         await page.keyboard.press('Backspace');
-        return human.type(page, text);
+        await human.type(page, text);
+        return verify(c);
       }
-      case 'type':
+      case 'type': {
         if (hasTarget(c)) { await target(c.id, c.gen); await focused(c.id); }
-        return human.type(page, c.text);
-      case 'press':
+        const pin = await field('pinAt', null, c.text);
+        if (pin.stale) throw new StaleElement('страница сменилась перед вводом');
+        if (pin.was) throw mismatch(c, pin.was, 'ввод не начат', true);
+        await human.type(page, c.text);
+        if (pin.editable) return verify(c); // фокус не в поле ввода (кнопка, страница): сверять нечего, как раньше
+        return;
+      }
+      case 'press': {
         if (hasTarget(c)) await target(c.id, c.gen);
         await human.pause(150, 600);
         if (hasTarget(c)) await focused(c.id); // после паузы, прямо перед клавишей
-        return human.press(page, c.key);
+        if (c.key !== 'Enter') return human.press(page, c.key);
+        // Enter отправляет: в поле, куда печатал бот, должно быть ровно то, что он набрал (хозяин мог дописать в зеркале,
+        // fill мог остановиться посередине).
+        const r = await field('enter');
+        if (r.stale) throw new StaleElement('страница сменилась перед Enter');
+        if (!r.ok && !r.gone) throw mismatch(c, r, 'Enter не нажат', true);
+        await human.press(page, c.key);
+        await field('sent');
+        return;
+      }
       case 'select': return choose(c);
       case 'upload': return upload(c);
       case 'scroll':
@@ -566,4 +708,4 @@ function replay(dir, opts = {}) {
   };
 }
 
-module.exports = { hands, replay, validate, journalUrl, BadCommand, StaleElement };
+module.exports = { hands, replay, validate, journalUrl, BadCommand, StaleElement, FieldMismatch };

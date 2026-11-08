@@ -53,7 +53,7 @@ Several bots share the one warmed browser, so the queue is **per site**, not per
 
 Why the wheel is global and the queue is not: a bot in its own window disturbs no other bot (its commands go over CDP to its own page), but a bot's click activates its window, and the letters the owner is typing in the mirror then land in the bot's field (measured in a local Neko mirror; task windows open in the background, so at least opening one takes no focus). Why a site and its subdomains share a queue: a `singleTab` task finds the site's tab by subdomain too, so a task on `telegram.org` could otherwise take the `web.telegram.org` tab another task is working in. The shared files of `dir` (`limits.json`, `tabs.json`) are changed under a short lock `state.lock`, so concurrent tasks lose no counters. Details and what is not verified: [contract.md](contract.md#several-bots-in-one-browser).
 
-The command set is closed (`click`, `fill`, `type`, `press`, `select`, `upload`, `scroll`, `wait`, `back`, `goto`): no arbitrary JavaScript, `goto` stays on the task's site, and `upload` takes files only from the task's `uploadDirs`. Clicks check that the target is really under the cursor before pressing; typing checks the focus.
+The command set is closed (`click`, `fill`, `type`, `press`, `select`, `upload`, `scroll`, `wait`, `back`, `goto`): no arbitrary JavaScript, `goto` stays on the task's site, and `upload` takes files only from the task's `uploadDirs`. Clicks check that the target is really under the cursor before pressing; typing checks the focus, and afterwards that the field holds what was asked for (`FieldMismatch` otherwise, and Enter into that field is refused).
 
 ## The deploy file and the config page
 

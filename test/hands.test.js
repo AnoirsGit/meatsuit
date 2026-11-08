@@ -9,7 +9,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require('playwright-core');
-const { hands, replay, validate, BadCommand, StaleElement } = require('../hands.js');
+const { hands, replay, validate, BadCommand, StaleElement, FieldMismatch } = require('../hands.js');
+const human = require('../human.js');
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const HTML = `
 <body style="margin:0">
@@ -252,6 +255,122 @@ const rejects = (c, hosts) => assert.throws(() => validate(c, hosts), BadCommand
   await page.evaluate(() => { document.title = ''; });
   await hl.act({ cmd: 'press', key: 'Enter', id: idOf(sh1, 'S'), gen: sh1.gen });
   assert.equal(await page.title(), 's:Enter;', 'поле в shadow не признано сфокусированным');
+
+  // fill и type сверяют поле с заказанным текстом, а press Enter — ещё раз прямо перед клавишей (FieldMismatch).
+  // Случай из зеркала 08.11: хозяин печатал, пока печатал бот, буквы перемешались («ooпooенoрвая задача»), и Enter
+  // отправил бы это живому человеку. В сообщении и полях ошибки только длины: тексты — личные сообщения, а ошибка
+  // уходит в журнал и в notify. «Хозяин» здесь — insertText теста посреди печати бота, в ту же страницу.
+  {
+    human.usePersona({ speed: 1.4, tremor: 0.5, twitch: 0.1, wpm: 150, typoRate: 0 }); // быстро и без опечаток: длины точные
+    const CHAT = `<body style="margin:0">
+      <textarea id="m" aria-label="Чат"></textarea>
+      <div id="ce" contenteditable="true" aria-label="Редактор" style="min-height:30px;border:1px solid"></div>
+      <input id="o" aria-label="Другое" value="чужой текст">
+      <script>window.keys = []; addEventListener('keydown', (e) => keys.push(e.key), true);</script>
+    </body>`;
+    const SECRET = 'первая задача';
+    const enters = () => page.evaluate(() => keys.filter((k) => k === 'Enter').length);
+    const valueOf = (sel) => page.evaluate((s) => { const e = document.querySelector(s); return e.isContentEditable ? e.innerText : e.value; }, sel);
+    const private_ = (e) => {
+      for (const part of [SECRET, ...SECRET.split(' '), 'oo']) assert.ok(!e.message.includes(part), `в сообщении FieldMismatch текст поля: ${e.message}`);
+      assert.deepEqual(Object.keys(e).sort(), ['actualLength', 'cmd', 'diffAt', 'expectedLength', 'id', ...(e.before ? ['before'] : [])].sort());
+    };
+    // «Хозяин» вставляет свои буквы, когда бот набрал не меньше трёх (в поле было from знаков).
+    const interleave = async (sel, run, from = 0) => {
+      const pending = run.then(() => null, (e) => e);
+      while ((await valueOf(sel)).length < from + 3) await sleep(10);
+      await page.keyboard.insertText('oo');
+      return pending;
+    };
+    const hm = hands(page);
+
+    // Чистый fill проходит, Enter после него нажимается (ровно один).
+    await page.setContent(CHAT);
+    const c0 = await hm.see();
+    const c1 = await hm.act({ cmd: 'fill', id: idOf(c0, 'Чат'), gen: c0.gen, text: SECRET });
+    assert.equal(c1.elements.find((e) => e.name === 'Чат').value, SECRET);
+    await hm.act({ cmd: 'press', key: 'Enter', id: idOf(c1, 'Чат'), gen: c1.gen });
+    assert.equal(await enters(), 1, 'Enter после чистого fill не нажат');
+
+    // Буквы вклинились посреди fill: FieldMismatch (команда шла — before нет), и Enter в это поле не нажимается ни с id,
+    // ни без него (по фокусу).
+    await page.setContent(CHAT);
+    const m0 = await hm.see();
+    const err = await interleave('#m', hm.act({ cmd: 'fill', id: idOf(m0, 'Чат'), gen: m0.gen, text: SECRET }));
+    assert.ok(err instanceof FieldMismatch, `fill не заметил чужие буквы: ${err}`);
+    assert.equal(err.cmd, 'fill');
+    assert.equal(err.id, idOf(m0, 'Чат'));
+    assert.equal(err.expectedLength, SECRET.length);
+    assert.equal(err.actualLength, SECRET.length + 2);
+    assert.equal(err.actualLength, (await valueOf('#m')).length);
+    assert.ok(err.diffAt >= 3 && err.diffAt < SECRET.length, `diffAt ${err.diffAt}`);
+    assert.equal(err.before, undefined, 'fill выполнялся: before не ставится');
+    private_(err);
+    const m1 = await hm.see();
+    const pe = await hm.act({ cmd: 'press', key: 'Enter', id: idOf(m1, 'Чат'), gen: m1.gen }).then(() => null, (e) => e);
+    assert.ok(pe instanceof FieldMismatch && pe.before === true && pe.cmd === 'press', `Enter не остановлен: ${pe}`);
+    private_(pe);
+    await assert.rejects(hm.act({ cmd: 'press', key: 'Enter' }), (e) => e instanceof FieldMismatch && e.before === true, 'Enter без id ушёл в поле с чужими буквами');
+    assert.equal(await enters(), 0, 'Enter дошёл до страницы');
+    // В журнал ошибка уходит тем же сообщением — без текста.
+    const jl = path.join(dir, 'mismatch.jsonl');
+    const hj = hands(page, { logFile: jl });
+    const j0 = await hj.see();
+    await assert.rejects(hj.act({ cmd: 'press', key: 'Enter', id: idOf(j0, 'Чат'), gen: j0.gen }), FieldMismatch);
+    const jtext = fs.readFileSync(jl, 'utf8');
+    assert.ok(/не тот текст/.test(jtext) && !/первая|задача|oo/.test(jtext), jtext);
+
+    // Поле поменялось между fill и Enter (хозяин дописал в зеркале): FieldMismatch до клавиши; вернули как было — Enter идёт.
+    await page.setContent(CHAT);
+    const v0 = await hm.see();
+    const v1 = await hm.act({ cmd: 'fill', id: idOf(v0, 'Чат'), gen: v0.gen, text: SECRET });
+    await page.evaluate(() => { document.getElementById('m').value += ' ой'; });
+    await assert.rejects(hm.act({ cmd: 'press', key: 'Enter', id: idOf(v1, 'Чат'), gen: v1.gen }), (e) => e instanceof FieldMismatch && e.before === true);
+    assert.equal(await enters(), 0, 'Enter ушёл в изменённое поле');
+    await page.evaluate((t) => { document.getElementById('m').value = t; }, SECRET);
+    await hm.act({ cmd: 'press', key: 'Enter', id: idOf(v1, 'Чат'), gen: v1.gen });
+    assert.equal(await enters(), 1);
+
+    // contenteditable (поле чата в Telegram Web): то же — чистый fill, буквы посреди fill, правка до Enter.
+    await page.setContent(CHAT);
+    const e0 = await hm.see();
+    const e1 = await hm.act({ cmd: 'fill', id: idOf(e0, 'Редактор'), gen: e0.gen, text: SECRET });
+    assert.equal((await valueOf('#ce')).replace(/\u00a0/g, ' ').trim(), SECRET);
+    await page.evaluate(() => { document.getElementById('ce').append(' ой'); });
+    const e1b = await hm.see(); // содержимое редактора сменилось: прежний номер устарел (StaleElement), берём свежий
+    await assert.rejects(hm.act({ cmd: 'press', key: 'Enter', id: idOf(e1b, 'Редактор'), gen: e1b.gen }), (e) => e instanceof FieldMismatch && e.before === true);
+    await page.setContent(CHAT);
+    const e2 = await hm.see();
+    const ce = await interleave('#ce', hm.act({ cmd: 'fill', id: idOf(e2, 'Редактор'), gen: e2.gen, text: SECRET }));
+    assert.ok(ce instanceof FieldMismatch && ce.actualLength === SECRET.length + 2, `contenteditable: ${ce}`);
+    assert.equal(await enters(), 0);
+
+    // type сверяет: в поле должно стать «что было + text» (с места курсора). Буквы посреди type — FieldMismatch.
+    await page.setContent(CHAT);
+    const t0 = await hm.see();
+    const t1 = await hm.act({ cmd: 'fill', id: idOf(t0, 'Чат'), gen: t0.gen, text: 'да' });
+    const t2 = await hm.act({ cmd: 'type', text: ', ' + SECRET, id: idOf(t1, 'Чат'), gen: t1.gen });
+    assert.equal(t2.elements.find((e) => e.name === 'Чат').value, 'да, ' + SECRET);
+    const te = await interleave('#m', hm.act({ cmd: 'type', text: ' и ' + SECRET, id: idOf(t2, 'Чат'), gen: t2.gen }), ('да, ' + SECRET).length);
+    assert.ok(te instanceof FieldMismatch && te.cmd === 'type' && te.before === undefined, `type не заметил чужие буквы: ${te}`);
+    private_(te);
+    await assert.rejects(hm.act({ cmd: 'press', key: 'Enter' }), FieldMismatch);
+    assert.equal(await enters(), 0);
+    // Дописать в поле, где после бота стало другое: FieldMismatch до первой клавиши (иначе чужие буквы ушли бы с Enter).
+    await page.setContent(CHAT);
+    const u0 = await hm.see();
+    const u1 = await hm.act({ cmd: 'fill', id: idOf(u0, 'Чат'), gen: u0.gen, text: 'да' });
+    await page.evaluate(() => { document.getElementById('m').value += 'oo'; });
+    await assert.rejects(hm.act({ cmd: 'type', text: ' нет', id: idOf(u1, 'Чат'), gen: u1.gen }), (e) => e instanceof FieldMismatch && e.before === true);
+    assert.equal(await page.inputValue('#m'), 'даoo', 'type дописал в поле с чужими буквами');
+
+    // fill сверяет фокус перед Ctrl+A и Backspace: страница увела фокус в другое поле — StaleElement, чужое поле цело.
+    await page.setContent('<body style="margin:0"><input id="a" aria-label="A" onfocus="document.getElementById(\'o\').focus()"><input id="o" aria-label="Другое" value="чужой текст"></body>');
+    const g0 = await hm.see();
+    await assert.rejects(hm.act({ cmd: 'fill', id: idOf(g0, 'A'), gen: g0.gen, text: 'x' }), StaleElement, 'fill стёр бы чужое поле');
+    assert.equal(await page.inputValue('#o'), 'чужой текст', 'Ctrl+A и Backspace ушли в чужое поле');
+    human.usePersona(null);
+  }
 
   // Живые руки.
   await page.setContent(HTML);

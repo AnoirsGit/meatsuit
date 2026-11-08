@@ -17,7 +17,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { chromium } = require('playwright-core');
-const { hands, replay, journalUrl, BadCommand, StaleElement } = require('./hands.js');
+const { hands, replay, journalUrl, BadCommand, StaleElement, FieldMismatch } = require('./hands.js');
 const { NeedsHuman, check: guardCheck, codeLoginRule } = require('./guard.js');
 const eyes = require('./eyes.js');
 const { StaleWorld } = require('./dom.js');
@@ -385,4 +385,4 @@ async function connect({
 
 // telegramNotifier и остальное из telegram.js — помощник для вызывающего (токен и группу передаёт он);
 // оставлены здесь для совместимости импорта, новым проектам проще require('meatsuit/telegram.js').
-module.exports = { connect, hands, replay, signature, normalizeName, urlPattern, NeedsHuman, LimitReached, BudgetExceeded, BadCommand, StaleElement, telegramNotifier, createTelegram, findChats, TelegramError, peek, holdState, releaseHold };
+module.exports = { connect, hands, replay, signature, normalizeName, urlPattern, NeedsHuman, LimitReached, BudgetExceeded, BadCommand, StaleElement, FieldMismatch, telegramNotifier, createTelegram, findChats, TelegramError, peek, holdState, releaseHold };

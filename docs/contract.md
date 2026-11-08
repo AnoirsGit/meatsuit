@@ -27,7 +27,7 @@ const {
   connect,                                            // entry point
   hands, replay,                                      // hands on your own page; replaying a recording
   signature, normalizeName, urlPattern,               // screen signature (archive)
-  NeedsHuman, LimitReached, BudgetExceeded, BadCommand, StaleElement, // errors
+  NeedsHuman, LimitReached, BudgetExceeded, BadCommand, StaleElement, FieldMismatch, // errors
   telegramNotifier, createTelegram, findChats, TelegramError,       // Telegram helper
   peek,                                               // what is left of a site's limit, without spending a slot
   holdState, releaseHold,                             // a site's hold after NeedsHuman: read it, lift it
@@ -251,6 +251,7 @@ are how many more are allowed (`null` means no limit, `0` means no such site). `
 | `NeedsHuman` (`.reason`, `.url`, `.before`, `.hold`, `.onHold`) | a captcha, a sign-in page (except the declared path of a `codeLogin` task), a block, leaving the site's host (and not to `extraHosts`); the site is on hold (`onHold: true`) | stop; the window is open for the human. The site goes on hold (`.hold.until`); `onHold: true` means the task never started: not a failure, and no reason to retry before `until`. The state is not cleared until the task ends. From `act()`: with `before: true` the stop came from the check before the command and **the command did not run**; without it the command ran and the stop is about the page after it (a message may be out, a form sent) |
 | `BudgetExceeded` | more than `maxCommands` commands or `maxMinutes` minutes | treat the task as failed |
 | `StaleElement` | `gen` is out of date, the element is gone, something other than the target is under the cursor before the press, focus moved | take a fresh snapshot |
+| `FieldMismatch` (`.cmd`, `.id`, `.expectedLength`, `.actualLength`, `.diffAt`, `.before`) | after `fill` or `type` the field does not hold the text (someone typed along with the bot, or the page changed the input); `type` or `Enter` into a field that no longer holds what the bot typed (`before: true`: nothing typed or pressed). Lengths only, never the text | do not retry blindly: tell the owner, or check the field with `see()`; see "The field after typing" |
 | `BadCommand` | a command outside the set or with bad fields; a wrong `within`, `tree`, `items` or `textLimit` of `see()` | a bug in the caller's code or the model |
 
 ## Attaching to the mirror
@@ -354,11 +355,11 @@ The set is closed; anything else is a `BadCommand` before it runs.
 | Command | Fields | Notes |
 |---|---|---|
 | `click` | `id`, `gen` | scrolls, moves the mouse along a curve, clicks a random point; before the press checks that the target is at that point. On a file field it is a `BadCommand` (it would open the system file dialog; use `upload` for files) |
-| `fill` | `id`, `gen`, `text` | click, clear, type. `text` up to 1000 characters on one line; in a `<textarea>` up to 2000 with line breaks, see below. On a `<select>` or a file field it is a `BadCommand` (use `select` and `upload`) |
+| `fill` | `id`, `gen`, `text` | click, check that the focus is in the field, clear, type, check that the field holds `text` (see "The field after typing"). `text` up to 1000 characters on one line; in a `<textarea>` up to 2000 with line breaks, see below. On a `<select>` or a file field it is a `BadCommand` (use `select` and `upload`) |
 | `select` | `id`, `gen`, `value` or `label` | an option of a native `<select>`, see below |
 | `upload` | `id`, `gen`, `file` | a file from `uploadDirs` into the form, see below |
-| `type` | `text`, `id?`, `gen?` | types into the focused element, one line; with `id`/`gen` the focus is checked before the first key |
-| `press` | `key`, `id?`, `gen?` | `Enter` `Escape` `Tab` `Backspace` `ArrowDown` `ArrowUp` `PageDown` `PageUp` |
+| `type` | `text`, `id?`, `gen?` | types into the focused element, one line; with `id`/`gen` the focus is checked before the first key; afterwards the field must hold what it held plus `text` at the caret |
+| `press` | `key`, `id?`, `gen?` | `Enter` `Escape` `Tab` `Backspace` `ArrowDown` `ArrowUp` `PageDown` `PageUp`. `Enter` into a field these hands typed into goes only while the field still holds what they typed |
 | `scroll` | `px?`, `id?`, `gen?` | down, 0 to 5000; with `id`/`gen` the mouse first moves over the element (no click) and the wheel turns over it: this is how a nested scroll moves, such as a list in a side panel |
 | `wait` | `ms` (up to 15000) or `text` | a pause, or until the text appears |
 | `back` | — | back in history |
@@ -368,6 +369,38 @@ Returns the snapshot diff after the command. `dryRun: true`: `see` works, `act` 
 changed: false }` and only writes to the journal (`upload` checks the file first); the exception is `goto`, which runs.
 `dryRunNavigation: true` also runs a `click` on an element with the `tab` role (switching a view) when no link,
 button, field or label is above it, and `scroll` (it only moves the view; this is how a rehearsal sees a list that loads on scroll).
+
+### The field after typing: FieldMismatch
+
+`fill` and `type` check the field after the last key, and `press Enter` checks it once more right before the key:
+
+- after `fill` the field's value (for a `contenteditable`, its visible text, `innerText`) must equal `text`; after
+  `type`, what the field held before, with `text` inserted at the caret. Both sides are normalised first: `\r\n`
+  becomes `\n`, a no-break space a space, Unicode NFC, spaces at both ends trimmed;
+- `type` into a field these hands typed into that now holds something else, and `press Enter` into such a field (the
+  focused one, with or without `id`), throw `FieldMismatch` with `before: true`: nothing is typed or pressed. A field
+  is forgotten after an Enter that went through; a new `fill` starts it over. What the hands typed is remembered in
+  meatsuit's isolated world of that document (not on disk, invisible to the page) until the document changes, so a
+  later task in the same tab sees it too;
+- before `Ctrl+A` `fill` checks that the focus is in the target (or inside it): the page may have moved it after the
+  click, and the clearing would wipe another field. If it is not, `StaleElement`, nothing is cleared or typed;
+- if after the last key the field is gone or the document has changed (the page took the input itself: a code checked
+  on its last digit, a form sent), there is nothing to compare with and the command succeeds as before.
+
+`FieldMismatch` carries `cmd` (`'fill'`, `'type'` or `'press'`), `id` (as in the command, possibly `undefined`),
+`expectedLength` and `actualLength` (after normalisation), `diffAt` (the 0-based index of the first character that
+differs) and `before: true` when nothing was typed or pressed. Neither the message nor the fields contain the text: it
+is a private message, and the error goes to the journal and to `notify`. Without `before` the keys were typed, and the
+field holds something other than `text`.
+
+It happens when someone types along with the bot (the owner in the mirror: a bot's click activates the bot's window,
+and the letters the owner types land in the bot's field, see "Several bots in one browser"), and also when the page
+itself changes the input: a phone mask, a `maxlength` cut, code boxes that move the focus on after each digit (the
+first box then holds one digit). Do not retry blindly: tell the owner, or look at the field with `see()` (its `value`,
+the first 80 characters) and decide. Enter into that field stays refused until it holds what the bot typed; a `click`
+on a submit button is not checked. Verified in headless Chromium (`test/hands.test.js`: letters inserted in the middle
+of `fill` and `type` into a `textarea` and a `contenteditable`, a change between `fill` and Enter, a page that moves
+the focus after the click); not verified live in Chrome under Neko.
 
 ### fill in a textarea (a cover letter)
 
@@ -437,7 +470,8 @@ the arrow path runs; not verified live in Chrome under Neko.
 Every command goes through `human.js` (the hands of the main line): the mouse moves along a curve at a speed
 following Fitts's law, with tremor and an occasional overshoot; an element below the screen is reached with the wheel,
 in bursts with pauses; the click lands near the centre with a delay and a held button; typing goes key by key with a
-rhythm, Shift and typos that are fixed right away (the field always ends up with exactly the requested text);
+rhythm, Shift and typos that are fixed right away (the plan always ends with exactly the requested text, and `fill` and
+`type` then check the field, see "The field after typing");
 Cyrillic is sent as key events over CDP. If the cursor is already over the element, the hand does not move. Before a
 mouse press, hands checks that the target is still under the cursor (`StaleElement` if not).
 
