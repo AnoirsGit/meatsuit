@@ -11,7 +11,8 @@
 # папка state/ — общий dir вызывающих: connect({ dir: '<том>/state' }).
 #
 # Необязательно: выход через Tailscale (MEATSUIT_EGRESS=tailscale в файле: up.sh добавит docker-compose.egress.yml
-# и профиль egress). Сервисы из extras/ (ядро их не грузит): автопрогрев (профиль warmup) и HTTP-сервис (профиль api).
+# и профиль egress). Сервисы из extras/ (ядро их не грузит): руль от зеркала (wheel, всегда вместе с браузером),
+# автопрогрев (профиль warmup) и HTTP-сервис (профиль api).
 name: meatsuit
 
 services:
@@ -140,6 +141,39 @@ services:
       - ..:/app:ro
       - life_data:/data
     command: ["node", "extras/server.js", "--host", "0.0.0.0", "--port", "8787", "--data", "/data"]
+
+  # extras/: руль от зеркала, node extras/wheel-watch.js. Без профиля: поднимается с браузером. Раз в 2,5 с спрашивает
+  # Neko (в общей сети он 127.0.0.1:8080), держит ли хозяин управление; пока держит — руль ботов в state/ взят
+  # (by: 'mirror', на 30 с, продлевается), и ждут все боты этого dir. Пароль админа Neko остаётся здесь, ботам он не нужен.
+  # Из тома meatsuit_profile подключена только папка state/ (subpath, Docker Engine 26+): в корне тома у Chrome
+  # профиль со входами. Пишет от uid 1000, как владелец state/ (profile-init). Образ без сборки: ядру и presence.js
+  # зависимостей не нужно, код из репозитория. Квоты процессора нет нарочно: там, где её не дают (NEKO_CPUS=0),
+  # сервис без профиля с ней не поднялся бы, а с ним и весь docker/up.sh.
+  wheel:
+    image: node:24-slim
+    restart: unless-stopped
+    init: true # без этого Node как PID 1 не реагирует на SIGTERM
+    user: "1000:1000"
+    network_mode: "service:neko"
+    mem_limit: 128m
+    memswap_limit: 128m
+    pids_limit: 64
+    depends_on:
+      neko:
+        condition: service_healthy
+    environment:
+      TZ: ${MEATSUIT_TZ:-UTC} # время в журнале
+      MEATSUIT_NEKO_URL: http://127.0.0.1:8080
+      NEKO_ADMIN_PASSWORD: ${NEKO_ADMIN_PASSWORD}
+    working_dir: /app
+    volumes:
+      - ..:/app:ro
+      - type: volume
+        source: profile
+        target: /meatsuit/state
+        volume:
+          subpath: state
+    command: ["node", "extras/wheel-watch.js", "--dir", "/meatsuit/state"]
 
   # Выход через Tailscale: необязательный профиль egress, только вместе с docker-compose.egress.yml
   # (docker/up.sh добавляет оба при MEATSUIT_EGRESS=tailscale).
