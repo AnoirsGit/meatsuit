@@ -27,7 +27,7 @@ const { telegramNotifier, createTelegram, findChats, TelegramError } = require('
 const { openWindow } = require('./window.js');
 const { supervise, BudgetExceeded, HANG } = require('./supervise.js');
 const { signature, normalizeName, urlPattern } = require('./capture.js');
-const { ruleFor, reserve, charge, peek: peekLimit, status: limitStatus, lock, queueKey, queueFile, heldTargets, LimitReached } = require('./limits.js');
+const { ruleFor, reserve, charge, chargeWrite, readBudget, peek: peekLimit, status: limitStatus, lock, queueKey, queueFile, heldTargets, LimitReached } = require('./limits.js');
 const { loadPersona } = require('./human/persona-file.js');
 const holds = require('./holds.js');
 const { watcher: wheelWatcher, WHEEL } = require('./wheel.js');
@@ -278,6 +278,7 @@ async function connect({
     if (rule && rule.maxMinutes) maxMinutes = Math.min(maxMinutes, rule.maxMinutes);
     const staleHours = rule && rule.singleTab ? tabs.staleHours(rule) : 0; // кривой staleTabHours — ошибка до очереди
     const holdFor = holds.holdHours(rule); // кривой holdHours — тоже
+    const splitBudget = !!readBudget(rule); // раздельный бюджет чтений и записей; кривые readsPerHour, readsPerDay — тоже
     // Стоп площадки после прошлого NeedsHuman: в браузер не идём, очередь не ждём, слот не тратим, notify не шлём
     // (о стопе уже сообщили, когда его ставили).
     // В команде снятия — --dir этой задачи: release.js без него берёт MEATSUIT_DIR, а connect() эту переменную не читает.
@@ -380,8 +381,23 @@ async function connect({
         try { await waitWheel({ what: 'команда не выполнена', before: true, alive: () => !hung }); }
         catch (e) { if (e instanceof LimitReached) await emit('limit', `meatsuit: «${name}» на ${site} остановлена: ${e.message}`); throw e; }
       };
-      run = supervise(h, { name, site, extraHosts, notify: (t) => emit('needsHuman', t), maxCommands, maxMinutes, codeLogin, pause,
-        onWrite: readOnly && !dryRun ? () => atomically(() => charge(site, rule, limitsFile, slot)) : null }); // read-only задача записала: полный слот задним числом
+      // Слот записи — перед первой командой записи задачи, под замком состояния. Раздельный бюджет (readsPerHour): слот
+      // записи perHour и perDay; как раньше — только у readOnly задачи (полный слот задним числом). Отказ — LimitReached
+      // с before: true: команда не выполнялась, до страницы ничего не дошло; следующая запись спросит слот снова.
+      const writeSlot = dryRun ? null
+        : splitBudget ? () => atomically(() => chargeWrite(site, rule, limitsFile, new Date()))
+        : readOnly ? () => atomically(() => charge(site, rule, limitsFile, slot)) : null;
+      const onWrite = writeSlot && (async () => {
+        try { await writeSlot(); }
+        catch (e) {
+          if (e instanceof LimitReached) {
+            e.before = true;
+            if (splitBudget) await emit('limit', `meatsuit: «${name}» на ${site}: запись не выполнена: ${e.message}`);
+          }
+          throw e;
+        }
+      });
+      run = supervise(h, { name, site, extraHosts, notify: (t) => emit('needsHuman', t), maxCommands, maxMinutes, codeLogin, pause, onWrite });
       await emit('start', `meatsuit: «${name}» на ${site} запущена${dryRun ? ' (dryRun)' : ''}`);
       if (hung) throw hung;
       const result = await fn(run.api);

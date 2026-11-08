@@ -20,6 +20,16 @@
       "maxMinutes": 6
     }
   },
+  "chat.example.net": {
+    "readsPerHour": 30,
+    "readsPerDay": 250,
+    "perHour": 6,
+    "perDay": 20,
+    "hours": "9-23",
+    "singleTab": true,
+    "maxCommands": 80,
+    "maxMinutes": 15
+  },
   "*": {
     "perDay": 3,
     "perHour": 2,

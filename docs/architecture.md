@@ -48,10 +48,12 @@ Several bots share the one warmed browser, so the queue is **per site**, not per
 | | Per site | For the whole browser |
 |---|---|---|
 | queue «one bot at a time» | yes: `<dir>/queue/<key>.lock`, a site and its subdomains share a key | no: tasks on different sites run at once, each in its own window or tab |
-| limits (`sites.json`), hold after `NeedsHuman` | yes | no |
+| limits (`sites.json`), hold after `NeedsHuman` | yes; optionally split into reads and writes (`readsPerHour`) | no |
 | the owner at the wheel (`<dir>/wheel.json`) | no | yes: while the owner works in the mirror, no task starts, no command starts, and a `fill` or `type` already typing stops within about 2 seconds |
 
 Why the wheel is global and the queue is not: a bot in its own window disturbs no other bot (its commands go over CDP to its own page), but a bot's click activates its window, and the letters the owner is typing in the mirror then land in the bot's field (measured in a local Neko mirror; task windows open in the background, so at least opening one takes no focus). Why a site and its subdomains share a queue: a `singleTab` task finds the site's tab by subdomain too, so a task on `telegram.org` could otherwise take the `web.telegram.org` tab another task is working in. The shared files of `dir` (`limits.json`, `tabs.json`) are changed under a short lock `state.lock`, so concurrent tasks lose no counters. Details and what is not verified: [contract.md](contract.md#several-bots-in-one-browser).
+
+A site may split its budget into reads and writes (`readsPerHour`, optionally `readsPerDay`): a task starts on a read slot, and its first writing command takes a write slot from `perHour` and `perDay` before it runs, so a chat bot that mostly looks at a conversation does not use up its replies by looking. Without `readsPerHour` the limits count as before ([contract.md](contract.md#sitesjson)).
 
 The command set is closed (`click`, `fill`, `type`, `press`, `select`, `upload`, `scroll`, `wait`, `back`, `goto`): no arbitrary JavaScript, `goto` stays on the task's site, and `upload` takes files only from the task's `uploadDirs`. Clicks check that the target is really under the cursor before pressing; typing checks the focus, and afterwards that the field holds what was asked for (`FieldMismatch` otherwise, and Enter into that field is refused).
 

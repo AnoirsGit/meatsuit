@@ -61,13 +61,13 @@ await ms.close();
 | `extraHosts` | an array of hosts (`['company.com']`, no scheme, path or `*`) where the page may end up without a stop: a "thank you" page on the company's own site after an ATS form. Subdomains too. `goto` there is not allowed; limits and counters go by `site`; guard (captcha, sign-in, block) works there too. A wrong shape is an error before the queue and the browser |
 | `maxCommands`, `maxMinutes` | the task's budget; the ceiling comes from the site (`sites.json`), the caller may choose less. `maxMinutes` is checked before each command; a task still running 15 minutes after it (a page that does not answer, the caller's own await that hangs) is ended by meatsuit: `BudgetExceeded`, the window is closed (after `NeedsHuman` it stays for the human), the queue is free |
 | `dryRun`, `dryRunNavigation` | a rehearsal, see "Hands" |
-| `readOnly` | the task only reads: it spends `perHour` but not `perDay`, and `perDay` does not stop it. The first writing command (`fill`, `type`, `select`, `upload`, `press Enter`, a `click` not on a `tab`) counts a full day slot before it runs; if the day is used up, that is `LimitReached` and the command does not run |
+| `readOnly` | the task only reads: it spends `perHour` but not `perDay`, and `perDay` does not stop it. The first writing command (`fill`, `type`, `select`, `upload`, `press Enter`, a `click` not on a `tab`) counts a full day slot before it runs; if the day is used up, that is `LimitReached` (`before: true`) and the command does not run. With a split budget (`readsPerHour` in `sites.json`) every task starts on a read slot, and `readOnly` changes nothing |
 | `capture` | the screen archive `{ dir, htmlPerSignature = 5, maxMB = 500 }`; nothing is written without it |
 | `codeLogin` | `true` means the task signs in with a one-time code (see "Code sign-in" below). The site also needs its own `sites.json` entry with `codeLogin`; without it, with a malformed rule, or with a value other than `true`/`false` it is an error before the queue and the browser |
 
 `task` in order: a site on hold throws `NeedsHuman` with `onHold: true` right away (see "Site hold") → waits while
 the owner holds the wheel → joins **its site's** queue (one bot at a time per site; the lock file works across
-processes) → checks the site's limit and records the task (`dryRun` spends no slots) → opens a window of its own (with
+processes) → checks the site's limit and records the task (with `readsPerHour`, a read slot; `dryRun` spends no slots) → opens a window of its own (with
 `singleTab`, takes the site's tab) → calls the function under guard and the budget → closes the window. On
 `NeedsHuman` the window stays open for the human to handle in the mirror. New tabs the page opens are closed. Returns
 what the function returned.
@@ -207,6 +207,23 @@ const ms = await connect({ cdpUrl, dir, sitesFile, ownerPresent: () => presence.
   entry**, never from `"*"`.
 - `holdHours` (default `6`, `0` means no hold) is how many hours the site stays on hold after a `NeedsHuman`; see
   "Site hold".
+- `readsPerHour` (and, optionally, `readsPerDay` as a safety net) splits the site's budget into reads and writes. Without
+  it everything is as above: `perHour` counts every task, `perDay` the writing ones. With it:
+  - every task starts on a **read** slot: `readsPerHour` and `readsPerDay` count task starts, and `readOnly` changes
+    nothing;
+  - the first writing command of a task (`fill`, `type`, `select`, `upload`, `press Enter`, a `click` not on a `tab`)
+    takes a **write** slot before it runs, under `state.lock`: `perHour` and `perDay` now count these only. One per
+    task, however many writes follow. With the write budget used up (or outside `hours`) that command throws
+    `LimitReached` with `budget: 'write'`, `before: true` and `freeAt`, nothing reaches the page, `notify('limit')`
+    goes out, and the task's next writing command asks again;
+  - the read slot is not given back when the task writes (the read did happen): a writing task costs one read and one
+    write;
+  - `hours`, `perDay: 0`, holds and `NeedsHuman` apply to both as before; `dryRun` spends neither;
+  - `readsPerDay` without `readsPerHour`, or a value that is not a number ≥ 0, is an error before the queue and the
+    browser.
+  The owner's values for a dating chat: `{ "readsPerHour": 30, "readsPerDay": 250, "perHour": 6, "perDay": 20 }`
+  (`chat.example.net` in `sites.example.json`). Tested in headless Chromium and with four processes writing one
+  `limits.json` (`test/budgets.test.js`).
 
 ### Site hold after NeedsHuman
 
@@ -253,6 +270,9 @@ hash). meatsuit never types a password: the caller passes only the identifier (a
 ```js
 const st = peek(site, { sitesFile /* or sites */, dir?, now?, readOnly? });
 // → { site, rule, ok, reason, usedDay, usedHour, leftDay, leftHour }
+// with readsPerHour, two more:
+//   reads:  { ok, reason, usedHour, usedDay, leftHour, leftDay, freeAt }
+//   writes: { ok, reason, usedHour, usedDay, leftHour, leftDay, freeAt }
 ```
 
 For checks before a run and for reports: no browser, no queue, `limits.json` is not written. `sitesFile`/`sites`
@@ -264,11 +284,19 @@ are how many more are allowed (`null` means no limit, `0` means no such site). `
 `perDay` does not stop it. A malformed rule (for example `hours`) throws, as in `task`. Do not import the internal
 `meatsuit/limits.js`: its format is not part of the contract.
 
+With a split budget (`readsPerHour`) the fields above stay: `ok` and `reason` say whether a task would start now (a
+read slot), and `usedDay`, `usedHour`, `leftDay`, `leftHour` keep meaning what `perDay` and `perHour` count, which is
+then writes only. `reads` is the read budget (`readsPerHour`, `readsPerDay`; task starts) and `writes` the write
+budget (`perHour`, `perDay`): `ok` and `reason` say whether the first write of a task started now would get its slot;
+`left*` is `null` without that limit. `freeAt` is when (ms) the next slot frees up, given `hours` and the day and hour
+windows and no new tasks: `null` when a slot is free now (`ok: true`) or when time alone never frees one (a limit of
+`0`, `perDay: 0`). Without `readsPerHour` the result is exactly as before, without `reads` and `writes`.
+
 ### Errors
 
 | Error | When | What the caller should do |
 |---|---|---|
-| `LimitReached` (`.wheel`, `.before`) | the site is not in `sites.json` (and there is no `"*"`), `perDay: 0`, outside hours, day or hour limit; the site's queue stayed busy with another task for 30 minutes (the text names that task and site); the owner held the wheel for 30 minutes (`.wheel`; from `act()` with `before: true`, the command did not run); the owner took the wheel in the middle of a `fill` or `type` (`.wheel` without `.before`: part of the text was typed); the short lock `state.lock` or `wheel.lock` stayed busy (the text names it) | do not start the task, retry later; after a cut `fill`, fill the field again rather than pressing Enter |
+| `LimitReached` (`.wheel`, `.before`) | the site is not in `sites.json` (and there is no `"*"`), `perDay: 0`, outside hours, day or hour limit; the site's queue stayed busy with another task for 30 minutes (the text names that task and site); the owner held the wheel for 30 minutes (`.wheel`; from `act()` with `before: true`, the command did not run); the owner took the wheel in the middle of a `fill` or `type` (`.wheel` without `.before`: part of the text was typed); the short lock `state.lock` or `wheel.lock` stayed busy (the text names it). With a split budget (`readsPerHour`) also `.budget` and `.freeAt`: `budget: 'read'` when the task did not start (no read slot), `budget: 'write'` from the first writing command (no write slot, `before: true`: the command did not run, nothing reached the page); `freeAt` is when a slot frees up (ms) or `null` | do not start the task, retry later (with `freeAt`, not before it); after a cut `fill`, fill the field again rather than pressing Enter |
 | `NeedsHuman` (`.reason`, `.url`, `.before`, `.hold`, `.onHold`) | a captcha, a sign-in page (except the declared path of a `codeLogin` task), a block, leaving the site's host (and not to `extraHosts`); the site is on hold (`onHold: true`) | stop; the window is open for the human. The site goes on hold (`.hold.until`); `onHold: true` means the task never started: not a failure, and no reason to retry before `until`. The state is not cleared until the task ends. From `act()`: with `before: true` the stop came from the check before the command and **the command did not run**; without it the command ran and the stop is about the page after it (a message may be out, a form sent) |
 | `BudgetExceeded` | more than `maxCommands` commands or `maxMinutes` minutes | treat the task as failed |
 | `StaleElement` | `gen` is out of date, the element is gone, something other than the target is under the cursor before the press, focus moved | take a fresh snapshot |

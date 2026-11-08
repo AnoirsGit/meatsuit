@@ -53,6 +53,7 @@ function supervise(h, { name, site, extraHosts = [], notify, maxCommands, maxMin
   }
   const hosts = [site, ...extraHosts]; // площадка и хосты, где страница может оказаться (extraHosts из task)
   let els = null; // последний виденный список элементов: по нему отличаем клик по вкладке
+  let writing = null; // идущий или взятый слот записи (onWrite)
   let paused = 0; // мс, которые задача простояла, пока хозяин у руля
   let pausing = 0; // с какого момента стоит сейчас (0 — не стоит)
   const state = { stopped: null, finished: false, commands: 0, maxCommands, maxMinutes, finish() { state.finished = true; },
@@ -97,7 +98,13 @@ function supervise(h, { name, site, extraHosts = [], notify, maxCommands, maxMin
       // накрыть цель (проверка точки под курсором её не видит). Тогда стоп до нажатия, а не после (ревью скрытности
       // 20.10, как у сервиса из extras/). Свежий снимок не меняет id и gen вызывающего.
       if (TOUCHES.has(c && c.cmd) && h.probe) await stopIfNeeded(await h.probe(), { before: true });
-      if (onWrite && isWrite(c, els)) { const f = onWrite; onWrite = null; await f(); } // до команды и один раз: слот один, дневной лимит может остановить запись
+      // Слот записи — до команды и один раз за задачу. Отказ (лимит) — команда не выполняется, а следующая запись спросит
+      // слот снова: раньше onWrite снимался до ответа, и повтор после отказа проходил без слота.
+      if (onWrite && isWrite(c, els)) {
+        const f = onWrite;
+        writing = writing || Promise.resolve().then(f).then(() => { onWrite = null; }, (e) => { writing = null; throw e; });
+        await writing;
+      }
       const r = await h.act(c);
       if (!r.dryRun && r.elements) els = r;
       if (!r.dryRun) await stopIfNeeded(r); // результат dryRun — не снимок, у него нет url: страница не менялась
