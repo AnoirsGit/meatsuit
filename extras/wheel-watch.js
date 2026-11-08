@@ -77,7 +77,7 @@ function createWheelWatch({ dir, presence, now = Date.now, log = console.log, hi
       return report('absent', `${why}: ${left ? `руль взят руками (${left.by}) до ${hms(left.until)}, его не трогаю`
         : released ? 'руль зеркала снят, боты работают' : 'руль свободен, боты работают'}`);
     } catch (e) {
-      return report('wheel-error', `руль в ${dir} не записать (${e.message}): боты хозяина не ждут`);
+      return report('wheel-error', `руль в ${dir} не записать (${e.message}): боты о хозяине не узнают`);
     }
   }
 
