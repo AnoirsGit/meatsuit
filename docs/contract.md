@@ -150,8 +150,8 @@ From a shell: `node tools/wheel.js take [minutes] [--dir …]`, `give`, or witho
 to `MEATSUIT_DIR`, else `~/.meatsuit`). With `connect({ ownerPresent })` the core asks the caller's function every 2
 seconds for as long as the connection lives (from `connect` until `close()` or a lost connection to the browser), also
 while that caller has no task of its own, and at most as often when a task waits or types; "yes" writes the wheel
-`by: 'mirror'` for 30 seconds and renews it while the answer is yes, "no" removes only a `mirror` wheel (never one the
-owner took by hand). So one connected caller that knows about Neko stops every caller of the same `dir`, busy or idle;
+`by: 'mirror'` for 30 seconds and renews it while the answer is yes, "no" withdraws only this caller's own "yes" (never
+a wheel the owner took by hand). So one connected caller that knows about Neko stops every caller of the same `dir`, busy or idle;
 if it stops running, its last "yes" holds the others for at most 30 seconds. The timer does not keep the caller's
 process alive. A caller in the mirror's network reaches Neko at
 `127.0.0.1:8080`; the admin password is its own setting:
@@ -165,7 +165,14 @@ const ms = await connect({ cdpUrl, dir, sitesFile, ownerPresent: () => presence.
 With the mirror from `docker/` a caller needs neither `ownerPresent` nor the admin password: the `wheel` service of
 that stack (`extras/wheel-watch.js`) asks Neko every 2.5 seconds and keeps the wheel by the same rules — `by: 'mirror'` for 30 seconds, renewed while the owner
 holds control, removed when he does not, a wheel taken by hand never shortened or removed. When Neko does not answer it
-writes nothing, so its wheel lapses within 30 seconds. Callers pass only the shared `dir`; the admin password stays in
+writes nothing, so its wheel lapses within 30 seconds.
+
+The mirror wheel has several sources (the `wheel` service, the `ownerPresent` of each `connect`), and each keeps its own
+"yes" with its own 30 seconds inside `wheel.json`. A "no" withdraws only the "yes" of the source that says it; the wheel
+is free once no source's "yes" is still in force. So sources that disagree do not take the wheel from each other: the
+service renewing it while a caller's `ownerPresent` failed (which the core counts as "no"), or the other way round,
+keeps the bots waiting. `node tools/wheel.js give` (without `by`) removes the wheel whatever its sources. Callers pass
+only the shared `dir`; the admin password stays in
 the mirror's stack ([docker/README.md](../docker/README.md#the-owners-wheel-from-the-mirror)). `ownerPresent` remains
 for a browser without that service.
 

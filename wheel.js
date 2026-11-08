@@ -8,7 +8,7 @@
  *   - connect({ ownerPresent }) — функция вызывающего, «держит ли хозяин управление» (например, check() из
  *     extras/presence.js: Neko знает, кто у руля). Спрашивается раз в WHEEL.pollMs, пока живо подключение (watcher.start).
  *     Ответ «да» ядро записывает рулём by: 'mirror' на WHEEL.mirrorTtlMs вперёд и продлевает, пока ответ «да»; ответ
- *     «нет» снимает только руль by: 'mirror'. Так паузу видят и вызывающие того же dir без своего ownerPresent. Сам
+ *     «нет» снимает только своё «да» руля зеркала (sources: сервис wheel и другие connect его не теряют). Так паузу видят и вызывающие того же dir без своего ownerPresent. Сам
  *     модуль никуда не ходит и окружение не читает.
  *
  * Что делает руль с задачами — index.js: задача не входит в очередь своей площадки, пока руль у хозяина, а начатая
@@ -51,6 +51,20 @@ function read(dir) {
 
 const active = (w, now) => (w && typeof w === 'object' && Number.isFinite(w.until) && w.until > now ? w : null);
 
+// Руль зеркала держат его источники — сервис wheel стека (extras/wheel-watch.js), ownerPresent каждого connect:
+// у каждого своё «да» до своего срока (sources: { источник: until }). «Нет» источника снимает только его «да», и руль
+// свободен, когда живых «да» не осталось: источники с разными ответами (у одного Neko не ответил, другой видит
+// хозяина) не снимают руль друг у друга. Источник без имени — 'mirror'.
+const sourceOf = (s) => (typeof s === 'string' && s ? s.slice(0, 100) : 'mirror');
+const liveSources = (w, now) => Object.fromEntries(Object.entries((w && w.sources && typeof w.sources === 'object') ? w.sources : {})
+  .filter(([, until]) => Number.isFinite(until) && until > now));
+
+function write(dir, w) {
+  const tmp = `${fileOf(dir)}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(w));
+  fs.renameSync(tmp, fileOf(dir)); // целиком или никак: wheelState читает без замка и половину не увидит
+}
+
 /** Руль сейчас: { by, since, until } или null. */
 function wheelState({ dir, now = Date.now() } = {}) {
   if (!dir) throw new Error('wheelState: нужен dir');
@@ -60,9 +74,10 @@ function wheelState({ dir, now = Date.now() } = {}) {
 
 /**
  * Взять руль: боты этого dir ждут. minutes — на сколько (по умолчанию 60, не больше суток); by — кто взял.
- * Руль уже взят дольше — срок не укорачивается. → Promise<{ by, since, until }>.
+ * Руль уже взят дольше — срок не укорачивается. source — имя источника руля зеркала (by: 'mirror'), см. sourceOf.
+ * → Promise<{ by, since, until }>.
  */
-async function takeWheel({ dir, minutes = 60, by = 'owner', now = Date.now() } = {}) {
+async function takeWheel({ dir, minutes = 60, by = 'owner', source, now = Date.now() } = {}) {
   if (!dir) throw new Error('takeWheel: нужен dir');
   if (!(typeof minutes === 'number' && minutes > 0 && minutes <= 24 * 60)) throw new Error(`takeWheel: minutes — число минут от 0 до 1440, пришло ${JSON.stringify(minutes)}`);
   if (typeof by !== 'string' || !by) throw new Error('takeWheel: by — непустая строка');
@@ -71,20 +86,29 @@ async function takeWheel({ dir, minutes = 60, by = 'owner', now = Date.now() } =
     const until = Math.max(+now + minutes * MIN, cur ? cur.until : 0);
     // Ручной руль сильнее зеркального: «да» от зеркала не превращает руль хозяина в by: 'mirror' (и «нет» его не снимет).
     const w = { by: cur && cur.by !== 'mirror' && by === 'mirror' ? cur.by : by, since: cur ? cur.since : +now, until };
-    const tmp = `${fileOf(dir)}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(w));
-    fs.renameSync(tmp, fileOf(dir)); // целиком или никак: wheelState читает без замка и половину не увидит
-    return w;
+    if (w.by === 'mirror') w.sources = { ...liveSources(cur && cur.by === 'mirror' ? cur : null, +now), [sourceOf(source)]: +now + minutes * MIN };
+    write(dir, w);
+    return { by: w.by, since: w.since, until: w.until };
   });
 }
 
-/** Отдать руль. by — снять, только если руль взял этот by ('mirror' не снимает руль хозяина). → Promise<{ released }>. */
-async function releaseWheel({ dir, by, now = Date.now() } = {}) {
+/**
+ * Отдать руль. by — снять, только если руль взял этот by ('mirror' не снимает руль хозяина). by: 'mirror' снимает только
+ * «да» своего source: пока другой источник зеркала говорит «да», руль остаётся (до его срока). Без by — всё (хозяин
+ * отдал руками). → Promise<{ released }>.
+ */
+async function releaseWheel({ dir, by, source, now = Date.now() } = {}) {
   if (!dir) throw new Error('releaseWheel: нужен dir');
   return locked(dir, () => {
     const w = read(dir);
     if (by !== undefined && w && w.by !== by) return { released: false };
     const was = !!active(w, +now);
+    if (w && by === 'mirror' && w.by === 'mirror') {
+      const rest = liveSources(w, +now);
+      delete rest[sourceOf(source)];
+      const left = Object.values(rest);
+      if (left.length) { write(dir, { ...w, until: Math.max(...left), sources: rest }); return { released: false }; }
+    }
     if (w) fs.rmSync(fileOf(dir), { force: true });
     return { released: was };
   });
@@ -99,6 +123,7 @@ async function releaseWheel({ dir, by, now = Date.now() } = {}) {
  */
 function watcher({ dir, ownerPresent }) {
   if (ownerPresent !== undefined && typeof ownerPresent !== 'function') throw new Error('connect: ownerPresent — async-функция → true | false | { present }');
+  const source = `connect:${process.pid}:${Math.random().toString(36).slice(2, 8)}`; // своё «да» руля зеркала
   let asked = 0;
   let failed = false;
   let unwritten = false;
@@ -109,8 +134,8 @@ function watcher({ dir, ownerPresent }) {
     try { r = await ownerPresent(); failed = false; }
     catch (e) { if (!failed) console.error('meatsuit: ownerPresent не ответил, считаю, что хозяина нет:', e.message); failed = true; return; }
     const present = r === true || (!!r && typeof r === 'object' && r.present === true);
-    if (present) await takeWheel({ dir, by: 'mirror', minutes: WHEEL.mirrorTtlMs / MIN });
-    else await releaseWheel({ dir, by: 'mirror' });
+    if (present) await takeWheel({ dir, by: 'mirror', minutes: WHEEL.mirrorTtlMs / MIN, source });
+    else await releaseWheel({ dir, by: 'mirror', source });
   };
   // Спросить, если пора (не чаще раза в pollMs); идущий вопрос не дублируется.
   const poll = () => {

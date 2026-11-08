@@ -15,7 +15,8 @@
  * не считается). Руль пишется функциями ядра, не копией: файл и замок <dir>/wheel.lock у всех одни.
  *   - хозяин у руля → takeWheel({ by: 'mirror' }) на WHEEL.mirrorTtlMs (30 с) вперёд — ровно то, что ядро делает
  *     для connect({ ownerPresent }): срок не укорачивается, ручной руль не становится 'mirror';
- *   - хозяина нет → releaseWheel({ by: 'mirror' }): снимается только руль зеркала, ручной — никогда;
+ *   - хозяина нет → releaseWheel({ by: 'mirror', source }): снимается только своё «да» руля зеркала; пока
+ *     ownerPresent какого-то вызывающего говорит «да», руль остаётся; ручной не снимается никогда;
  *   - Neko не ответил → руль не трогается: это «не знаю», а не «нет». Руль зеркала не продлевается и кончается
  *     сам через WHEEL.mirrorTtlMs после последнего «да» (ядро в этом случае руль зеркала снимает).
  * В журнал — строка на смену состояния (у руля / нет / Neko молчит / руль не записать), не на каждый опрос.
@@ -30,6 +31,7 @@ const { wheelState, takeWheel, releaseWheel, WHEEL } = require('../wheel.js');
 
 const MIN = 60e3;
 const EVERY_MS = 2500;
+const SOURCE = 'wheel-watch'; // своё «да» руля зеркала: «нет» сервиса не снимает «да» ownerPresent вызывающих, и наоборот
 
 const pad = (n) => String(n).padStart(2, '0');
 const hms = (ms) => { const d = new Date(ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`; };
@@ -65,17 +67,18 @@ function createWheelWatch({ dir, presence, now = Date.now, log = console.log, hi
     if (who.error) return report('error', `Neko не отвечает (${who.error}): руль зеркала не продлеваю, он кончится сам за ${ttl / 1000} с`);
     try {
       if (who.present) {
-        const w = await takeWheel({ dir, by: 'mirror', minutes: ttl / MIN, now: now() });
+        const w = await takeWheel({ dir, by: 'mirror', minutes: ttl / MIN, source: SOURCE, now: now() });
         return report('present', w.by === 'mirror'
           ? `хозяин держит управление в зеркале: руль взят до ${hms(w.until)} и продлевается, боты ждут`
           : `хозяин держит управление в зеркале; руль уже взят руками (${w.by}) до ${hms(w.until)}: срок не трогаю`);
       }
       const t = now();
-      const { released } = await releaseWheel({ dir, by: 'mirror', now: t });
+      const { released } = await releaseWheel({ dir, by: 'mirror', source: SOURCE, now: t });
       const left = released ? null : wheelState({ dir, now: t });
       const why = who.stale ? 'хост зеркала отключился, не отпустив управление' : 'хозяин не держит управление в зеркале';
-      return report('absent', `${why}: ${left ? `руль взят руками (${left.by}) до ${hms(left.until)}, его не трогаю`
-        : released ? 'руль зеркала снят, боты работают' : 'руль свободен, боты работают'}`);
+      const held = left && (left.by === 'mirror' ? `руль зеркала держит другой источник (ownerPresent вызывающего) до ${hms(left.until)}, его не трогаю`
+        : `руль взят руками (${left.by}) до ${hms(left.until)}, его не трогаю`);
+      return report('absent', `${why}: ${held || (released ? 'руль зеркала снят, боты работают' : 'руль свободен, боты работают')}`);
     } catch (e) {
       return report('wheel-error', `руль в ${dir} не записать (${e.message}): боты о хозяине не узнают`);
     }

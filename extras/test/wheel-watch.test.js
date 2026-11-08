@@ -70,6 +70,22 @@ test('хозяин у руля в зеркале: руль by mirror на WHEEL.
   assert.match(s.lines[0], /управлени/);
 });
 
+test('сервис wheel и ownerPresent какого-то connect не спорят: «нет» одного не снимает «да» другого', async (t) => {
+  const { releaseWheel, takeWheel: take } = require('../../wheel.js');
+  const s = setup(t);
+  s.neko.hasHost = true;
+  await s.watch.step();
+  // connect, у которого ownerPresent ответил «нет» (или бросил — для ядра это «нет»), отдаёт свой руль зеркала.
+  assert.deepEqual(await releaseWheel({ dir: s.dir, by: 'mirror', source: 'connect:1', now: s.clock.t + 100 }), { released: false });
+  assert.equal(s.state().by, 'mirror', 'ownerPresent «нет» сняло руль, который держит сервис');
+  // Наоборот: connect держит «да», сервис видит, что хозяина нет, — руль остаётся за connect.
+  await take({ dir: s.dir, by: 'mirror', minutes: TTL / MIN, source: 'connect:1', now: s.clock.t + 200 });
+  s.neko.hasHost = false;
+  await s.tick();
+  assert.equal(s.state()?.by, 'mirror', 'сервис снял руль, который держит connect');
+  assert.match(s.lines.at(-1), /хозяин не держит управление/);
+});
+
 test('хозяин ушёл: руль зеркала снят сразу; Neko замолчал — руль не продлевается и кончается сам', async (t) => {
   const s = setup(t);
   s.neko.hasHost = true;

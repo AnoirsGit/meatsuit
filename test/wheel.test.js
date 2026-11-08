@@ -44,6 +44,38 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   assert.equal(wheelState({ dir, now: NOW + MIN }).by, 'owner');
   await releaseWheel({ dir });
 
+  // Источников руля зеркала бывает несколько (сервис wheel стека, ownerPresent разных connect): они не спорят. «Нет»
+  // одного не снимает руль, который держит «да» другого; руль свободен, когда «нет» сказали все, кто говорил «да»,
+  // или их срок вышел. Отданный руками руль (без by) снимает всё.
+  const S = 30e3;
+  await takeWheel({ dir, by: 'mirror', minutes: S / MIN, source: 'wheel-watch', now: NOW });
+  assert.deepEqual(await releaseWheel({ dir, by: 'mirror', source: 'connect:1', now: NOW + 1000 }), { released: false });
+  assert.equal(wheelState({ dir, now: NOW + 1000 }).by, 'mirror', '«нет» другого источника сняло руль');
+  await takeWheel({ dir, by: 'mirror', minutes: S / MIN, source: 'connect:1', now: NOW + 2000 });
+  assert.deepEqual(await releaseWheel({ dir, by: 'mirror', source: 'wheel-watch', now: NOW + 3000 }), { released: false });
+  assert.deepEqual(wheelState({ dir, now: NOW + 3000 }), { by: 'mirror', since: NOW, until: NOW + 2000 + S }, 'держит оставшееся «да»');
+  assert.deepEqual(await releaseWheel({ dir, by: 'mirror', source: 'connect:1', now: NOW + 4000 }), { released: true });
+  assert.equal(wheelState({ dir, now: NOW + 4000 }), null);
+  // Чужое «да» истекло — оно уже не держит.
+  await takeWheel({ dir, by: 'mirror', minutes: S / MIN, source: 'a', now: NOW });
+  await takeWheel({ dir, by: 'mirror', minutes: S / MIN, source: 'b', now: NOW + 20e3 });
+  assert.deepEqual(await releaseWheel({ dir, by: 'mirror', source: 'b', now: NOW + 40e3 }), { released: true }, 'истёкшее «да» держит руль');
+  // Руками: give снимает и руль зеркала с несколькими источниками.
+  await takeWheel({ dir, by: 'mirror', minutes: S / MIN, source: 'a', now: NOW });
+  await takeWheel({ dir, by: 'mirror', minutes: S / MIN, source: 'b', now: NOW });
+  assert.deepEqual(await releaseWheel({ dir, now: NOW + 1000 }), { released: true });
+  assert.equal(wheelState({ dir, now: NOW + 1000 }), null);
+  // Два connect одного dir с разными ответами ownerPresent: руль держится, пока хоть один говорит «да».
+  WHEEL.pollMs = 0;
+  const yes = watcher({ dir, ownerPresent: async () => true });
+  const no = watcher({ dir, ownerPresent: async () => false });
+  for (let i = 0; i < 3; i++) {
+    await yes.held();
+    assert.equal((await no.held())?.by, 'mirror', `опрос ${i}: «нет» одного connect сняло «да» другого`);
+  }
+  WHEEL.pollMs = 2000;
+  await releaseWheel({ dir });
+
   // Прочитать-решить-записать — под коротким замком <dir>/wheel.lock: «да» зеркала (другой процесс) и хозяин с
   // tools/wheel.js не затирают друг друга. Пока замок держит другой, ни взять, ни отдать руль нельзя; после — можно,
   // и замок не остаётся.
@@ -123,7 +155,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const cli = (...a) => spawnSync(process.execPath, [path.join(__dirname, '..', 'tools', 'wheel.js'), ...a, '--dir', dir], { encoding: 'utf8' });
   let r = cli('take', '15');
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /руль у owner до \d\d:\d\d: боты ждут/);
+  assert.match(r.stdout, /руль у owner до (\d\d\.\d\d )?\d\d:\d\d: боты ждут/); // у полуночи — с датой
   assert.ok(wheelState({ dir }).until - Date.now() > 14 * MIN);
   assert.match(cli().stdout, /руль у owner/);
   assert.match(cli('give').stdout, /руль отдан/);
