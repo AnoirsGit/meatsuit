@@ -119,9 +119,11 @@ one): **the queue is per site**, shared by all callers of one `dir`.
   a weak CPU.
 
 **Updating from the version with one queue for the whole browser.** That version kept one lock `<dir>/queue.lock`. A
-task of this version waits while a live `queue.lock` exists (a caller not yet updated is running a task), but the old
-version knows nothing of the per-site locks: its task may start while tasks of this version run, on the same site
-too. Update all callers of one `dir` together (rebuild their images). Callers change nothing in their code: the same
+task of this version looks at it once, right after it has taken its site's lock: if `queue.lock` exists at that
+moment (a caller not yet updated is running a task), the task waits until it can take it and gives it back at once,
+then runs. That is a snapshot, not a hold: an old-version task that takes `queue.lock` a moment later runs alongside.
+The old version knows nothing of the per-site locks either, so its task may start while tasks of this version run, on
+the same site too. Update all callers of one `dir` together (rebuild their images). Callers change nothing in their code: the same
 `connect` and `task`; tasks on different sites now simply overlap.
 
 ### The owner at the wheel
