@@ -27,7 +27,7 @@ const { telegramNotifier, createTelegram, findChats, TelegramError } = require('
 const { openWindow } = require('./window.js');
 const { supervise, BudgetExceeded, HANG } = require('./supervise.js');
 const { signature, normalizeName, urlPattern } = require('./capture.js');
-const { ruleFor, reserve, charge, peek: peekLimit, status: limitStatus, lock, queueKey, queueFile, LimitReached } = require('./limits.js');
+const { ruleFor, reserve, charge, peek: peekLimit, status: limitStatus, lock, queueKey, queueFile, heldTargets, LimitReached } = require('./limits.js');
 const { loadPersona } = require('./human/persona-file.js');
 const holds = require('./holds.js');
 const { watcher: wheelWatcher, WHEEL } = require('./wheel.js');
@@ -118,6 +118,9 @@ async function connect({
   // контексте нет слушателя. Слушатель есть, и он трогает только окна бота: мои оставляет мне.
   const botPages = new WeakSet();
   browser.contexts()[0].on('dialog', (d) => { if (botPages.has(d.page())) d.dismiss().catch(() => {}); });
+  // Страницы, в которых сейчас идут задачи этого подключения: siteTab их не берёт (задачи других процессов — по
+  // targetId в их замке очереди, heldTargets).
+  const inUse = new WeakSet();
 
   const emit = async (event, text) => {
     if (!notifyOn.includes(event)) return;
@@ -179,13 +182,23 @@ async function connect({
   // событием чуть позже и ещё отдаёт её в pages(). Такую пропускаем, а не падаем «Target page … closed».
   // Из нескольких вкладок площадки рабочая — на экране, иначе с самой свежей активностью; остальные без активности
   // дольше staleTabHours закрываются (правило и исключения — tabs.js). Отметки — в <dir>/tabs.json.
+  // Страница, где идёт другая задача (её extraHosts привели её на этот хост), — не вкладка площадки: пропускается до
+  // снимка, без выбора и закрытия. Своя задача этого подключения — inUse, задача другого процесса — по targetId в живом
+  // замке её очереди.
   async function siteTab(site, codeLogin, onExamine = () => {}, { hours = 0, dryRun = false, alive = () => true } = {}) {
     const onSite = (u) => hostOn(u, site);
     const tabsFile = path.join(dir, 'tabs.json');
     const seen = [];
+    const held = heldTargets(dir, queueFile(dir, site));
     let busy; // вкладка сменила документ во время снимка: в этот раз её не трогаем (ни выбора, ни закрытия)
     for (const found of browser.contexts()[0].pages()) {
-      if (found.isClosed() || !onSite(found.url())) continue;
+      if (found.isClosed() || inUse.has(found) || !onSite(found.url())) continue;
+      if (held.size) {
+        let id;
+        try { id = await tabs.targetId(found); }
+        catch (e) { if (found.isClosed() || CLOSED_PAGE.test(e.message)) continue; throw e; }
+        if (held.has(id)) continue;
+      }
       onExamine(found); // сторож задачи закроет её, если снимок повиснет
       // Снимок без команд: на вкладке может быть капча, которую решает человек (оставлена прошлой задачей,
       // в том числе другим процессом), её не трогаем.
@@ -229,7 +242,7 @@ async function connect({
       return chosen.page;
     }
     if (busy) throw busy; // как раньше: ни одна вкладка площадки не дала снимок — ошибка снимка, а не новое окно
-    if (targetInfos.some((t) => t.type === 'page' && onSite(t.url))) throw new Error(`singleTab: вкладка ${site} есть, но Playwright её не видит`);
+    if (targetInfos.some((t) => t.type === 'page' && onSite(t.url) && !held.has(t.targetId))) throw new Error(`singleTab: вкладка ${site} есть, но Playwright её не видит`);
   }
 
   // Отметить активность вкладки сейчас (под замком состояния: tabs.json общий у всех площадок). Сбой не роняет задачу:
@@ -334,6 +347,10 @@ async function connect({
       }
       page = found || await openWindow(browser);
       opened = !found;
+      inUse.add(page);
+      // Какую страницу держит задача — в замок её очереди: siteTab других процессов её не возьмёт.
+      try { if (release.update) release.update({ targetId: await tabs.targetId(page) }); }
+      catch (e) { console.error('meatsuit: окно задачи не записано в замок очереди:', e.message); }
       if (hung) throw hung;
       botPages.add(page);
       onPopup = (p) => { botPages.add(p); p.close().catch(() => {}); }; // новые вкладки бот не ведёт
@@ -391,6 +408,7 @@ async function connect({
       throw err;
     } finally {
       clearTimeout(watchdog);
+      if (page) inUse.delete(page);
       if (run) run.state.finish();
       if (page && rule && rule.singleTab) { // вкладка площадки живёт дальше: убираем только свои следы
         page.off('popup', onPopup);

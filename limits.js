@@ -151,6 +151,29 @@ function queueKey(site) {
 /** Файл замка очереди площадки: <dir>/queue/<ключ>.lock. */
 const queueFile = (dir, site) => path.join(dir, 'queue', `${encodeURIComponent(queueKey(site))}.lock`);
 
+const STALE_MS = 30000; // lock(): замок, не обновлявшийся дольше, брошен
+
+/**
+ * targetId страниц, в которых сейчас идут задачи: из живых замков очередей <dir>/queue/*.lock (кроме except — своего).
+ * Задача пишет туда targetId своего окна (release.update): задача singleTab другой площадки не возьмёт эту страницу
+ * за свою вкладку, даже если она открыта на её хосте (extraHosts держателя). Брошенный замок не в счёт.
+ */
+function heldTargets(dir, except = null, now = Date.now()) {
+  const qdir = path.join(dir, 'queue');
+  const out = new Set();
+  let names = [];
+  try { names = fs.readdirSync(qdir); } catch { return out; }
+  for (const n of names) {
+    if (!n.endsWith('.lock')) continue;
+    const f = path.join(qdir, n);
+    if (except && path.resolve(f) === path.resolve(except)) continue;
+    try { if (now - fs.statSync(f).mtimeMs > STALE_MS) continue; } catch { continue; }
+    const h = lockHolder(f);
+    if (h && typeof h.targetId === 'string' && h.targetId) out.add(h.targetId);
+  }
+  return out;
+}
+
 /** Текст отказа «очередь занята»: чья задача, на какой площадке и с какого времени, сколько ждали. */
 function busyText(file, timeoutMs, queue = null) {
   const h = lockHolder(file);
@@ -171,9 +194,9 @@ function busyText(file, timeoutMs, queue = null) {
  * только свой замок: держатель, который завис дольше staleMs, просыпается и не уносит замок того, кто его забрал.
  * Не дождались за timeoutMs — LimitReached «очередь <queue>: занята …» (без queue — «браузер занят …», так звучал
  * замок всего браузера): как исчерпанный лимит, задача не начинается, браузер не тронут, повторить позже.
- * Возвращает release().
+ * Возвращает release(); release.update({ targetId }) дописывает в файл, какую страницу держит задача (heldTargets).
  */
-async function lock(file, { pollMs = 500, timeoutMs = 30 * 60e3, heartbeatMs = 5000, staleMs = 30000, holder = {}, queue = null } = {}) {
+async function lock(file, { pollMs = 500, timeoutMs = 30 * 60e3, heartbeatMs = 5000, staleMs = STALE_MS, holder = {}, queue = null } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const until = Date.now() + timeoutMs;
   const token = `${process.pid}-${randomUUID()}`;
@@ -184,11 +207,22 @@ async function lock(file, { pollMs = 500, timeoutMs = 30 * 60e3, heartbeatMs = 5
       fs.writeFileSync(file, JSON.stringify({ token, pid: process.pid, ...who, since: Date.now() }), { flag: 'wx' });
       const beat = setInterval(() => { try { const t = new Date(); fs.utimesSync(file, t, t); } catch {} }, heartbeatMs);
       beat.unref();
-      return () => {
+      const release = () => {
         clearInterval(beat);
         const h = lockHolder(file);
         if (h && h.token === token) { try { fs.unlinkSync(file); } catch {} }
       };
+      // Замок свой — переписать целиком через rename (читатель не увидит половину, путь не пропадает ни на миг).
+      release.update = ({ targetId } = {}) => {
+        const h = lockHolder(file);
+        if (!h || h.token !== token) return false;
+        if (typeof targetId === 'string' && targetId) h.targetId = targetId.slice(0, 100);
+        const tmp = `${file}.${randomUUID()}.tmp`;
+        fs.writeFileSync(tmp, JSON.stringify(h));
+        fs.renameSync(tmp, file);
+        return true;
+      };
+      return release;
     } catch (e) {
       if (e.code !== 'EEXIST') throw e;
       let age = 0;
@@ -213,4 +247,4 @@ async function lock(file, { pollMs = 500, timeoutMs = 30 * 60e3, heartbeatMs = 5
   }
 }
 
-module.exports = { ruleFor, check, peek, status, reserve, charge, lock, queueKey, queueFile, LimitReached };
+module.exports = { ruleFor, check, peek, status, reserve, charge, lock, queueKey, queueFile, heldTargets, LimitReached };

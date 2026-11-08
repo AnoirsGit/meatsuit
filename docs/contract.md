@@ -80,9 +80,12 @@ one): **the queue is per site**, shared by all callers of one `dir`.
 - Tasks on **different sites run at the same time**, each in its own page: a new window of its own, opened in the
   background (`Target.createTarget` with `newWindow` and `background`, so it does not take the screen focus), or with
   `singleTab` the site's own tab, found by the task's host and its subdomains. A task never takes, snapshots or closes
-  another site's page; its commands go over CDP to its own page (keys into that document's focused element, the mouse
-  into that page), so they do not depend on which window has the focus on the screen. The core brings a page to the
-  front in one case only: the window or tab left to the human after `NeedsHuman`, so it need not be searched for in
+  another site's page, nor a page where another task is working: a `singleTab` search skips a tab on its host that a
+  running task holds (one that got there through that task's `extraHosts`). Tasks of the same process know their pages;
+  a task of another process is known by the CDP target id of its window, which every task writes into its queue lock
+  `queue/<key>.lock` (a lock not refreshed for 30 seconds counts as abandoned). A task's commands go over CDP to its
+  own page (keys into that document's focused element, the mouse into that page), so they do not depend on which
+  window has the focus on the screen. The core brings a page to the front in one case only: the window or tab left to the human after `NeedsHuman`, so it need not be searched for in
   the mirror, and only while the wheel is free.
 - Tasks on **one site run one at a time**, in the order they get the lock. A site and its subdomains share one queue:
   the key is the last two labels of the host (`web.telegram.org` and `telegram.org`, `www.linkedin.com` and

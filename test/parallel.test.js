@@ -38,13 +38,33 @@ const PAGE = (host) => `<title>${host}</title><textarea aria-label="Сообще
   const sitesFile = path.join(tmp, 'sites.json');
   const SITES = ['a.test', 'b.test', 'c.test', 'web.c.test', 'p1.test', 'p2.test', 'p3.test', 'p4.test', 'slow.test'];
   fs.writeFileSync(sitesFile, JSON.stringify({ ...Object.fromEntries(SITES.map((s) => [s, { perDay: 100 }])),
-    'sa.test': { perDay: 100, singleTab: true }, 'sb.test': { perDay: 100, singleTab: true } }));
+    'sa.test': { perDay: 100, singleTab: true }, 'sb.test': { perDay: 100, singleTab: true },
+    'y.test': { perDay: 100 }, 'sx.test': { perDay: 100, singleTab: true } }));
 
   const ctx = await chromium.launchPersistentContext(path.join(tmp, 'profile'), { headless: true, args: ['--remote-debugging-port=0'] });
   const PORT = await cdpPort(path.join(tmp, 'profile'));
   const cdpUrl = `http://127.0.0.1:${PORT}`;
   await ctx.route(/\.test\//, (r) => r.fulfill({ contentType: 'text/html', body: PAGE(new URL(r.request().url()).hostname) }));
+  await ctx.route('https://y.test/go', (r) => r.fulfill({ contentType: 'text/html', body: '<a href="https://sx.test/">на sx</a>' }));
   WHEEL.pollMs = 50;
+  // Задача y.test уходит по ссылке на свой extraHosts sx.test и держит там страницу; задача singleTab площадки sx.test
+  // не должна взять её как «вкладку площадки» (ищет по хосту). holderFn — тело задачи-держателя, takerFn — берущей.
+  const holderFn = (onX, gate) => async ({ see, act }) => {
+    await act({ cmd: 'goto', url: 'https://y.test/go' });
+    const s = await see();
+    await act({ cmd: 'click', id: s.elements.find((e) => e.role === 'link').id, gen: s.gen });
+    onX();
+    await gate();
+    const s2 = await see();
+    return { url: s2.url, value: s2.elements.find((e) => e.role === 'textbox').value };
+  };
+  const takerFn = async ({ see, act }) => {
+    let s = await see();
+    if (s.url !== 'https://sx.test/') { await act({ cmd: 'goto', url: 'https://sx.test/' }); s = await see(); }
+    const r = await act({ cmd: 'fill', id: s.elements.find((e) => e.role === 'textbox').id, gen: s.gen, text: 'берущий' });
+    return r.elements.find((e) => e.role === 'textbox').value;
+  };
+  const closeSx = async () => { for (const p of ctx.pages()) if (p.url().startsWith('https://sx.test')) await p.close(); };
 
   const notes = [];
   const ms = await connect({ cdpUrl, dir: state, sitesFile, notify: async (text, event) => { notes.push({ text, event }); } });
@@ -95,6 +115,26 @@ const PAGE = (host) => `<title>${host}</title><textarea aria-label="Сообще
     await pa.close(); await pb.close();
     await sleep(300);
     assert.equal(windows(), base);
+
+    // 2б. Страница, где идёт другая задача этого процесса, — не вкладка площадки: задача y.test стоит на sx.test (свой
+    // extraHosts), задача singleTab площадки sx.test открывает своё окно и печатает в своё поле.
+    {
+      let onX, go;
+      const there = new Promise((r) => { onX = r; });
+      const gate = new Promise((r) => { go = r; });
+      const holding = ms.task('holder', holderFn(onX, () => gate), { site: 'y.test', extraHosts: ['sx.test'] });
+      await there;
+      await sleep(300);
+      const took = await ms.task('taker', takerFn, { site: 'sx.test' });
+      go();
+      const held = await holding;
+      assert.equal(held.url, 'https://sx.test/');
+      assert.equal(held.value, '', 'задача singleTab взяла страницу, где идёт другая задача этого процесса');
+      assert.equal(took, 'берущий');
+      await closeSx();
+      await sleep(300);
+      assert.equal(windows(), base);
+    }
 
     // 3. Руль у хозяина до входа: задачи обеих площадок не начинаются и окон не открывают; отдал — обе идут.
     await takeWheel({ dir: state, minutes: 1 });
@@ -298,6 +338,41 @@ const [cdpUrl, dir, sitesFile, site, out, hold] = process.argv.slice(2);
       for (const site of ['a.test', 'b.test']) assert.deepEqual(after[site], before[site], `${site}: чужие счётчики изменились`);
     }
     assert.deepEqual(fs.readdirSync(path.join(state, 'queue')), [], 'после процессов замков не осталось');
+
+    // 8б. То же между процессами: держатель — другой процесс; его окно записано (targetId) в его замке очереди, и задача
+    // singleTab этого процесса его не берёт.
+    {
+      const holderJs = path.join(tmp, 'holder.js');
+      const marker = path.join(tmp, 'holder-there'), go = path.join(tmp, 'holder-go'), out = path.join(tmp, 'holder-out.json');
+      fs.writeFileSync(holderJs, `const fs = require('node:fs');
+const { connect } = require(${JSON.stringify(path.join(__dirname, '..', 'index.js'))});
+const [cdpUrl, dir, sitesFile, marker, go, out] = process.argv.slice(2);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+(async () => {
+  const ms = await connect({ cdpUrl, dir, sitesFile });
+  const r = await ms.task('holder-child', (${holderFn.toString()})(() => fs.writeFileSync(marker, ''), async () => { while (!fs.existsSync(go)) await sleep(20); }),
+    { site: 'y.test', extraHosts: ['sx.test'] });
+  fs.writeFileSync(out, JSON.stringify(r));
+  await ms.close();
+})().catch((e) => { console.error(e); process.exit(1); });
+`);
+      let err = '';
+      const proc = spawn(process.execPath, [holderJs, cdpUrl, state, sitesFile, marker, go, out], { stdio: ['ignore', 'ignore', 'pipe'] });
+      proc.stderr.on('data', (d) => { err += d; });
+      const exited = new Promise((resolve) => proc.on('exit', resolve));
+      for (const t = Date.now(); !fs.existsSync(marker); await sleep(20)) assert.ok(Date.now() - t < 20000, `держатель не дошёл до sx.test: ${err}`);
+      await sleep(300);
+      const ms2 = await connect({ cdpUrl, dir: state, sitesFile });
+      const took = await ms2.task('taker-2', takerFn, { site: 'sx.test' });
+      fs.writeFileSync(go, '');
+      assert.equal(await exited, 0, err);
+      const held = JSON.parse(fs.readFileSync(out, 'utf8'));
+      assert.equal(held.url, 'https://sx.test/');
+      assert.equal(held.value, '', 'задача singleTab взяла страницу, где идёт задача другого процесса');
+      assert.equal(took, 'берущий');
+      await ms2.close();
+      await closeSx();
+    }
     assert.ok(!fs.readdirSync(state).some((f) => f.endsWith('.tmp')), 'временные файлы не остались');
   } finally { await ctx.close(); }
 
