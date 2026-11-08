@@ -55,7 +55,7 @@ await ms.close();
 | `dir` | the per-site queue locks `queue/<key>.lock`, the counters `limits.json`, the journal `journal.jsonl`, the human's habits `persona.json`, the tab marks `tabs.json`, the site holds `holds/`, the owner's wheel `wheel.json` and the short locks `state.lock` around the shared files and `wheel.lock` around the wheel; `~/.meatsuit` by default. **All callers of one browser must pass the same `dir`**: otherwise their locks differ, two bots enter one site at once, and the owner's wheel stops only some of them. With the mirror from `docker/` this is the `state/` folder in the `meatsuit_profile` volume (see "Attaching to the mirror") |
 | `notify(text, event)` | the caller's async notification function. A failed send does not fail the task; it goes to stderr |
 | `notifyOn` | which events to send: `'start'`, `'done'`, `'limit'`, `'error'`, `'needsHuman'`; by default `['needsHuman', 'limit', 'error']` |
-| `ownerPresent` | optional: the caller's async function telling whether the owner holds the controls in the mirror, returning `true`, `false` or `{ present }` (the `check()` of `extras/presence.js` fits as is; the Neko admin password stays with the caller). A "yes" puts the owner's wheel on for every caller of the same `dir`, see "The owner at the wheel". A function that throws counts as "no"; not a function is an error before the browser |
+| `ownerPresent` | optional: the caller's async function telling whether the owner holds the controls in the mirror, returning `true`, `false` or `{ present }` (the `check()` of `extras/presence.js` fits as is; the Neko admin password stays with the caller). Asked every 2 seconds while the connection lives. A "yes" puts the owner's wheel on for every caller of the same `dir`, see "The owner at the wheel". A function that throws counts as "no"; not a function is an error before the browser |
 | `site` | the site's host, its key in `sites.json`; `goto` is limited to it as well |
 | `uploadDirs` | an array of absolute paths to directories `upload` may take files from (CVs, letters). Without it `upload` is a `BadCommand`. A wrong shape is an error before the queue and the browser |
 | `extraHosts` | an array of hosts (`['company.com']`, no scheme, path or `*`) where the page may end up without a stop: a "thank you" page on the company's own site after an ATS form. Subdomains too. `goto` there is not allowed; limits and counters go by `site`; guard (captcha, sign-in, block) works there too. A wrong shape is an error before the queue and the browser |
@@ -141,10 +141,13 @@ site's queue lock first, then `wheel.lock` or `state.lock`; each of those two is
 nothing taken under it, and they are never held together.
 
 From a shell: `node tools/wheel.js take [minutes] [--dir …]`, `give`, or without a command the state (`--dir` defaults
-to `MEATSUIT_DIR`, else `~/.meatsuit`). With `connect({ ownerPresent })` the core asks the caller's function at most
-every 2 seconds while a task waits or before a command; "yes" writes the wheel `by: 'mirror'` for 30 seconds and
-renews it while the answer is yes, "no" removes only a `mirror` wheel (never one the owner took by hand). So one caller
-that knows about Neko stops every caller of the same `dir`. A caller in the mirror's network reaches Neko at
+to `MEATSUIT_DIR`, else `~/.meatsuit`). With `connect({ ownerPresent })` the core asks the caller's function every 2
+seconds for as long as the connection lives (from `connect` until `close()` or a lost connection to the browser), also
+while that caller has no task of its own, and at most as often when a task waits or types; "yes" writes the wheel
+`by: 'mirror'` for 30 seconds and renews it while the answer is yes, "no" removes only a `mirror` wheel (never one the
+owner took by hand). So one connected caller that knows about Neko stops every caller of the same `dir`, busy or idle;
+if it stops running, its last "yes" holds the others for at most 30 seconds. The timer does not keep the caller's
+process alive. A caller in the mirror's network reaches Neko at
 `127.0.0.1:8080`; the admin password is its own setting:
 
 ```js

@@ -108,6 +108,10 @@ async function connect({
   const wheel = wheelWatcher({ dir, ownerPresent }); // кривой ownerPresent — ошибка до браузера
   const browser = await chromium.connectOverCDP(cdpUrl);
   fs.mkdirSync(dir, { recursive: true });
+  // ownerPresent спрашивается всё время, пока живо подключение, а не только когда своя задача ждёт или жмёт:
+  // простаивающий вызывающий с ownerPresent держит руль и для тех, у кого его нет.
+  wheel.start();
+  browser.on('disconnected', () => wheel.stop());
   loadPersona(dir); // повадки человека (темп руки и печати, опечатки) — в <dir>/persona.json: тот же человек после перезапуска
 
   // Пока есть подключение, Playwright сам отклоняет все диалоги во ВСЕХ вкладках, если на
@@ -398,7 +402,7 @@ async function connect({
     }
   }
 
-  return { task, close: () => browser.close() };
+  return { task, close: async () => { wheel.stop(); return browser.close(); } };
 }
 
 // telegramNotifier и остальное из telegram.js — помощник для вызывающего (токен и группу передаёт он);

@@ -6,9 +6,10 @@
  * руля (он не должен держать ботов вечно). Ставят его:
  *   - хозяин сам: node tools/wheel.js take [минуты] и give, или takeWheel/releaseWheel отсюда (require('meatsuit/wheel.js'));
  *   - connect({ ownerPresent }) — функция вызывающего, «держит ли хозяин управление» (например, check() из
- *     extras/presence.js: Neko знает, кто у руля). Ответ «да» ядро записывает рулём by: 'mirror' на WHEEL.mirrorTtlMs
- *     вперёд и продлевает, пока ответ «да»; ответ «нет» снимает только руль by: 'mirror'. Так паузу видят и
- *     вызывающие того же dir без своего ownerPresent. Сам модуль никуда не ходит и окружение не читает.
+ *     extras/presence.js: Neko знает, кто у руля). Спрашивается раз в WHEEL.pollMs, пока живо подключение (watcher.start).
+ *     Ответ «да» ядро записывает рулём by: 'mirror' на WHEEL.mirrorTtlMs вперёд и продлевает, пока ответ «да»; ответ
+ *     «нет» снимает только руль by: 'mirror'. Так паузу видят и вызывающие того же dir без своего ownerPresent. Сам
+ *     модуль никуда не ходит и окружение не читает.
  *
  * Что делает руль с задачами — index.js: задача не входит в очередь своей площадки, пока руль у хозяина, а начатая
  * ждёт перед каждой командой act(); время ожидания в бюджет maxMinutes не входит. Ждут не дольше WHEEL.maxWaitMs,
@@ -29,7 +30,7 @@ const { lock } = require('./limits.js');
 const MIN = 60e3;
 // Объект, а не числа: тест укорачивает сроки, не трогая список экспорта ядра (как HANG в supervise.js).
 const WHEEL = {
-  pollMs: 2000, // как часто ждущая задача и идущая печать смотрят руль и спрашивают ownerPresent
+  pollMs: 2000, // как часто спрашивается ownerPresent (всё время, пока жив connect) и как часто печать смотрит руль
   mirrorTtlMs: 30e3, // руль от ownerPresent: столько держится после последнего «да», если спросить больше некому
   maxWaitMs: 30 * MIN, // столько задача ждёт руль до входа и перед командой, потом LimitReached
 };
@@ -91,13 +92,18 @@ async function releaseWheel({ dir, by, now = Date.now() } = {}) {
 
 /**
  * Руль для задач одного connect(): held() — руль сейчас (спросив ownerPresent не чаще раза в WHEEL.pollMs).
+ * start() — спрашивать ownerPresent раз в WHEEL.pollMs всё время, пока жив connect, и без задач: простаивающий
+ * вызывающий с ownerPresent держит руль для всех вызывающих dir (руль зеркала живёт WHEEL.mirrorTtlMs после последнего
+ * «да»); stop() — перестать (close, обрыв связи с браузером). Таймер unref: процесс вызывающего он не держит.
  * Сбой ownerPresent — «хозяина нет» (присутствие — вежливость, а не предохранитель), причина в stderr один раз.
  */
 function watcher({ dir, ownerPresent }) {
   if (ownerPresent !== undefined && typeof ownerPresent !== 'function') throw new Error('connect: ownerPresent — async-функция → true | false | { present }');
   let asked = 0;
   let failed = false;
+  let unwritten = false;
   let inflight = null;
+  let timer = null;
   const ask = async () => {
     let r;
     try { r = await ownerPresent(); failed = false; }
@@ -106,15 +112,35 @@ function watcher({ dir, ownerPresent }) {
     if (present) await takeWheel({ dir, by: 'mirror', minutes: WHEEL.mirrorTtlMs / MIN });
     else await releaseWheel({ dir, by: 'mirror' });
   };
-  async function held() {
-    if (ownerPresent && Date.now() - asked >= WHEEL.pollMs) {
+  // Спросить, если пора (не чаще раза в pollMs); идущий вопрос не дублируется.
+  const poll = () => {
+    if (ownerPresent && !inflight && Date.now() - asked >= WHEEL.pollMs) {
       asked = Date.now();
-      if (!inflight) inflight = ask().finally(() => { inflight = null; });
-      await inflight;
+      inflight = ask().finally(() => { inflight = null; });
     }
+    return inflight;
+  };
+  async function held() {
+    await poll();
     return wheelState({ dir });
   }
-  return { held };
+  function start() {
+    if (!ownerPresent || timer) return;
+    const tick = () => {
+      const p = poll();
+      if (p) {
+        p.then(() => { unwritten = false; }, (e) => {
+          if (!unwritten) console.error('meatsuit: руль от ownerPresent не записан:', e.message);
+          unwritten = true;
+        });
+      }
+    };
+    timer = setInterval(tick, WHEEL.pollMs);
+    timer.unref();
+    tick();
+  }
+  function stop() { clearInterval(timer); timer = null; }
+  return { held, start, stop };
 }
 
 module.exports = { wheelState, takeWheel, releaseWheel, watcher, WHEEL };

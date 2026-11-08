@@ -210,9 +210,20 @@ const PAGE = (host) => `<title>${host}</title><textarea aria-label="Сообще
     WHEEL.maxWaitMs = 30 * 60e3;
 
     // 6. ownerPresent одного вызывающего держит и другого (тот же dir, своего ownerPresent нет): руль by: 'mirror'.
-    let present = true;
-    const wired = await connect({ cdpUrl, dir: state, sitesFile, ownerPresent: async () => ({ present }) });
+    // Спрашивается всё время, пока жив connect, — и когда у самого вызывающего задач нет; после close — нет.
+    let present = true, asks = 0;
+    const wired = await connect({ cdpUrl, dir: state, sitesFile, ownerPresent: async () => { asks++; return { present }; } });
     spans.length = 0;
+    await sleep(200);
+    assert.equal(wheelState({ dir: state })?.by, 'mirror', 'простаивающий вызывающий с ownerPresent не поставил руль');
+    const idle = span('b.test', 'I1', 100);
+    await sleep(400);
+    assert.equal(spans.length, 0, 'хозяин в зеркале, а вызывающий без ownerPresent пошёл: у того, кто спрашивает, задач нет');
+    present = false;
+    await idle;
+    spans.length = 0;
+    present = true;
+    await sleep(200);
     const w1 = span('a.test', 'M1', 200, wired);
     await sleep(200);
     assert.equal(wheelState({ dir: state }).by, 'mirror');
@@ -225,6 +236,9 @@ const PAGE = (host) => `<title>${host}</title><textarea aria-label="Сообще
     assert.ok(m1.s >= away && m2.s >= away);
     assert.equal(wheelState({ dir: state }), null, '«нет» снимает руль зеркала');
     await wired.close();
+    const asked = asks;
+    await sleep(300);
+    assert.equal(asks, asked, 'после close ownerPresent спрашивают дальше');
 
     // 7. Замок площадки свой: занятый чужим вызывающим держит только её (LimitReached с ним), другая площадка идёт;
     // брошенный (не обновлялся дольше staleMs) забирается.

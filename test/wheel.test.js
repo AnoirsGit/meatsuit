@@ -84,6 +84,41 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   assert.equal(calls - before, 1, 'ownerPresent спрашивается не чаще раза в pollMs');
   assert.throws(() => watcher({ dir, ownerPresent: 'да' }), /ownerPresent/);
 
+  // start(): ownerPresent спрашивается раз в pollMs всё время, пока жив connect, и без задач — простаивающий
+  // вызывающий с ownerPresent держит руль и для вызывающих без него; stop() (close, обрыв связи) — больше не спрашивает.
+  WHEEL.pollMs = 30;
+  let ticks = 0, here = true;
+  const idle = watcher({ dir, ownerPresent: async () => { ticks++; return here; } });
+  idle.start();
+  idle.start(); // второй раз — тот же опрос, не второй
+  await sleep(250);
+  assert.ok(ticks >= 3 && ticks <= 12, `ownerPresent спросили ${ticks} раз за 250 мс при pollMs 30`);
+  assert.equal(wheelState({ dir }).by, 'mirror', 'простаивающий вызывающий не поставил руль');
+  here = false;
+  await sleep(120);
+  assert.equal(wheelState({ dir }), null, '«нет» снимает руль и без задач');
+  idle.stop();
+  const stoppedAt = ticks;
+  await sleep(150);
+  assert.equal(ticks, stoppedAt, 'после stop() ownerPresent спрашивают дальше');
+  const plainIdle = watcher({ dir });
+  plainIdle.start(); plainIdle.stop(); // без ownerPresent спрашивать некого
+  // Сбой записи руля в опросе не роняет процесс (некому поймать): строка в stderr, опрос идёт дальше.
+  const noDir = path.join(dir, 'файл');
+  fs.writeFileSync(noDir, '');
+  let failedTicks = 0;
+  const errs = [];
+  const origErr = console.error;
+  console.error = (...a) => errs.push(a.join(' '));
+  const bad = watcher({ dir: noDir, ownerPresent: async () => { failedTicks++; return true; } });
+  bad.start();
+  await sleep(150);
+  bad.stop();
+  console.error = origErr;
+  assert.ok(failedTicks >= 2, 'после сбоя записи опрос остановился');
+  assert.ok(errs.length === 1 && /руль/.test(errs[0]), `сбой записи — одна строка в stderr: ${JSON.stringify(errs)}`);
+  fs.rmSync(noDir);
+
   // tools/wheel.js: take, статус, give — в той же папке, без браузера.
   const cli = (...a) => spawnSync(process.execPath, [path.join(__dirname, '..', 'tools', 'wheel.js'), ...a, '--dir', dir], { encoding: 'utf8' });
   let r = cli('take', '15');
