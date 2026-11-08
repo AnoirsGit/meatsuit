@@ -182,9 +182,11 @@ const PAGE = (host) => `<title>${host}</title><textarea aria-label="Сообще
     WHEEL.pollMs = 400;
     human.usePersona({ speed: 1.4, tremor: 0.5, twitch: 0.1, wpm: 60, typoRate: 0 }); // ~200 мс на знак
     const LONG = 'Привет! Это длинное сообщение, его печатают долго';
-    let stopped, gate4, stoppedAt;
+    let stopped, gate4, stoppedAt, entered, gate5;
     const stoppedP = new Promise((r) => { stopped = r; });
     const gate4P = new Promise((r) => { gate4 = r; });
+    const enteredP = new Promise((r) => { entered = r; });
+    const gate5P = new Promise((r) => { gate5 = r; });
     notes.length = 0;
     const typing = ms.task('mid-type', async ({ see, act }) => {
       await act({ cmd: 'goto', url: 'https://a.test/' });
@@ -195,7 +197,9 @@ const PAGE = (host) => `<title>${host}</title><textarea aria-label="Сообще
       await gate4P; // тест смотрит, что печать стоит, и отдаёт руль
       const s2 = await see();
       const enter = await act({ cmd: 'press', key: 'Enter', id: s2.elements.find((e) => e.role === 'textbox').id, gen: s2.gen }).then(() => null, (e) => e);
-      return { err, enter, after: (await see()).elements.find((e) => e.role === 'textbox').value };
+      entered();
+      await gate5P; // тест читает поле как есть (в снимке value обрезан по краям: перевод строки от Enter не виден)
+      return { err, enter };
     }, { site: 'a.test' });
     let field;
     for (let t = Date.now(); !field && Date.now() - t < 10000; await sleep(20)) field = ctx.pages().find((p) => p.url() === 'https://a.test/');
@@ -210,7 +214,10 @@ const PAGE = (host) => `<title>${host}</title><textarea aria-label="Сообще
     const v2 = await valueNow();
     await releaseWheel({ dir: state });
     gate4();
-    const { err: midErr, enter, after } = await typing;
+    await enteredP;
+    const after = await valueNow();
+    gate5();
+    const { err: midErr, enter } = await typing;
     assert.ok(midErr instanceof LimitReached && midErr.wheel && midErr.wheel.by === 'owner' && midErr.before === undefined
       && /ввод остановлен/.test(midErr.message), `печать не остановилась рулём: ${midErr}`);
     assert.ok(stoppedAt - tookAt < WHEEL.pollMs + 600, `печать шла ещё ${stoppedAt - tookAt} мс после руля (окно ${WHEEL.pollMs} мс)`);
