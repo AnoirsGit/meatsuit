@@ -364,6 +364,22 @@ const rejects = (c, hosts) => assert.throws(() => validate(c, hosts), BadCommand
     await assert.rejects(hm.act({ cmd: 'type', text: ' нет', id: idOf(u1, 'Чат'), gen: u1.gen }), (e) => e instanceof FieldMismatch && e.before === true);
     assert.equal(await page.inputValue('#m'), 'даoo', 'type дописал в поле с чужими буквами');
 
+    // Своя клавиша бота (Backspace) в поле, куда он печатал, — не «чужие буквы»: Enter после неё идёт.
+    await page.setContent(CHAT);
+    const b0 = await hm.see();
+    const b1 = await hm.act({ cmd: 'fill', id: idOf(b0, 'Чат'), gen: b0.gen, text: 'да!' });
+    const b2 = await hm.act({ cmd: 'press', key: 'Backspace', id: idOf(b1, 'Чат'), gen: b1.gen });
+    await hm.act({ cmd: 'press', key: 'Enter', id: idOf(b2, 'Чат'), gen: b2.gen });
+    assert.equal(await enters(), 1, 'Enter после своего Backspace не нажат');
+    // А если чужие буквы были до Backspace — Enter всё равно нет.
+    await page.setContent(CHAT);
+    const x0 = await hm.see();
+    const x1 = await hm.act({ cmd: 'fill', id: idOf(x0, 'Чат'), gen: x0.gen, text: 'да' });
+    await page.evaluate(() => { document.getElementById('m').value += 'oo'; });
+    const x2 = await hm.act({ cmd: 'press', key: 'Backspace', id: idOf(x1, 'Чат'), gen: x1.gen });
+    await assert.rejects(hm.act({ cmd: 'press', key: 'Enter', id: idOf(x2, 'Чат'), gen: x2.gen }), FieldMismatch, 'Backspace «отмыл» чужие буквы');
+    assert.equal(await enters(), 0);
+
     // fill сверяет фокус перед Ctrl+A и Backspace: страница увела фокус в другое поле — StaleElement, чужое поле цело.
     await page.setContent('<body style="margin:0"><input id="a" aria-label="A" onfocus="document.getElementById(\'o\').focus()"><input id="o" aria-label="Другое" value="чужой текст"></body>');
     const g0 = await hm.see();

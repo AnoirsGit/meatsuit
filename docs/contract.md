@@ -428,7 +428,9 @@ button, field or label is above it, and `scroll` (it only moves the view; this i
   becomes `\n`, a no-break space a space, Unicode NFC, spaces at both ends trimmed;
 - `type` into a field these hands typed into that now holds something else, and `press Enter` into such a field (the
   focused one, with or without `id`), throw `FieldMismatch` with `before: true`: nothing is typed or pressed. A field
-  is forgotten after an Enter that went through; a new `fill` starts it over. What the hands typed is remembered in
+  is forgotten after an Enter that went through; a new `fill` starts it over. The bot's own other key into such a field
+  (`Backspace`, an arrow) moves what is expected to what the field holds after it, but only if the field held exactly
+  what the bot typed before that key; otherwise the expectation stays and Enter is still refused. What the hands typed is remembered in
   meatsuit's isolated world of that document (not on disk, invisible to the page) until the document changes, so a
   later task in the same tab sees it too;
 - before `Ctrl+A` `fill` checks that the focus is in the target (or inside it): the page may have moved it after the

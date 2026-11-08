@@ -42,6 +42,8 @@ class FieldMismatch extends Error {
  *   check             — сверить запомненное поле с ожиданием (после ввода).
  *   enter             — перед Enter: поле в фокусе, если бот в него печатал, держит то, что он набрал.
  *   sent              — Enter нажат: ожидание этого поля снято.
+ *   key / keyed       — до и после другой клавиши (Backspace, стрелки): если в поле было ровно набранное, ожидание
+ *                       становится тем, что в поле после клавиши бота; если уже не было — остаётся, Enter не пройдёт.
  * Сравнение — после нормализации: \r\n → \n, неразрывный пробел → пробел, NFC, без пробелов по краям.
  */
 function fieldOp([op, i, text]) {
@@ -114,6 +116,12 @@ function fieldOp([op, i, text]) {
       return compare(a);
     }
     case 'sent': if (st.pin) { st.want.delete(st.pin); st.view.delete(st.pin); } return true;
+    case 'key': {
+      const a = deep();
+      st.pin = a && st.want.has(a) && compare(a).ok ? a : null;
+      return true;
+    }
+    case 'keyed': if (st.pin && st.pin.isConnected) { st.want.set(st.pin, norm(read(st.pin))); st.view.delete(st.pin); } return true;
   }
   return null;
 }
@@ -604,7 +612,13 @@ function hands(page, opts = {}) {
         if (hasTarget(c)) await target(c.id, c.gen);
         await human.pause(150, 600);
         if (hasTarget(c)) await focused(c.id); // после паузы, прямо перед клавишей
-        if (c.key !== 'Enter') return human.press(page, c.key);
+        if (c.key !== 'Enter') {
+          // Backspace бота в поле, куда он печатал, меняет и то, что там должно быть: иначе следующий Enter был бы «не тем».
+          if ((await field('key')).stale) throw new StaleElement('страница сменилась перед клавишей');
+          await human.press(page, c.key);
+          await field('keyed');
+          return;
+        }
         // Enter отправляет: в поле, куда печатал бот, должно быть ровно то, что он набрал (хозяин мог дописать в зеркале,
         // fill мог остановиться посередине).
         const r = await field('enter');
