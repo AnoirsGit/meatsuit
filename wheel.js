@@ -16,10 +16,15 @@
  * между клавишами не чаще раза в WHEEL.pollMs и обрывается (LimitReached с .wheel, без before); прочая начатая команда
  * (клик с путём мыши, прокрутка, wait) доходит до конца.
  *
- * wheelState, takeWheel, releaseWheel — без браузера (test/wheel.test.js).
+ * wheelState, takeWheel, releaseWheel — без браузера (test/wheel.test.js). takeWheel и releaseWheel — async: прочитать,
+ * решить и записать руль они успевают под коротким замком <dir>/wheel.lock (lock из limits.js). Иначе «да» зеркала из
+ * одного процесса и `tools/wheel.js take` хозяина в тот же миг затёрли бы друг друга: руль хозяина стал бы by: 'mirror',
+ * и следующее «нет» его сняло бы. Порядок замков: wheel.lock — лист, под ним ничего не берётся; его берут и под замком
+ * площадки (задача ждёт руль перед командой: площадка → wheel.lock), никогда наоборот и никогда вместе с state.lock.
  */
 const fs = require('node:fs');
 const path = require('node:path');
+const { lock } = require('./limits.js');
 
 const MIN = 60e3;
 // Объект, а не числа: тест укорачивает сроки, не трогая список экспорта ядра (как HANG в supervise.js).
@@ -30,6 +35,13 @@ const WHEEL = {
 };
 
 const fileOf = (dir) => path.join(dir, 'wheel.json');
+
+// Держится на одно чтение и одну запись; брошенный (процесс умер посередине) забирается через staleMs.
+const LOCK = { pollMs: 10, heartbeatMs: 1000, staleMs: 10e3, timeoutMs: 30e3 };
+async function locked(dir, fn) {
+  const release = await lock(path.join(dir, 'wheel.lock'), LOCK);
+  try { return fn(); } finally { release(); }
+}
 
 function read(dir) {
   try { return JSON.parse(fs.readFileSync(fileOf(dir), 'utf8')); }
@@ -47,31 +59,34 @@ function wheelState({ dir, now = Date.now() } = {}) {
 
 /**
  * Взять руль: боты этого dir ждут. minutes — на сколько (по умолчанию 60, не больше суток); by — кто взял.
- * Руль уже взят дольше — срок не укорачивается. → { by, since, until }.
+ * Руль уже взят дольше — срок не укорачивается. → Promise<{ by, since, until }>.
  */
-function takeWheel({ dir, minutes = 60, by = 'owner', now = Date.now() } = {}) {
+async function takeWheel({ dir, minutes = 60, by = 'owner', now = Date.now() } = {}) {
   if (!dir) throw new Error('takeWheel: нужен dir');
   if (!(typeof minutes === 'number' && minutes > 0 && minutes <= 24 * 60)) throw new Error(`takeWheel: minutes — число минут от 0 до 1440, пришло ${JSON.stringify(minutes)}`);
   if (typeof by !== 'string' || !by) throw new Error('takeWheel: by — непустая строка');
-  const cur = active(read(dir), +now);
-  const until = Math.max(+now + minutes * MIN, cur ? cur.until : 0);
-  // Ручной руль сильнее зеркального: «да» от зеркала не превращает руль хозяина в by: 'mirror' (и «нет» его не снимет).
-  const w = { by: cur && cur.by !== 'mirror' && by === 'mirror' ? cur.by : by, since: cur ? cur.since : +now, until };
-  fs.mkdirSync(dir, { recursive: true });
-  const tmp = `${fileOf(dir)}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(w));
-  fs.renameSync(tmp, fileOf(dir)); // целиком или никак: задача другого процесса не прочтёт половину
-  return w;
+  return locked(dir, () => {
+    const cur = active(read(dir), +now);
+    const until = Math.max(+now + minutes * MIN, cur ? cur.until : 0);
+    // Ручной руль сильнее зеркального: «да» от зеркала не превращает руль хозяина в by: 'mirror' (и «нет» его не снимет).
+    const w = { by: cur && cur.by !== 'mirror' && by === 'mirror' ? cur.by : by, since: cur ? cur.since : +now, until };
+    const tmp = `${fileOf(dir)}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(w));
+    fs.renameSync(tmp, fileOf(dir)); // целиком или никак: wheelState читает без замка и половину не увидит
+    return w;
+  });
 }
 
-/** Отдать руль. by — снять, только если руль взял этот by ('mirror' не снимает руль хозяина). → { released }. */
-function releaseWheel({ dir, by, now = Date.now() } = {}) {
+/** Отдать руль. by — снять, только если руль взял этот by ('mirror' не снимает руль хозяина). → Promise<{ released }>. */
+async function releaseWheel({ dir, by, now = Date.now() } = {}) {
   if (!dir) throw new Error('releaseWheel: нужен dir');
-  const w = read(dir);
-  if (by !== undefined && w && w.by !== by) return { released: false };
-  const was = !!active(w, +now);
-  if (w) fs.rmSync(fileOf(dir), { force: true });
-  return { released: was };
+  return locked(dir, () => {
+    const w = read(dir);
+    if (by !== undefined && w && w.by !== by) return { released: false };
+    const was = !!active(w, +now);
+    if (w) fs.rmSync(fileOf(dir), { force: true });
+    return { released: was };
+  });
 }
 
 /**
@@ -88,8 +103,8 @@ function watcher({ dir, ownerPresent }) {
     try { r = await ownerPresent(); failed = false; }
     catch (e) { if (!failed) console.error('meatsuit: ownerPresent не ответил, считаю, что хозяина нет:', e.message); failed = true; return; }
     const present = r === true || (!!r && typeof r === 'object' && r.present === true);
-    if (present) takeWheel({ dir, by: 'mirror', minutes: WHEEL.mirrorTtlMs / MIN });
-    else releaseWheel({ dir, by: 'mirror' });
+    if (present) await takeWheel({ dir, by: 'mirror', minutes: WHEEL.mirrorTtlMs / MIN });
+    else await releaseWheel({ dir, by: 'mirror' });
   };
   async function held() {
     if (ownerPresent && Date.now() - asked >= WHEEL.pollMs) {

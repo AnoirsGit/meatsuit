@@ -52,7 +52,7 @@ await ms.close();
 |---|---|
 | `cdpUrl` | the CDP address of the shared browser; required |
 | `sitesFile` or `sites` | the **caller's** site limits: the path to its `sites.json` (read for every task, so an edit applies without a restart) or an object of the same shape. Exactly one of the two; with neither, with both, or with a missing file `connect` fails before it touches the browser. Sample: `sites.example.json` |
-| `dir` | the per-site queue locks `queue/<key>.lock`, the counters `limits.json`, the journal `journal.jsonl`, the human's habits `persona.json`, the tab marks `tabs.json`, the site holds `holds/`, the owner's wheel `wheel.json` and the short lock `state.lock` around the shared files; `~/.meatsuit` by default. **All callers of one browser must pass the same `dir`**: otherwise their locks differ, two bots enter one site at once, and the owner's wheel stops only some of them. With the mirror from `docker/` this is the `state/` folder in the `meatsuit_profile` volume (see "Attaching to the mirror") |
+| `dir` | the per-site queue locks `queue/<key>.lock`, the counters `limits.json`, the journal `journal.jsonl`, the human's habits `persona.json`, the tab marks `tabs.json`, the site holds `holds/`, the owner's wheel `wheel.json` and the short locks `state.lock` around the shared files and `wheel.lock` around the wheel; `~/.meatsuit` by default. **All callers of one browser must pass the same `dir`**: otherwise their locks differ, two bots enter one site at once, and the owner's wheel stops only some of them. With the mirror from `docker/` this is the `state/` folder in the `meatsuit_profile` volume (see "Attaching to the mirror") |
 | `notify(text, event)` | the caller's async notification function. A failed send does not fail the task; it goes to stderr |
 | `notifyOn` | which events to send: `'start'`, `'done'`, `'limit'`, `'error'`, `'needsHuman'`; by default `['needsHuman', 'limit', 'error']` |
 | `ownerPresent` | optional: the caller's async function telling whether the owner holds the controls in the mirror, returning `true`, `false` or `{ present }` (the `check()` of `extras/presence.js` fits as is; the Neko admin password stays with the caller). A "yes" puts the owner's wheel on for every caller of the same `dir`, see "The owner at the wheel". A function that throws counts as "no"; not a function is an error before the browser |
@@ -129,10 +129,16 @@ wheel.
 
 ```js
 const { wheelState, takeWheel, releaseWheel } = require('meatsuit/wheel.js');
-takeWheel({ dir, minutes = 60 });   // the owner takes it: → { by: 'owner', since, until }; a longer wheel is not shortened
-releaseWheel({ dir });              // → { released }
-wheelState({ dir });                // → { by, since, until } or null
+await takeWheel({ dir, minutes = 60 });   // the owner takes it: → { by: 'owner', since, until }; a longer wheel is not shortened
+await releaseWheel({ dir });              // → { released }
+wheelState({ dir });                      // → { by, since, until } or null
 ```
+
+`takeWheel` and `releaseWheel` are async: they read, decide and write the wheel under a short lock `<dir>/wheel.lock`,
+so a "yes" of the mirror from one process and the owner's `take` from another at the same moment do not overwrite each
+other (the owner's wheel turned into a `mirror` one would be removed by the next "no"). Locks are taken in one order: a
+site's queue lock first, then `wheel.lock` or `state.lock`; each of those two is held for one read and one write, with
+nothing taken under it, and they are never held together.
 
 From a shell: `node tools/wheel.js take [minutes] [--dir …]`, `give`, or without a command the state (`--dir` defaults
 to `MEATSUIT_DIR`, else `~/.meatsuit`). With `connect({ ownerPresent })` the core asks the caller's function at most

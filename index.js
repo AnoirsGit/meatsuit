@@ -125,7 +125,8 @@ async function connect({
 
   // Чтение-правка-запись общих файлов dir (limits.json, tabs.json) — под коротким замком состояния: задачи разных
   // площадок идут одновременно, в том числе из разных процессов, и без замка одна затёрла бы запись другой
-  // (пропавшая отметка лимита — лишняя задача сверх perDay).
+  // (пропавшая отметка лимита — лишняя задача сверх perDay). Порядок замков: площадка → state.lock или wheel.lock
+  // (wheel.js); под state.lock ничего не берётся, с wheel.lock вместе он не держится.
   const atomically = async (fn) => {
     const release = await lock(path.join(dir, 'state.lock'), { pollMs: 10, heartbeatMs: 1000, staleMs: 10000, timeoutMs: 60e3 });
     try { return await fn(); } finally { release(); }

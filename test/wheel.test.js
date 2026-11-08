@@ -10,38 +10,55 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { wheelState, takeWheel, releaseWheel, watcher, WHEEL } = require('../wheel.js');
-const { queueKey, queueFile } = require('../limits.js');
+const { queueKey, queueFile, lock } = require('../limits.js');
 
 const MIN = 60e3;
 const NOW = Date.UTC(2026, 10, 8, 12);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 (async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'meatsuit-wheel-'));
 
   // Нет руля — null; взяли — действует до срока; срок вышел — null; битый файл — как нет руля.
   assert.equal(wheelState({ dir, now: NOW }), null);
-  assert.deepEqual(takeWheel({ dir, minutes: 30, now: NOW }), { by: 'owner', since: NOW, until: NOW + 30 * MIN });
+  assert.deepEqual(await takeWheel({ dir, minutes: 30, now: NOW }), { by: 'owner', since: NOW, until: NOW + 30 * MIN });
   assert.deepEqual(wheelState({ dir, now: NOW + 30 * MIN - 1 }), { by: 'owner', since: NOW, until: NOW + 30 * MIN });
   assert.equal(wheelState({ dir, now: NOW + 30 * MIN }), null, 'срок вышел — руль свободен');
   assert.deepEqual(fs.readdirSync(dir), ['wheel.json'], 'временный файл не остаётся');
   fs.writeFileSync(path.join(dir, 'wheel.json'), '{"until":');
   assert.equal(wheelState({ dir, now: NOW }), null, 'битый файл не держит ботов');
-  for (const bad of [0, -1, 1441, '5', NaN]) assert.throws(() => takeWheel({ dir, minutes: bad, now: NOW }), /minutes/);
+  for (const bad of [0, -1, 1441, '5', NaN]) await assert.rejects(takeWheel({ dir, minutes: bad, now: NOW }), /minutes/);
   assert.throws(() => wheelState({}), /нужен dir/);
 
   // Повторное взятие не укорачивает срок; отдать — released по действующему рулю.
-  takeWheel({ dir, minutes: 60, now: NOW });
-  assert.equal(takeWheel({ dir, minutes: 5, now: NOW + MIN }).until, NOW + 60 * MIN, 'короче не стал');
-  assert.deepEqual(releaseWheel({ dir, now: NOW + MIN }), { released: true });
-  assert.deepEqual(releaseWheel({ dir, now: NOW + MIN }), { released: false });
+  await takeWheel({ dir, minutes: 60, now: NOW });
+  assert.equal((await takeWheel({ dir, minutes: 5, now: NOW + MIN })).until, NOW + 60 * MIN, 'короче не стал');
+  assert.deepEqual(await releaseWheel({ dir, now: NOW + MIN }), { released: true });
+  assert.deepEqual(await releaseWheel({ dir, now: NOW + MIN }), { released: false });
   assert.equal(wheelState({ dir, now: NOW + MIN }), null);
 
   // Руль хозяина сильнее зеркального: «да» от зеркала его не перепишет, «нет» от зеркала его не снимет.
-  takeWheel({ dir, minutes: 60, now: NOW });
-  assert.equal(takeWheel({ dir, minutes: 0.5, by: 'mirror', now: NOW + MIN }).by, 'owner');
-  assert.deepEqual(releaseWheel({ dir, by: 'mirror', now: NOW + MIN }), { released: false });
+  await takeWheel({ dir, minutes: 60, now: NOW });
+  assert.equal((await takeWheel({ dir, minutes: 0.5, by: 'mirror', now: NOW + MIN })).by, 'owner');
+  assert.deepEqual(await releaseWheel({ dir, by: 'mirror', now: NOW + MIN }), { released: false });
   assert.equal(wheelState({ dir, now: NOW + MIN }).by, 'owner');
-  releaseWheel({ dir });
+  await releaseWheel({ dir });
+
+  // Прочитать-решить-записать — под коротким замком <dir>/wheel.lock: «да» зеркала (другой процесс) и хозяин с
+  // tools/wheel.js не затирают друг друга. Пока замок держит другой, ни взять, ни отдать руль нельзя; после — можно,
+  // и замок не остаётся.
+  for (const [what, call] of [['takeWheel', () => takeWheel({ dir, minutes: 5 })], ['releaseWheel', () => releaseWheel({ dir })]]) {
+    const other = await lock(path.join(dir, 'wheel.lock'), { pollMs: 10 });
+    let done = false;
+    const pending = call().then((r) => { done = true; return r; });
+    await sleep(200);
+    assert.equal(done, false, `${what} не ждёт wheel.lock`);
+    other();
+    await pending;
+    assert.equal(done, true);
+  }
+  assert.equal(wheelState({ dir }), null);
+  assert.ok(!fs.existsSync(path.join(dir, 'wheel.lock')), 'wheel.lock остался');
 
   // watcher: ownerPresent «да» — руль by: 'mirror' на mirrorTtlMs, его видит и watcher без ownerPresent (тот же dir);
   // «нет» снимает зеркальный руль; сбой функции — «хозяина нет», руль не ставится. Спрашивает не чаще pollMs.
@@ -57,7 +74,7 @@ const NOW = Date.UTC(2026, 10, 8, 12);
   assert.equal(await wired.held(), null);
   assert.equal(await plain.held(), null);
   assert.equal(await watcher({ dir, ownerPresent: async () => true }).held().then((x) => x.by), 'mirror', 'ответ true тоже годится');
-  releaseWheel({ dir });
+  await releaseWheel({ dir });
   const broken = watcher({ dir, ownerPresent: async () => { throw new Error('Neko молчит'); } });
   assert.equal(await broken.held(), null, 'сбой ownerPresent — хозяина нет');
   WHEEL.pollMs = 60e3;

@@ -19,16 +19,18 @@ const [cmd, arg] = args.filter((a, i) => !a.startsWith('--') && (at < 0 || i !==
 
 const show = (w) => (w ? `руль у ${w.by === 'mirror' ? 'хозяина в зеркале' : w.by} до ${clock(w.until)}: боты ждут` : 'руль свободен: боты работают');
 
-if (cmd === 'take') {
-  const minutes = arg === undefined ? 60 : Number(arg);
-  try { console.log(show(takeWheel({ dir, minutes }))); }
-  catch (e) { console.error(e.message); process.exit(1); }
-} else if (cmd === 'give') {
-  const { released } = releaseWheel({ dir });
-  console.log(released ? 'руль отдан: боты работают' : `руль и так был свободен (${dir}; руль в другой папке — укажите её в --dir)`);
-} else if (cmd === undefined) {
-  console.log(`${show(wheelState({ dir }))} (${dir})`);
-} else {
-  console.error('использование: node tools/wheel.js [take [минуты] | give] [--dir <папка состояния>]');
-  process.exit(2);
-}
+(async () => {
+  if (cmd === 'take') {
+    const minutes = arg === undefined ? 60 : Number(arg);
+    try { console.log(show(await takeWheel({ dir, minutes }))); }
+    catch (e) { console.error(e.message); process.exit(1); }
+  } else if (cmd === 'give') {
+    const { released } = await releaseWheel({ dir });
+    console.log(released ? 'руль отдан: боты работают' : `руль и так был свободен (${dir}; руль в другой папке — укажите её в --dir)`);
+  } else if (cmd === undefined) {
+    console.log(`${show(wheelState({ dir }))} (${dir})`);
+  } else {
+    console.error('использование: node tools/wheel.js [take [минуты] | give] [--dir <папка состояния>]');
+    process.exit(2);
+  }
+})().catch((e) => { console.error(e.message); process.exit(1); });

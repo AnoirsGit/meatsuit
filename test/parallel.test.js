@@ -97,14 +97,14 @@ const PAGE = (host) => `<title>${host}</title><textarea aria-label="Сообще
     assert.equal(windows(), base);
 
     // 3. Руль у хозяина до входа: задачи обеих площадок не начинаются и окон не открывают; отдал — обе идут.
-    takeWheel({ dir: state, minutes: 1 });
+    await takeWheel({ dir: state, minutes: 1 });
     spans.length = 0;
     const both = Promise.all([span('a.test', 'WA', 300), span('b.test', 'WB', 300)]);
     await sleep(500);
     assert.equal(spans.length, 0, 'пока хозяин у руля, задачи не начинаются');
     assert.equal(windows(), base, 'пока хозяин у руля, окна не открываются');
     const gave = Date.now();
-    releaseWheel({ dir: state });
+    await releaseWheel({ dir: state });
     const [wa, wb] = await both;
     assert.ok(wa.s >= gave && wb.s >= gave, 'задачи начались только после того, как хозяин отдал руль');
     assert.ok(overlap(wa, wb), 'после руля разные площадки снова идут вместе');
@@ -124,11 +124,11 @@ const PAGE = (host) => `<title>${host}</title><textarea aria-label="Сообще
     }, { site, maxMinutes: 0.05 }); // 3 с; хозяин держит руль дольше
     const midRuns = Promise.all([mid('a.test'), mid('b.test')]);
     while (ready < 2) await sleep(20);
-    takeWheel({ dir: state, minutes: 1 });
+    await takeWheel({ dir: state, minutes: 1 });
     go();
     await sleep(4000);
     const gave2 = Date.now();
-    releaseWheel({ dir: state });
+    await releaseWheel({ dir: state });
     const [ta, tb] = await midRuns;
     assert.ok(ta >= gave2 && tb >= gave2, 'команды обеих задач ждали руль');
     // Контроль: без руля та же пауза кончается бюджетом — значит, выше его спасло именно время у руля.
@@ -162,13 +162,13 @@ const PAGE = (host) => `<title>${host}</title><textarea aria-label="Сообще
     assert.ok(field, 'окно задачи не нашлось');
     const valueNow = () => field.inputValue('textarea');
     while ((await valueNow()).length < 5) await sleep(20);
-    takeWheel({ dir: state, minutes: 1 });
+    await takeWheel({ dir: state, minutes: 1 });
     const tookAt = Date.now();
     await stoppedP;
     const v1 = await valueNow();
     await sleep(1000);
     const v2 = await valueNow();
-    releaseWheel({ dir: state });
+    await releaseWheel({ dir: state });
     gate4();
     const { err: midErr, enter, after } = await typing;
     assert.ok(midErr instanceof LimitReached && midErr.wheel && midErr.wheel.by === 'owner' && midErr.before === undefined
@@ -187,7 +187,7 @@ const PAGE = (host) => `<title>${host}</title><textarea aria-label="Сообще
     WHEEL.maxWaitMs = 300;
     const limitsFile = path.join(state, 'limits.json');
     const stamps = fs.readFileSync(limitsFile, 'utf8');
-    takeWheel({ dir: state, minutes: 1 });
+    await takeWheel({ dir: state, minutes: 1 });
     notes.length = 0;
     let ran = false;
     await assert.rejects(ms.task('late', async () => { ran = true; }, { site: 'a.test' }),
@@ -195,15 +195,15 @@ const PAGE = (host) => `<title>${host}</title><textarea aria-label="Сообще
     assert.equal(ran, false);
     assert.equal(fs.readFileSync(limitsFile, 'utf8'), stamps, 'слот не потрачен');
     assert.ok(notes.some((n) => n.event === 'limit' && /late.*не запущена.*руль/.test(n.text)), JSON.stringify(notes));
-    releaseWheel({ dir: state });
+    await releaseWheel({ dir: state });
     const title = await ms.task('cut', async ({ see, act }) => {
       await act({ cmd: 'goto', url: 'https://b.test/' });
       const s = await see();
-      takeWheel({ dir: state, minutes: 1 });
+      await takeWheel({ dir: state, minutes: 1 });
       const btn = s.elements.find((e) => e.role === 'button');
       const err = await act({ cmd: 'click', id: btn.id, gen: s.gen }).then(() => null, (e) => e);
       assert.ok(err instanceof LimitReached && err.before === true && /команда не выполнена/.test(err.message), String(err));
-      releaseWheel({ dir: state });
+      await releaseWheel({ dir: state });
       return (await see()).title;
     }, { site: 'b.test' });
     assert.equal(title, 'b.test', 'команда, не дождавшаяся руля, не выполнялась');
